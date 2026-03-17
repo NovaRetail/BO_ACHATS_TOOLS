@@ -209,12 +209,12 @@ with st.sidebar:
 
     # Navigation
     st.markdown("<div style='font-size:11px;font-weight:600;color:#8E8E93;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px'>Navigation</div>", unsafe_allow_html=True)
-    st.page_link("app.py",                        label="🏠  Accueil")
-    st.page_link("pages/01_Scoring_ABC.py",        label="📊  Scoring ABC")
-    st.page_link("pages/02_Ventes_PBI.py",         label="📈  Ventes PBI",         disabled=True)
-    st.page_link("pages/03_Detention_Top_CA.py",   label="📦  Détention Top CA",   disabled=True)
-    st.page_link("pages/04_Performance_Promo.py",  label="💸  Performance Promo",  disabled=True)
-    st.page_link("pages/05_Suivi_Implantation.py", label="🏪  Suivi Implantation", disabled=True)
+    st.page_link("app.py",                                         label="🏠  Accueil")
+    st.page_link("pages/01_📊_Analyse_Scoring_ABC.py",             label="📊  Scoring ABC")
+    st.page_link("pages/02_📈_Ventes_PBI.py",                      label="📈  Ventes PBI",         disabled=True)
+    st.page_link("pages/03_📦_Detention_Top_CA.py",                label="📦  Détention Top CA",   disabled=True)
+    st.page_link("pages/04_💸_Performance_Promo.py",               label="💸  Performance Promo",  disabled=True)
+    st.page_link("pages/05_🏪_Suivi_Implantation.py",              label="🏪  Suivi Implantation", disabled=True)
     st.markdown("---")
 
     # Upload
