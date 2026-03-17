@@ -88,28 +88,31 @@ def badge_etat(code):
 
 # ─── PARSING ──────────────────────────────────────────────────────────────────
 @st.cache_data(show_spinner=False)
-def load_stock(files_bytes_names):
-    dfs = []
-    for byt, name in files_bytes_names:
-        try:
-            df = pd.read_csv(BytesIO(byt), sep=";", encoding="utf-8-sig", dtype=str, low_memory=False)
-            dfs.append(df)
-        except Exception as e:
-            st.warning(f"Erreur {name} : {e}")
-    if not dfs: return pd.DataFrame()
-    raw = pd.concat(dfs, ignore_index=True)
+def load_stock(file_bytes, file_name):
+    """
+    Accepte :
+      - 1 fichier consolidé  : stock_consolide_YYYYMMDD.csv  (produit par consolider_stock.py)
+      - 1 fichier individuel : Extraction_stock_XXXXX_GLOBAL.csv
+    Séparateur ; · encodage UTF-8
+    """
+    try:
+        raw = pd.read_csv(BytesIO(file_bytes), sep=";", encoding="utf-8-sig",
+                          dtype=str, low_memory=False)
+    except Exception as e:
+        st.error(f"Erreur lecture {file_name} : {e}")
+        return pd.DataFrame()
 
     num_cols = ["Nouveau stock","Ral","Nb colis","Prix d'achat","PMP","Prix de vente"]
     for col in num_cols:
         if col in raw.columns:
             raw[col] = pd.to_numeric(raw[col], errors="coerce").fillna(0)
 
-    raw["Code article"]     = norm_code(raw["Code article"])
-    raw["Code etat"]        = raw["Code etat"].astype(str).str.strip().str.upper()
-    raw["Code marketing"]   = raw.get("Code marketing", pd.Series("?", index=raw.index)).astype(str).str.strip().str.upper()
-    raw["Type saisonnalité"]= raw.get("Type saisonnalité", pd.Series("?", index=raw.index)).astype(str).str.strip().str.upper()
+    raw["Code article"]      = norm_code(raw["Code article"])
+    raw["Code etat"]         = raw["Code etat"].astype(str).str.strip().str.upper()
+    raw["Code marketing"]    = raw.get("Code marketing",    pd.Series("?", index=raw.index)).astype(str).str.strip().str.upper()
+    raw["Type saisonnalité"] = raw.get("Type saisonnalité", pd.Series("?", index=raw.index)).astype(str).str.strip().str.upper()
 
-    # PGC uniquement
+    # Filtre PGC (au cas où le fichier contient d'autres rayons)
     PGC = {"BOISSONS","DROGUERIE","PARFUMERIE HYGIENE","EPICERIE"}
     if "Libellé rayon" in raw.columns:
         raw = raw[raw["Libellé rayon"].str.upper().isin(PGC)]
@@ -332,9 +335,11 @@ with st.sidebar:
 
     st.markdown("<div style='font-size:11px;font-weight:600;color:#8E8E93;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px'>Import fichiers</div>", unsafe_allow_html=True)
     f_topca  = st.file_uploader("Liste Top CA (CSV ou Excel)", type=["csv","xlsx"], key="topca")
-    f_stocks = st.file_uploader("Extractions stock ERP",
-                                 type=["csv"], accept_multiple_files=True, key="stocks",
-                                 help="1 CSV par magasin · séparateur ; · UTF-8")
+    f_stocks = st.file_uploader(
+        "Stock consolidé (CSV)",
+        type=["csv"], key="stocks",
+        help="Fichier produit par consolider_stock.py · séparateur ; · UTF-8"
+    )
     st.markdown("---")
 
     st.markdown("<div style='font-size:11px;font-weight:600;color:#8E8E93;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px'>Paramètres</div>", unsafe_allow_html=True)
@@ -347,7 +352,7 @@ with st.sidebar:
 
 # ─── PAGE PRINCIPALE ──────────────────────────────────────────────────────────
 st.markdown("<div class='page-title'>📦 Détention Top CA</div>", unsafe_allow_html=True)
-st.markdown("<div class='page-caption'>Articles Permanents · Flux IM / LO · Code état 2 · Stock immobilisé code B · Valorisation PMP</div>", unsafe_allow_html=True)
+st.markdown("<div class='page-caption'>Articles Permanents · Flux IM / LO · Code état 2 · Stock immobilisé code B · Fichier consolidé</div>", unsafe_allow_html=True)
 
 # ─── ÉCRAN D'ACCUEIL ─────────────────────────────────────────────────────────
 if not f_topca or not f_stocks:
@@ -396,9 +401,9 @@ if not f_topca or not f_stocks:
     with c2:
         st.markdown("""
 <div class='col-required'><div style='font-size:16px'>🏪</div>
-<div><div class='col-name'>Extractions stock ERP</div>
-<div class='col-desc'>1 CSV par magasin · séparateur ; · encodage UTF-8</div>
-<div class='col-ex'>Extraction_stock_XXXXX_YYYYMMDD_GLOBAL.csv</div></div></div>""", unsafe_allow_html=True)
+<div><div class='col-name'>Stock consolidé ERP</div>
+<div class='col-desc'>1 seul CSV · produit par <strong>consolider_stock.py</strong> · séparateur ; · UTF-8</div>
+<div class='col-ex'>stock_consolide_YYYYMMDD.csv · tous magasins</div></div></div>""", unsafe_allow_html=True)
 
     st.info("⬆️ Charge la liste Top CA et les extractions stock dans la sidebar pour lancer l'analyse.")
     st.stop()
@@ -406,8 +411,8 @@ if not f_topca or not f_stocks:
 # ─── TRAITEMENT ───────────────────────────────────────────────────────────────
 with st.spinner("Lecture des fichiers…"):
     top_codes = load_topca(f_topca.read())
-    files_bn  = tuple((f.read(), f.name) for f in f_stocks)
-    df_stock  = load_stock(files_bn)
+    stock_bytes = f_stocks.read()
+    df_stock  = load_stock(stock_bytes, f_stocks.name)
 
 if df_stock.empty:
     st.error("Aucune donnée PGC lue."); st.stop()
