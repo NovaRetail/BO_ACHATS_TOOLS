@@ -586,61 +586,132 @@ with tab1:
 
     st.dataframe(disp1, use_container_width=True, hide_index=True)
 
-    # Graphique — barres groupées GOLD / Global
-    try:
-        import plotly.graph_objects as go
-        s = taux_all.sort_values("taux")
-        fig = go.Figure()
+    # Graphique SVG — barres arrondies modernes style Apple
+    def render_chart(rows, cible, show_gold):
+        n      = len(rows)
+        W      = 420         # largeur zone barres
+        LBL_W  = 190         # largeur labels
+        ROW_H  = 50 if show_gold else 44
+        BAR_G  = 14          # barre taux global
+        BAR_g  = 9           # barre GOLD
+        GAP    = 5            # écart entre les deux barres
+        R      = 7
+        SVG_W  = LBL_W + W + 80
+        SVG_H  = n * ROW_H + 64
+        SCALE  = W / 115.0
 
-        # Barre GOLD
-        if type_filtre in ("Tous", "GOLD"):
-            gold_vals = s["taux_gold"].tolist()
-            fig.add_bar(
-                x=gold_vals, y=s["site"].tolist(),
-                name="GOLD", orientation="h",
-                marker_color="#FFD700",
-                marker_line_color="#B8860B", marker_line_width=0.8,
-                opacity=0.9,
-                text=[f"{v:.1f}%" if v is not None and v==v else "" for v in gold_vals],
-                textposition="inside",
-                textfont=dict(color="#7A5800", size=11),
-                width=0.35,
-            )
+        def fill(v):
+            if v is None: return "var(--color-border-tertiary)"
+            if v >= cible:      return "url(#gg)"
+            if v >= cible - 10: return "url(#ga)"
+            return "url(#gr)"
 
-        # Barre taux global
-        fig.add_bar(
-            x=s["taux"].tolist(), y=s["site"].tolist(),
-            name="Taux global", orientation="h",
-            marker_color=[color_taux(v, cible) for v in s["taux"]],
-            marker_line_width=0, opacity=0.9,
-            text=[f"{v:.1f}%" if v else "" for v in s["taux"]],
-            textposition="outside",
-            textfont=dict(size=12),
-            width=0.35,
-        )
+        lines = [
+            f'<svg xmlns="http://www.w3.org/2000/svg" width="100%" ',
+            f'viewBox="0 0 {SVG_W} {SVG_H}" ',
+            f'style="font-family:-apple-system,BlinkMacSystemFont,Helvetica Neue,Arial;background:transparent">',
+            "<defs>",
+            '<linearGradient id="gg" x1="0%" y1="0%" x2="100%" y2="0%">',
+            '<stop offset="0%" stop-color="#34C759"/><stop offset="100%" stop-color="#28A745"/></linearGradient>',
+            '<linearGradient id="ga" x1="0%" y1="0%" x2="100%" y2="0%">',
+            '<stop offset="0%" stop-color="#FF9500"/><stop offset="100%" stop-color="#E68600"/></linearGradient>',
+            '<linearGradient id="gr" x1="0%" y1="0%" x2="100%" y2="0%">',
+            '<stop offset="0%" stop-color="#FF3B30"/><stop offset="100%" stop-color="#E62E24"/></linearGradient>',
+            '<linearGradient id="gd" x1="0%" y1="0%" x2="100%" y2="0%">',
+            '<stop offset="0%" stop-color="#FFD700"/><stop offset="100%" stop-color="#FFC200"/></linearGradient>',
+            "</defs>",
+        ]
+
+        # Légende
+        lx = LBL_W
+        lines.append(f'<rect x="{lx}" y="10" width="14" height="10" rx="5" fill="url(#gg)" opacity=".9"/>')
+        lines.append(f'<text x="{lx+18}" y="19" font-size="11" fill="var(--color-text-secondary)">Taux global</text>')
+        if show_gold:
+            lines.append(f'<rect x="{lx+110}" y="10" width="14" height="10" rx="5" fill="url(#gd)" opacity=".9"/>')
+            lines.append(f'<text x="{lx+128}" y="19" font-size="11" fill="var(--color-text-secondary)">GOLD</text>')
+
+        # Grille + labels axe
+        for pct in [0, 20, 40, 60, 80, 100]:
+            x = LBL_W + pct * SCALE
+            lines.append(f'<line x1="{x:.1f}" y1="28" x2="{x:.1f}" y2="{SVG_H-26}" stroke="var(--color-border-tertiary)" stroke-width="0.5"/>')
+            lines.append(f'<text x="{x:.1f}" y="38" text-anchor="middle" font-size="10" fill="var(--color-text-tertiary)">{pct}%</text>')
 
         # Ligne cible
-        fig.add_vline(x=cible, line_width=2, line_dash="dot", line_color="#007AFF",
-                      annotation_text=f" Cible {cible}%",
-                      annotation_position="top right",
-                      annotation_font=dict(color="#007AFF", size=11))
+        xc = LBL_W + cible * SCALE
+        lines.append(f'<line x1="{xc:.1f}" y1="26" x2="{xc:.1f}" y2="{SVG_H-26}" stroke="#007AFF" stroke-width="1.5" stroke-dasharray="4,3"/>')
+        lines.append(f'<text x="{xc+4:.1f}" y="38" font-size="10" fill="#007AFF" font-weight="600">Cible {cible}%</text>')
 
-        fig.update_layout(
-            plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-            font=dict(family="-apple-system, Helvetica Neue, Arial", color="#3A3A3C", size=12),
-            height=max(300, n_sites*76+80),
-            barmode="group", bargap=0.28, bargroupgap=0.06,
-            margin=dict(t=30, b=20, l=10, r=90),
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0,
-                        bgcolor="rgba(0,0,0,0)", font=dict(size=12)),
-            xaxis=dict(title="Taux de détention (%)", ticksuffix="%",
-                       showgrid=True, gridcolor="#F2F2F7", gridwidth=0.5,
-                       range=[0, 115], zeroline=False),
-            yaxis=dict(showgrid=False, title="", tickfont=dict(size=11)),
-        )
-        st.plotly_chart(fig, use_container_width=True)
-    except ImportError:
-        pass
+        # Barres
+        for i, row in enumerate(rows):
+            y0   = 44 + i * ROW_H
+            v    = row.get("taux") or 0
+            vg   = row.get("taux_gold") or 0
+            site = str(row.get("site", ""))[:24]
+
+            # Calcul positions
+            cy_global = y0 + (ROW_H - (BAR_G + (BAR_g + GAP if show_gold else 0))) // 2
+            cy_gold   = cy_global + BAR_G + GAP
+
+            # Label magasin — centré sur les deux barres
+            label_y = cy_global + BAR_G // 2 + (BAR_g // 2 + GAP // 2 if show_gold else 0) + 4
+            lines.append(
+                f'<text x="{LBL_W-10}" y="{label_y}" ',
+                f'text-anchor="end" font-size="11" fill="var(--color-text-primary)" ',
+                f'font-weight="500">{site}</text>'
+            )
+
+            def rr(bx, by, bw, bh, r, fill_ref, opacity=1.0):
+                bw = max(float(bw), r * 2)
+                return (
+                    f'<rect x="{bx:.1f}" y="{by}" ',
+                    f'width="{bw:.1f}" height="{bh}" rx="{r}" ry="{r}" ',
+                    f'fill="{fill_ref}" opacity="{opacity}"/>',
+                )
+
+            # Track global
+            lines.extend(rr(LBL_W, cy_global, W * 0.99, BAR_G, R, "var(--color-border-tertiary)", 0.35))
+            # Barre global
+            if v > 0:
+                bw = v * SCALE
+                lines.extend(rr(LBL_W, cy_global, bw, BAR_G, R, fill(v)))
+                tx = LBL_W + bw + 6
+                lines.append(
+                    f'<text x="{tx:.1f}" y="{cy_global + BAR_G//2 + 4}" ',
+                    f'font-size="12" fill="var(--color-text-primary)" font-weight="600">{v:.1f}%</text>'
+                )
+
+            # Barre GOLD
+            if show_gold:
+                lines.extend(rr(LBL_W, cy_gold, W * 0.99, BAR_g, R - 2, "var(--color-border-tertiary)", 0.25))
+                if vg > 0:
+                    bwg = vg * SCALE
+                    lines.extend(rr(LBL_W, cy_gold, bwg, BAR_g, R - 2, "url(#gd)", 0.85))
+                    # Label GOLD
+                    if bwg > 55:
+                        lines.append(
+                            f'<text x="{LBL_W + bwg / 2:.1f}" y="{cy_gold + BAR_g//2 + 3}" ',
+                            f'text-anchor="middle" font-size="10" fill="#7A5800" font-weight="600">{vg:.1f}%</text>'
+                        )
+                    else:
+                        lines.append(
+                            f'<text x="{LBL_W + bwg + 5:.1f}" y="{cy_gold + BAR_g//2 + 3}" ',
+                            f'font-size="10" fill="#B8860B" font-weight="600">{vg:.1f}%</text>'
+                        )
+
+        # Axe bas
+        lines.append(f'<line x1="{LBL_W}" y1="{SVG_H-26}" x2="{LBL_W+W}" y2="{SVG_H-26}" stroke="var(--color-border-tertiary)" stroke-width="0.5"/>')
+        lines.append(f'<text x="{LBL_W + W/2:.1f}" y="{SVG_H-12}" text-anchor="middle" font-size="11" fill="var(--color-text-tertiary)">Taux de détention (%)</text>')
+        lines.append("</svg>")
+        return "".join(lines)
+
+    show_gold  = type_filtre in ("Tous", "GOLD") and taux_all["taux_gold"].notna().any()
+    rows_chart = taux_all.sort_values("taux")[["site","taux","taux_gold","taux_silver"]].to_dict("records")
+    svg_html   = render_chart(rows_chart, cible, show_gold)
+    st.markdown(
+        f'<div style="background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);',
+        f'border-radius:14px;padding:20px 16px 12px 16px;margin-top:12px">{svg_html}</div>',
+        unsafe_allow_html=True,
+    )
 
 # ═══ TAB 2 — IM vs LO ═════════════════════════════════════════════════════════
 with tab2:
