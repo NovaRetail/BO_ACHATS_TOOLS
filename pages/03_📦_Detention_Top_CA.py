@@ -655,9 +655,8 @@ with tab1:
             # Label magasin — centré sur les deux barres
             label_y = cy_global + BAR_G // 2 + (BAR_g // 2 + GAP // 2 if show_gold else 0) + 4
             lines.append(
-                f'<text x="{LBL_W-10}" y="{label_y}" ',
-                f'text-anchor="end" font-size="11" fill="var(--color-text-primary)" ',
-                f'font-weight="500">{site}</text>'
+                f'<text x="{LBL_W-10}" y="{label_y}" text-anchor="end" font-size="11"'
+                f' fill="var(--color-text-primary)" font-weight="500">{site}</text>'
             )
 
             def rr(bx, by, bw, bh, r, fill_ref, opacity=1.0):
@@ -676,8 +675,8 @@ with tab1:
                 lines.extend(rr(LBL_W, cy_global, bw, BAR_G, R, fill(v)))
                 tx = LBL_W + bw + 6
                 lines.append(
-                    f'<text x="{tx:.1f}" y="{cy_global + BAR_G//2 + 4}" ',
-                    f'font-size="12" fill="var(--color-text-primary)" font-weight="600">{v:.1f}%</text>'
+                    f'<text x="{tx:.1f}" y="{cy_global + BAR_G//2 + 4}"'
+                    f' font-size="12" fill="var(--color-text-primary)" font-weight="600">{v:.1f}%</text>'
                 )
 
             # Barre GOLD
@@ -689,13 +688,13 @@ with tab1:
                     # Label GOLD
                     if bwg > 55:
                         lines.append(
-                            f'<text x="{LBL_W + bwg / 2:.1f}" y="{cy_gold + BAR_g//2 + 3}" ',
-                            f'text-anchor="middle" font-size="10" fill="#7A5800" font-weight="600">{vg:.1f}%</text>'
+                            f'<text x="{LBL_W + bwg / 2:.1f}" y="{cy_gold + BAR_g//2 + 3}"'
+                            f' text-anchor="middle" font-size="10" fill="#7A5800" font-weight="600">{vg:.1f}%</text>'
                         )
                     else:
                         lines.append(
-                            f'<text x="{LBL_W + bwg + 5:.1f}" y="{cy_gold + BAR_g//2 + 3}" ',
-                            f'font-size="10" fill="#B8860B" font-weight="600">{vg:.1f}%</text>'
+                            f'<text x="{LBL_W + bwg + 5:.1f}" y="{cy_gold + BAR_g//2 + 3}"'
+                            f' font-size="10" fill="#B8860B" font-weight="600">{vg:.1f}%</text>'
                         )
 
         # Axe bas
@@ -708,7 +707,7 @@ with tab1:
     rows_chart = taux_all.sort_values("taux")[["site","taux","taux_gold","taux_silver"]].to_dict("records")
     svg_html   = render_chart(rows_chart, cible, show_gold)
     st.markdown(
-        f'<div style="background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);',
+        f'<div style="background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);'
         f'border-radius:14px;padding:20px 16px 12px 16px;margin-top:12px">{svg_html}</div>',
         unsafe_allow_html=True,
     )
