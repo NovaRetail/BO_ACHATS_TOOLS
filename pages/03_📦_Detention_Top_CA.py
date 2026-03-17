@@ -634,7 +634,7 @@ with tab1:
         for pct in [0, 20, 40, 60, 80, 100]:
             x = LBL_W + pct * SCALE
             lines.append(f'<line x1="{x:.1f}" y1="28" x2="{x:.1f}" y2="{SVG_H-26}" stroke="var(--color-border-tertiary)" stroke-width="0.5"/>')
-            lines.append(f'<text x="{x:.1f}" y="38" text-anchor="middle" font-size="10" fill="var(--color-text-tertiary)" font-size="9">{pct}%</text>')
+            lines.append(f'<text x="{x:.1f}" y="38" text-anchor="middle" font-size="10" fill="var(--color-text-tertiary)">{pct}%</text>')
 
         # Ligne cible
         xc = LBL_W + cible * SCALE
@@ -655,8 +655,8 @@ with tab1:
             # Label magasin — centré sur les deux barres
             label_y = cy_global + BAR_G // 2 + (BAR_g // 2 + GAP // 2 if show_gold else 0) + 4
             lines.append(
-                f'<text x="{LBL_W-10}" y="{label_y}" text-anchor="end" font-size="11"'
-                f' fill="var(--color-text-primary)" font-weight="500" font-size="10">{site}</text>'
+                f'<text x="{LBL_W-10}" y="{label_y}" text-anchor="end" font-size="9"'
+                f' fill="var(--color-text-primary)" font-weight="500">{site}</text>'
             )
 
             def rr(bx, by, bw, bh, r, fill_ref, opacity=1.0):
@@ -676,7 +676,7 @@ with tab1:
                 tx = LBL_W + bw + 6
                 lines.append(
                     f'<text x="{tx:.1f}" y="{cy_global + BAR_G//2 + 4}"'
-                    f' font-size="11" fill="var(--color-text-primary)" font-weight="600">{v:.1f}%</text>'
+                    f' font-size="9" fill="var(--color-text-primary)" font-weight="600">{v:.1f}%</text>'
                 )
 
             # Barre GOLD
