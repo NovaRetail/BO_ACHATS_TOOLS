@@ -1,6 +1,6 @@
 """
 03_📦_Detention_Top_CA.py — SmartBuyer Hub
-Taux de détention Top CA · Articles Permanents · Flux IM/LO · Stock immobilisé code B
+Taux de détention Top CA · GOLD / SILVER · Flux IM/LO · Articles Permanents
 Charte SmartBuyer v2
 """
 
@@ -40,293 +40,307 @@ html, body, [class*="css"] {
 [data-testid="stDataFrame"] { border: 0.5px solid #E5E5EA !important; border-radius: 10px !important; }
 [data-testid="stDataFrame"] th { background: #F2F2F7 !important; font-size: 11px !important; font-weight: 600 !important; color: #8E8E93 !important; text-transform: uppercase !important; letter-spacing: 0.04em !important; }
 [data-testid="stFileUploader"] { border: 1.5px dashed #D1D1D6 !important; border-radius: 10px !important; background: #F9F9FB !important; }
-[data-testid="baseButton-primary"] { background: #007AFF !important; border: none !important; border-radius: 8px !important; font-weight: 500 !important; }
 .stDownloadButton > button { background: #007AFF !important; color: white !important; border: none !important; border-radius: 8px !important; font-weight: 500 !important; font-size: 13px !important; padding: 10px 24px !important; width: 100% !important; }
 hr { border-color: #E5E5EA !important; margin: 1rem 0 !important; }
+
 .page-title   { font-size: 28px; font-weight: 700; color: #1C1C1E; letter-spacing: -0.03em; margin: 0; }
-.page-caption { font-size: 13px; color: #8E8E93; margin-top: 3px; margin-bottom: 1.5rem; }
+.page-caption { font-size: 13px; color: #8E8E93; margin-top: 3px; margin-bottom: 0.5rem; }
 .section-label { font-size: 11px; font-weight: 600; color: #8E8E93; text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 10px; }
+
 .alert-card  { padding: 12px 16px; border-radius: 10px; margin-bottom: 8px; font-size: 13px; line-height: 1.5; border-left: 3px solid; }
 .alert-red   { background: #FFF2F2; border-color: #FF3B30; color: #3A0000; }
 .alert-amber { background: #FFFBF0; border-color: #FF9500; color: #3A2000; }
 .alert-green { background: #F0FFF4; border-color: #34C759; color: #003A10; }
 .alert-blue  { background: #F0F8FF; border-color: #007AFF; color: #001A3A; }
-.kpi-immo { background: #FFF2F2; border: 1px solid #FFB3AE; border-radius: 12px; padding: 16px 18px; }
-.kpi-immo-label { font-size: 11px; font-weight: 500; color: #FF3B30; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 3px; }
-.kpi-immo-value { font-size: 24px; font-weight: 700; color: #FF3B30; letter-spacing: -0.02em; }
-.kpi-immo-sub   { font-size: 12px; color: #C62828; margin-top: 3px; font-weight: 500; }
+
+/* Sélecteur GOLD / SILVER */
+.type-selector { display: flex; gap: 8px; margin-bottom: 16px; }
+.type-btn { padding: 8px 20px; border-radius: 100px; font-size: 13px; font-weight: 600; cursor: pointer; border: 1.5px solid; }
+.type-gold   { background: #FFF8E1; color: #B8860B; border-color: #FFD700; }
+.type-silver { background: #F2F2F7; color: #636366; border-color: #C7C7CC; }
+.type-all    { background: #E6F1FB; color: #007AFF; border-color: #007AFF; }
+
+/* KPI GOLD highlight */
+.kpi-gold { background: linear-gradient(135deg,#FFF8E1,#FFFBF0); border: 1px solid #FFD700; border-radius: 12px; padding: 16px 18px; }
+.kpi-gold-label { font-size: 11px; font-weight: 500; color: #B8860B; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 3px; }
+.kpi-gold-value { font-size: 24px; font-weight: 700; color: #B8860B; letter-spacing: -0.02em; }
+.kpi-gold-sub   { font-size: 12px; color: #996600; margin-top: 3px; font-weight: 500; }
+
 .col-required { background: #F0F8FF; border: 0.5px solid #B3D9FF; border-radius: 8px; padding: 10px 14px; margin-bottom: 6px; display: flex; align-items: flex-start; gap: 10px; }
 .col-name  { font-size: 13px; font-weight: 600; color: #0066CC; font-family: monospace; }
 .col-desc  { font-size: 12px; color: #3A3A3C; margin-top: 1px; }
 .col-ex    { font-size: 11px; color: #8E8E93; font-family: monospace; margin-top: 2px; }
-.gauge-bg  { background: #E5E5EA; border-radius: 3px; height: 5px; margin-top: 10px; }
-.gauge-fill { height: 5px; border-radius: 3px; }
 </style>
 """, unsafe_allow_html=True)
 
-# ─── HELPERS ─────────────────────────────────────────────────────────────────
-def fmt(n, suffix=""):
-    if pd.isna(n): return "—"
+# ─── CONSTANTES ───────────────────────────────────────────────────────────────
+ETAT_LABELS = {
+    "2": ("Actif",      "#34C759", "#F0FFF4"),
+    "B": ("Bloqué",     "#FF3B30", "#FFF2F2"),
+    "P": ("Permanent",  "#007AFF", "#E6F1FB"),
+    "S": ("Saisonnier", "#FF9500", "#FFFBF0"),
+    "F": ("Fin de vie", "#8E8E93", "#F2F2F7"),
+}
+TYPE_COLORS = {
+    "GOLD":   ("#B8860B", "#FFF8E1", "#FFD700"),
+    "SILVER": ("#636366", "#F2F2F7", "#C7C7CC"),
+}
+PGC = {"BOISSONS","DROGUERIE","PARFUMERIE HYGIENE","EPICERIE"}
+
+def fmt(n):
+    if pd.isna(n) or n is None: return "—"
     a = abs(n)
-    s = f"{n/1_000_000:.1f} M" if a >= 1_000_000 else f"{int(n/1_000)} K" if a >= 1_000 else f"{int(n):,}"
-    return s + suffix
+    if a >= 1_000_000: return f"{n/1_000_000:.1f} M"
+    if a >= 1_000:     return f"{int(n/1_000)} K"
+    return f"{int(n):,}"
 
 def norm_code(s):
-    return s.astype(str).str.strip().str.replace(r"\.0$", "", regex=True).str.zfill(8)
+    return s.astype(str).str.strip().str.replace(r"\.0$","",regex=True).str.zfill(8)
 
 def color_taux(v, cible):
     if v is None: return "#8E8E93"
-    return "#34C759" if v >= cible else "#FF9500" if v >= cible - 10 else "#FF3B30"
+    return "#34C759" if v >= cible else "#FF9500" if v >= cible-10 else "#FF3B30"
 
 def badge_etat(code):
-    MAP = {"2": ("#E6F1FB","#007AFF"), "B": ("#FFF2F2","#FF3B30"),
-           "P": ("#F2F2F7","#8E8E93"), "S": ("#FFFBF0","#FF9500"),
-           "F": ("#F2F2F7","#8E8E93")}
-    bg, fg = MAP.get(code, ("#F2F2F7","#8E8E93"))
-    labels = {"2":"Actif","B":"Bloqué","P":"Permanent","S":"Saisonnier","F":"Fin de vie"}
-    return f"<span style='background:{bg};color:{fg};padding:2px 8px;border-radius:100px;font-size:10px;font-weight:600'>{code} · {labels.get(code,code)}</span>"
+    lbl, fg, bg = ETAT_LABELS.get(code, ("?","#8E8E93","#F2F2F7"))
+    return f"<span style='background:{bg};color:{fg};padding:2px 8px;border-radius:100px;font-size:10px;font-weight:600'>{code} · {lbl}</span>"
+
+def badge_type(t):
+    fg, bg, bd = TYPE_COLORS.get(t, ("#8E8E93","#F2F2F7","#C7C7CC"))
+    return f"<span style='background:{bg};color:{fg};border:1px solid {bd};padding:2px 8px;border-radius:100px;font-size:10px;font-weight:700'>{t}</span>"
 
 # ─── PARSING ──────────────────────────────────────────────────────────────────
 @st.cache_data(show_spinner=False)
+def load_topca(byt, fname=""):
+    """
+    Lit la liste Top CA avec colonnes CODE ARTICLE, LIBELLÉ ARTICLE, TYPE.
+    Gère UTF-8, latin-1, cp1252 automatiquement.
+    """
+    for encoding in ("utf-8-sig","utf-8","latin-1","cp1252"):
+        try:
+            raw = byt.decode(encoding, errors="strict")
+            sep = ";" if raw.count(";") > raw.count(",") else ","
+            df  = pd.read_csv(BytesIO(byt), sep=sep, encoding=encoding, dtype=str)
+            # Normaliser les noms de colonnes
+            df.columns = df.columns.str.strip().str.upper()
+            # Code article : 1ère colonne ou colonne nommée CODE ARTICLE
+            code_col = "CODE ARTICLE" if "CODE ARTICLE" in df.columns else df.columns[0]
+            type_col = "TYPE" if "TYPE" in df.columns else None
+            lib_col  = next((c for c in df.columns if "LIB" in c), None)
+
+            result = pd.DataFrame()
+            result["code"] = norm_code(df[code_col])
+            result["type"] = df[type_col].str.strip().str.upper() if type_col else "GOLD"
+            result["lib"]  = df[lib_col].astype(str).str.strip() if lib_col else ""
+            result = result.dropna(subset=["code"])
+            if len(result) > 0:
+                return result
+        except Exception:
+            continue
+    st.error("Erreur lecture liste Top CA — encodage non reconnu.")
+    return pd.DataFrame(columns=["code","type","lib"])
+
+@st.cache_data(show_spinner=False)
 def load_stock(file_bytes, file_name):
-    """
-    Accepte :
-      - 1 fichier consolidé  : stock_consolide_YYYYMMDD.csv  (produit par consolider_stock.py)
-      - 1 fichier individuel : Extraction_stock_XXXXX_GLOBAL.csv
-    Séparateur ; · encodage UTF-8
-    """
     try:
         raw = pd.read_csv(BytesIO(file_bytes), sep=";", encoding="utf-8-sig",
                           dtype=str, low_memory=False)
     except Exception as e:
-        st.error(f"Erreur lecture {file_name} : {e}")
-        return pd.DataFrame()
+        st.error(f"Erreur lecture stock : {e}"); return pd.DataFrame()
 
-    num_cols = ["Nouveau stock","Ral","Nb colis","Prix d'achat","PMP","Prix de vente"]
-    for col in num_cols:
+    for col in ["Nouveau stock","Ral","Nb colis","PMP","Prix d'achat"]:
         if col in raw.columns:
             raw[col] = pd.to_numeric(raw[col], errors="coerce").fillna(0)
 
     raw["Code article"]      = norm_code(raw["Code article"])
     raw["Code etat"]         = raw["Code etat"].astype(str).str.strip().str.upper()
-    raw["Code marketing"]    = raw.get("Code marketing",    pd.Series("?", index=raw.index)).astype(str).str.strip().str.upper()
-    raw["Type saisonnalité"] = raw.get("Type saisonnalité", pd.Series("?", index=raw.index)).astype(str).str.strip().str.upper()
+    raw["Code marketing"]    = raw.get("Code marketing",    pd.Series("?",index=raw.index)).astype(str).str.strip().str.upper()
+    raw["Type saisonnalité"] = raw.get("Type saisonnalité", pd.Series("?",index=raw.index)).astype(str).str.strip().str.upper()
 
-    # Filtre PGC (au cas où le fichier contient d'autres rayons)
-    PGC = {"BOISSONS","DROGUERIE","PARFUMERIE HYGIENE","EPICERIE"}
     if "Libellé rayon" in raw.columns:
         raw = raw[raw["Libellé rayon"].str.upper().isin(PGC)]
-
     return raw
 
-@st.cache_data(show_spinner=False)
-def load_topca(byt, fname=""):
-    """
-    Lit la liste Top CA.
-    Gère automatiquement les encodages UTF-8, UTF-8-BOM, latin-1, Windows-1252.
-    Prend toujours la 1ère colonne comme code article.
-    """
-    for encoding in ("utf-8-sig", "utf-8", "latin-1", "cp1252"):
-        try:
-            raw = byt.decode(encoding, errors="strict")
-            sep = ";" if raw.count(";") > raw.count(",") else ","
-            df  = pd.read_csv(BytesIO(byt), sep=sep, encoding=encoding, dtype=str)
-            df  = df.iloc[:, [0]].copy()
-            df.columns = ["Code article"]
-            df["Code article"] = norm_code(df["Code article"])
-            codes = set(df["Code article"].dropna().unique())
-            if codes:
-                return codes
-        except Exception:
-            continue
-    st.error("Erreur lecture liste Top CA : encodage non reconnu. Sauvegarder le fichier en UTF-8 ou CSV standard.")
-    return set()
-
 # ─── CALCUL PRINCIPAL ────────────────────────────────────────────────────────
-def compute(df_stock, top_codes):
+def compute(df_stock, df_topca, type_filtre, cible):
     """
-    Filtre : articles Top CA × Type saisonnalité = P (Permanent)
-    Taux   : Code état = 2 uniquement
-    Immo   : Code état = B × PMP
+    Périmètre : articles de la liste Top CA uniquement (filtrés par type si besoin).
+    Dénominateur : tous les articles Top CA trouvés dans le stock.
+    Numérateur   : articles avec stock > 0 (quel que soit le code état).
+    Filtre       : Type saisonnalité = P (Permanent).
     """
-    df = df_stock[df_stock["Code article"].isin(top_codes)].copy()
+    # Filtrer Top CA par type sélectionné
+    if type_filtre != "Tous":
+        df_topca_f = df_topca[df_topca["type"]==type_filtre].copy()
+    else:
+        df_topca_f = df_topca.copy()
+
+    top_codes = set(df_topca_f["code"].unique())
+    # Garder 1 seule ligne par code (prendre le premier TYPE en cas de doublon)
+    top_meta  = df_topca_f.drop_duplicates(subset=["code"]).set_index("code")[["type","lib"]]
+    top_map   = top_meta.to_dict("index")
+
+    # Filtrer stock : permanents uniquement + articles de la liste
+    df = df_stock[
+        (df_stock["Code article"].isin(top_codes)) &
+        (df_stock["Type saisonnalité"]=="P")
+    ].copy()
 
     # Agréger par article × magasin
     agg_cols = {
-        "code_etat":        ("Code etat",        lambda x: x.mode().iloc[0] if len(x) else "?"),
-        "saisonnalite":     ("Type saisonnalité", lambda x: x.mode().iloc[0] if len(x) else "?"),
-        "flux":             ("Code marketing",    lambda x: x.mode().iloc[0] if len(x) else "?"),
-        "stock":            ("Nouveau stock",     "sum"),
-        "ral":              ("Ral",               "sum"),
-        "nb_colis":         ("Nb colis",          "first"),
-        "pmp":              ("PMP",               "first"),
-        "lib_article":      ("Libellé article",   "first"),
-        "lib_rayon":        ("Libellé rayon",     "first") if "Libellé rayon"    in df.columns else ("Code article","first"),
-        "lib_fournisseur":  ("Nom fourn.",        "first") if "Nom fourn."       in df.columns else ("Code article","first"),
+        "code_etat":       ("Code etat",         lambda x: x.mode().iloc[0] if len(x) else "?"),
+        "flux":            ("Code marketing",    lambda x: x.mode().iloc[0] if len(x) else "?"),
+        "stock":           ("Nouveau stock",     "sum"),
+        "ral":             ("Ral",               "sum"),
+        "nb_colis":        ("Nb colis",          "first"),
+        "lib_article":     ("Libellé article",   "first"),
+        "lib_rayon":       ("Libellé rayon",     "first") if "Libellé rayon"  in df_stock.columns else ("Code article","first"),
+        "lib_fournisseur": ("Nom fourn.",        "first") if "Nom fourn."     in df_stock.columns else ("Code article","first"),
     }
     grp = df.groupby(["Code article","Libellé site"]).agg(**agg_cols).reset_index()
 
-    # Valeur stock immobilisé (code B)
-    grp["stock_immo"] = np.where(grp["code_etat"]=="B", grp["stock"] * grp["pmp"], 0)
+    # Ajouter type et lib depuis Top CA
+    grp["type_ca"]  = grp["Code article"].map(lambda c: top_map.get(c,{}).get("type","?"))
+    grp["lib_topca"]= grp["Code article"].map(lambda c: top_map.get(c,{}).get("lib",""))
 
-    # Filtre Permanent pour les calculs de taux
-    grp_perm = grp[grp["saisonnalite"]=="P"].copy()
+    # Détenu = stock > 0
+    grp["detenu"] = grp["stock"] > 0
+    grp["alerte"] = grp.apply(_alerte, axis=1)
 
-    # Articles absents
-    found   = set(df["Code article"].unique())
-    absents = sorted(top_codes - found)
+    # Absents
+    found      = set(df["Code article"].unique())
+    absents_df = df_topca_f[~df_topca_f["code"].isin(found)].copy()
 
-    # Nombre d'articles permanents dans le Top CA (trouvés)
-    n_perm_top = grp_perm["Code article"].nunique()
+    return grp, absents_df, top_codes
 
-    return grp, grp_perm, absents, n_perm_top
+def _alerte(row):
+    if not row["detenu"]:
+        if row["code_etat"] == "B": return "🔴 Bloqué — 0 stock"
+        if row["ral"] > 0:          return "🚚 Relance en cours"
+        return "🛒 Rupture"
+    if row["nb_colis"] > 0 and 0 < row["stock"] < row["nb_colis"]:
+        return "⚠️ Stock faible"
+    if row["code_etat"] == "B":
+        return "⚠️ Bloqué — stock résiduel"
+    return "✅ OK"
 
-def compute_taux(grp_perm, top_codes, cible):
-    """Taux de détention par magasin et flux — Code état 2 uniquement — Permanents uniquement."""
-    sites = sorted(grp_perm["Libellé site"].unique())
+def compute_taux(grp, top_codes, cible):
+    """Taux par magasin et flux."""
+    sites = sorted(grp["Libellé site"].unique())
     rows  = []
     for site in sites:
-        s = grp_perm[grp_perm["Libellé site"]==site]
+        s = grp[grp["Libellé site"]==site]
         for flux in ["ALL","IM","LO"]:
-            sf      = s if flux=="ALL" else s[s["flux"]==flux]
-            actifs  = sf[sf["code_etat"]=="2"]
-            n_act   = len(actifs)
-            n_stk   = int((actifs["stock"]>0).sum())
-            taux    = round(n_stk/n_act*100, 1) if n_act > 0 else None
-            n_blq   = int((sf["code_etat"]=="B").sum())
-            immo    = sf["stock_immo"].sum()
-            n_rupt  = int((actifs["stock"]<=0).sum())
-            n_fbl   = int(((actifs["stock"]>0) & (actifs["stock"]<actifs["nb_colis"].replace(0,np.nan))).sum())
+            sf = s if flux=="ALL" else s[s["flux"]==flux]
+            n_total  = len(sf)
+            n_detenu = int(sf["detenu"].sum())
+            taux     = round(n_detenu/n_total*100,1) if n_total>0 else None
+
+            # Par type
+            sg = sf[sf["type_ca"]=="GOLD"]
+            ss = sf[sf["type_ca"]=="SILVER"]
+            t_gold   = round(sg["detenu"].sum()/len(sg)*100,1) if len(sg)>0 else None
+            t_silver = round(ss["detenu"].sum()/len(ss)*100,1) if len(ss)>0 else None
+
+            n_rupture = int((~sf["detenu"]).sum())
+            n_bloque  = int((sf["code_etat"]=="B").sum())
+            n_gold_rupt = int((sg["detenu"]==False).sum()) if len(sg)>0 else 0
+
             rows.append({
                 "site":site,"flux":flux,
-                "n_perm": len(sf),
-                "n_actifs":n_act,"n_stock":n_stk,"taux":taux,
-                "n_bloques":n_blq,"stock_immo":round(immo),
-                "n_rupture":n_rupt,"n_faible":n_fbl,
-                "sous_cible": taux is not None and taux < cible,
+                "n_total":n_total,"n_detenu":n_detenu,"taux":taux,
+                "taux_gold":t_gold,"taux_silver":t_silver,
+                "n_rupture":n_rupture,"n_bloque":n_bloque,
+                "n_gold_rupt":n_gold_rupt,
             })
     return pd.DataFrame(rows)
 
-def compute_alerte(row):
-    if row["code_etat"]=="B":    return "🔴 Bloqué"
-    if row["code_etat"]=="F":    return "⚪ Fin de vie"
-    if row["code_etat"]!="2":    return f"🟡 État {row['code_etat']}"
-    if row["stock"]<=0 and row["ral"]<=0: return "🛒 Rupture"
-    if row["stock"]<=0 and row["ral"]>0:  return "🚚 Relance"
-    if row["nb_colis"]>0 and 0<row["stock"]<row["nb_colis"]: return "⚠️ Stock faible"
-    return "✅ OK"
-
 # ─── EXPORT EXCEL ────────────────────────────────────────────────────────────
-def gen_excel(grp, grp_perm, taux_df, absents, top_codes):
+def gen_excel(grp, taux_df, absents_df, type_filtre):
     wb    = Workbook()
     HDR_F = PatternFill("solid", fgColor="1C3557")
     HDR_T = Font(bold=True, color="FFFFFF", size=11)
     RED_F = PatternFill("solid", fgColor="FCE4E4")
     AMB_F = PatternFill("solid", fgColor="FEF3CD")
     GRN_F = PatternFill("solid", fgColor="D6F0D6")
+    GLD_F = PatternFill("solid", fgColor="FFF8DC")
     NEU_F = PatternFill("solid", fgColor="FFFFFF")
-    ORG_F = PatternFill("solid", fgColor="FFE5CC")
     CTR   = Alignment(horizontal="center", vertical="center")
 
-    def write_ws(ws, headers, rows, title, col_widths=None):
-        ws.append([title]); ws.cell(1,1).font = Font(bold=True, size=13)
+    def write_ws(ws, headers, rows, title):
+        ws.append([title]); ws.cell(1,1).font=Font(bold=True,size=13)
         ws.append([]); ws.append(headers)
         for i,h in enumerate(headers,1):
-            c = ws.cell(3,i); c.fill=HDR_F; c.font=HDR_T; c.alignment=CTR
+            c=ws.cell(3,i); c.fill=HDR_F; c.font=HDR_T; c.alignment=CTR
         for row in rows: ws.append(row)
-        widths = col_widths or {}
-        for ci, col in enumerate(ws.iter_cols(min_row=1, max_row=1), 1):
-            hdr = str(ws.cell(3,ci).value or "")
-            ws.column_dimensions[get_column_letter(ci)].width = widths.get(ci, max(len(hdr)+4, 12))
+        for col in ws.columns:
+            ws.column_dimensions[get_column_letter(col[0].column)].width=max(
+                len(str(col[0].value or ""))+4,12)
 
-    # ── Onglet 1 : Synthèse magasins ─────────────────────────────────────────
-    ws1 = wb.active; ws1.title = "Synthèse magasins"
-    syn = taux_df[taux_df["flux"]=="ALL"].copy()
-    rows1 = []
-    for _,r in syn.iterrows():
-        rows1.append([r["site"], len(top_codes), r["n_perm"], r["n_actifs"],
-                      r["n_stock"], r["taux"], r["n_bloques"],
-                      r["stock_immo"], r["n_rupture"]])
+    taux_all = taux_df[taux_df["flux"]=="ALL"]
+
+    # Onglet 1 — Synthèse
+    ws1 = wb.active; ws1.title="Synthèse réseau"
+    rows1 = [[r["site"],r["n_total"],r["n_detenu"],r["taux"],
+              r["taux_gold"],r["taux_silver"],r["n_rupture"],r["n_bloque"],r["n_gold_rupt"]]
+             for _,r in taux_all.iterrows()]
     write_ws(ws1,
-        ["Magasin","Réf Top CA","Permanents","Actifs (état 2)",
-         "En stock","Taux %","Bloqués (B)","Stock immobilisé FCFA","Ruptures"],
-        rows1, f"Synthèse détention — {len(top_codes)} réf. Top CA · Permanents uniquement · Code état 2",
-        {8: 24})
+        ["Magasin","Réf analysées","Détenues","Taux %",
+         "Taux GOLD %","Taux SILVER %","Ruptures","Bloqués (B)","Ruptures GOLD"],
+        rows1, f"Synthèse détention — Top CA {type_filtre} · Permanents")
     for r in ws1.iter_rows(min_row=4, max_row=ws1.max_row):
-        v = r[5].value  # Taux %
-        if isinstance(v,(int,float)):
-            r[5].fill = GRN_F if v>=85 else AMB_F if v>=70 else RED_F
-        vi = r[7].value  # Stock immo
-        if isinstance(vi,(int,float)) and vi > 0:
-            r[7].fill = ORG_F; r[7].font = Font(bold=True, color="C62828")
-            r[7].number_format = "#,##0"
+        for ci in [4,5,6]:
+            v=r[ci-1].value
+            if isinstance(v,(int,float)):
+                r[ci-1].fill=GRN_F if v>=85 else AMB_F if v>=70 else RED_F
 
-    # ── Onglet 2 : IM vs LO ──────────────────────────────────────────────────
+    # Onglet 2 — IM vs LO
     ws2 = wb.create_sheet("IM vs LO")
-    rows2 = []
-    pivot = taux_df[taux_df["flux"]!="ALL"]
-    for _,r in pivot.iterrows():
-        rows2.append([r["site"], r["flux"], r["n_perm"], r["n_actifs"],
-                      r["n_stock"], r["taux"], r["n_bloques"], r["stock_immo"], r["n_rupture"]])
+    rows2=[[r["site"],r["flux"],r["n_total"],r["n_detenu"],r["taux"],
+            r["taux_gold"],r["taux_silver"],r["n_rupture"]]
+           for _,r in taux_df[taux_df["flux"]!="ALL"].iterrows()]
     write_ws(ws2,
-        ["Magasin","Flux","Permanents","Actifs (état 2)",
-         "En stock","Taux %","Bloqués (B)","Stock immobilisé FCFA","Ruptures"],
-        rows2, "Détention par flux IM / LO · Permanents · Code état 2", {8:24})
-    for r in ws2.iter_rows(min_row=4, max_row=ws2.max_row):
-        v = r[5].value
+        ["Magasin","Flux","Réf","Détenues","Taux %","Taux GOLD %","Taux SILVER %","Ruptures"],
+        rows2,"IM vs LO · Permanents")
+    for r in ws2.iter_rows(min_row=4,max_row=ws2.max_row):
+        v=r[4].value
         if isinstance(v,(int,float)):
-            r[5].fill = GRN_F if v>=85 else AMB_F if v>=70 else RED_F
-        vi = r[7].value
-        if isinstance(vi,(int,float)) and vi>0:
-            r[7].fill = ORG_F; r[7].number_format="#,##0"
+            r[4].fill=GRN_F if v>=85 else AMB_F if v>=70 else RED_F
 
-    # ── Onglet 3 : Plan d'action ──────────────────────────────────────────────
-    ws3 = wb.create_sheet("Plan d'action")
-    grp2 = grp.copy()
-    grp2["Alerte"] = grp2.apply(compute_alerte, axis=1)
-    urgences = grp2[grp2["Alerte"]!="✅ OK"].sort_values("Alerte")
-    rows3 = [[r["Code article"],r["lib_article"],r["Libellé site"],
-              r["flux"],r["code_etat"],r["saisonnalite"],
-              int(r["stock"]),int(r["ral"]),
-              int(r["stock_immo"]) if r["stock_immo"]>0 else "",
-              r["Alerte"]]
-             for _,r in urgences.iterrows()]
+    # Onglet 3 — GOLD ruptures (prioritaire)
+    ws3 = wb.create_sheet("🥇 GOLD — Ruptures")
+    gold_rupt = grp[(grp["type_ca"]=="GOLD")&(grp["detenu"]==False)].sort_values("Libellé site")
+    rows3=[[r["Code article"],r["lib_topca"],r["Libellé site"],r["flux"],
+            r["code_etat"],int(r["stock"]),int(r["ral"]),r["alerte"]]
+           for _,r in gold_rupt.iterrows()]
     write_ws(ws3,
-        ["Code","Libellé","Magasin","Flux","Code état","Saisonnalité",
-         "Stock","RAL","Stock immobilisé FCFA","Alerte"],
-        rows3, "Plan d'action · Urgences détection", {2:36, 3:22, 9:24})
-    for r in ws3.iter_rows(min_row=4, max_row=ws3.max_row):
-        v = str(r[9].value or "")
-        r[9].fill = RED_F if "🔴" in v else AMB_F if any(x in v for x in ["🛒","⚠️","🟡"]) else NEU_F
-        vi = r[8].value
-        if isinstance(vi,int) and vi>0:
-            r[8].fill=ORG_F; r[8].number_format="#,##0"
+        ["Code","Libellé","Magasin","Flux","Code état","Stock","RAL","Alerte"],
+        rows3,"Articles GOLD non détenus · Action prioritaire")
+    for r in ws3.iter_rows(min_row=4,max_row=ws3.max_row):
+        r[0].fill=GLD_F
+        v=str(r[7].value or "")
+        r[7].fill=RED_F if "🔴" in v or "🛒" in v else AMB_F if "⚠️" in v or "🚚" in v else NEU_F
 
-    # ── Onglet 4 : Stock immobilisé détail ────────────────────────────────────
-    ws4 = wb.create_sheet("Stock immobilisé (B)")
-    immo_df = grp[grp["code_etat"]=="B"].sort_values("stock_immo", ascending=False)
-    rows4 = [[r["Code article"],r["lib_article"],r["Libellé site"],
-              r["flux"],r["saisonnalite"],int(r["stock"]),
-              round(r["pmp"]),int(r["stock_immo"])]
-             for _,r in immo_df.iterrows()]
+    # Onglet 4 — Plan d'action complet
+    ws4 = wb.create_sheet("Plan d'action")
+    urgences = grp[grp["alerte"]!="✅ OK"].sort_values(["type_ca","alerte"])
+    rows4=[[r["Code article"],r["lib_topca"],r["type_ca"],r["Libellé site"],
+            r["flux"],r["code_etat"],int(r["stock"]),int(r["ral"]),r["alerte"]]
+           for _,r in urgences.iterrows()]
     write_ws(ws4,
-        ["Code","Libellé","Magasin","Flux","Saisonnalité",
-         "Stock qté","PMP (FCFA)","Stock immobilisé FCFA"],
-        rows4, "Détail stock immobilisé · Code état B · tous articles", {2:36,8:24})
-    for r in ws4.iter_rows(min_row=4, max_row=ws4.max_row):
-        vi = r[7].value
-        if isinstance(vi,(int,float)) and vi>0:
-            r[7].fill=ORG_F; r[7].font=Font(bold=True,color="C62828")
-            r[7].number_format="#,##0"
+        ["Code","Libellé","Type","Magasin","Flux","Code état","Stock","RAL","Alerte"],
+        rows4,"Plan d'action · GOLD en priorité")
+    for r in ws4.iter_rows(min_row=4,max_row=ws4.max_row):
+        if str(r[2].value)=="GOLD": r[2].fill=GLD_F
+        v=str(r[8].value or "")
+        r[8].fill=RED_F if "🔴" in v or "🛒" in v else AMB_F if "⚠️" in v or "🚚" in v else NEU_F
 
-    # ── Onglet 5 : Absents ERP ────────────────────────────────────────────────
+    # Onglet 5 — Absents ERP
     ws5 = wb.create_sheet("Absents ERP")
-    write_ws(ws5,
-        ["Code article","Statut","Action"],
-        [[c,"Absent ERP","Vérifier référentiel ou déréférencement"] for c in absents],
-        "Références Top CA absentes des extractions ERP")
+    rows5=[[r["code"],r["lib"],r["type"],"Absent ERP"] for _,r in absents_df.iterrows()]
+    write_ws(ws5,["Code","Libellé","Type","Statut"],rows5,"Absents des extractions ERP")
 
-    buf = BytesIO(); wb.save(buf); buf.seek(0)
+    buf=BytesIO(); wb.save(buf); buf.seek(0)
     return buf
 
 # ─── SIDEBAR ──────────────────────────────────────────────────────────────────
@@ -348,36 +362,36 @@ with st.sidebar:
     st.markdown("---")
 
     st.markdown("<div style='font-size:11px;font-weight:600;color:#8E8E93;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px'>Import fichiers</div>", unsafe_allow_html=True)
-    f_topca  = st.file_uploader("Liste Top CA (CSV ou Excel)", type=["csv","xlsx"], key="topca")
-    f_stocks = st.file_uploader(
-        "Stock consolidé (CSV)",
-        type=["csv"], key="stocks",
-        help="Fichier produit par consolider_stock.py · séparateur ; · UTF-8"
-    )
+    f_topca  = st.file_uploader("Liste Top CA (CSV)", type=["csv","xlsx"], key="topca",
+                                 help="Colonnes : CODE ARTICLE · LIBELLÉ ARTICLE · TYPE (GOLD/SILVER)")
+    f_stock  = st.file_uploader("Stock consolidé (CSV)", type=["csv"], key="stock",
+                                 help="Produit par consolider_stock.py · séparateur ; · UTF-8")
     st.markdown("---")
 
     st.markdown("<div style='font-size:11px;font-weight:600;color:#8E8E93;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px'>Paramètres</div>", unsafe_allow_html=True)
     cible = st.slider("Cible taux de détention (%)", 70, 100, 85)
     st.markdown(f"""
-<div style='background:#E6F1FB;border:0.5px solid #B3D9FF;border-radius:8px;padding:7px 11px;font-size:12px;color:#001A3A;margin-bottom:10px'>
-  Cible : <strong>{cible}%</strong> · Articles <strong>Permanents</strong> uniquement<br>
-  Code état <strong>2</strong> dans le calcul · PMP pour la valorisation
+<div style='background:#E6F1FB;border:0.5px solid #B3D9FF;border-radius:8px;
+            padding:7px 11px;font-size:12px;color:#001A3A;margin-top:4px'>
+  Cible : <strong>{cible}%</strong> · Articles <strong>Permanents</strong><br>
+  Détenu = <strong>stock &gt; 0</strong> (tous codes état)
 </div>""", unsafe_allow_html=True)
 
 # ─── PAGE PRINCIPALE ──────────────────────────────────────────────────────────
 st.markdown("<div class='page-title'>📦 Détention Top CA</div>", unsafe_allow_html=True)
-st.markdown("<div class='page-caption'>Articles Permanents · Flux IM / LO · Code état 2 · Stock immobilisé code B · Fichier consolidé</div>", unsafe_allow_html=True)
+st.markdown("<div class='page-caption'>Articles Permanents · Flux IM / LO · GOLD / SILVER · Détenu = stock &gt; 0</div>", unsafe_allow_html=True)
 
 # ─── ÉCRAN D'ACCUEIL ─────────────────────────────────────────────────────────
-if not f_topca or not f_stocks:
+if not f_topca or not f_stock:
     st.markdown("---")
     st.markdown("""
 <div class='alert-card alert-blue'>
   <strong>ℹ️ À quoi sert ce module ?</strong><br>
-  Ce module vérifie la présence en magasin des <strong>articles Top CA permanents</strong>
-  et calcule le taux de détention séparément pour les flux <strong>IM (Import)</strong> et <strong>LO (Local)</strong>.<br><br>
-  Il identifie également le <strong>stock immobilisé en code état B</strong> (articles bloqués)
-  valorisé au PMP — capital qui ne génère aucun CA.
+  Ce module vérifie la présence en magasin des articles <strong>Top CA permanents</strong>
+  et calcule le taux de détention par niveau de priorité (<strong>GOLD / SILVER</strong>)
+  et par flux (<strong>IM / LO</strong>).<br><br>
+  Un article est considéré <strong>détenu dès qu'il a du stock &gt; 0</strong>,
+  quel que soit son code état. Le code état est affiché pour information.
 </div>""", unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
@@ -385,22 +399,29 @@ if not f_topca or not f_stocks:
     c1, c2 = st.columns(2)
     with c1:
         st.markdown("""
-<div style='background:#FFFFFF;border:0.5px solid #E5E5EA;border-radius:12px;padding:16px;border-left:3px solid #34C759;margin-bottom:10px'>
-  <div style='font-size:13px;font-weight:600;color:#1C1C1E;margin-bottom:8px'>Inclus dans le taux</div>
+<div style='background:#FFFFFF;border:0.5px solid #E5E5EA;border-radius:12px;
+            padding:16px;border-left:3px solid #34C759;margin-bottom:10px'>
+  <div style='font-size:13px;font-weight:600;color:#1C1C1E;margin-bottom:8px'>Calcul du taux</div>
   <div style='font-size:12px;color:#3A3A3C;line-height:2'>
-    <span style='background:#F0FFF4;color:#34C759;padding:2px 8px;border-radius:100px;font-weight:600;font-size:11px'>Type saisonnalité = P</span> Permanent<br>
-    <span style='background:#E6F1FB;color:#007AFF;padding:2px 8px;border-radius:100px;font-weight:600;font-size:11px'>Code état = 2</span> Actif<br>
-    Taux = articles en stock / articles actifs permanents
+    <strong>Périmètre</strong> : articles de la liste Top CA uniquement<br>
+    <strong>Filtre</strong> : Type saisonnalité = P (Permanent)<br>
+    <strong>Dénominateur</strong> : tous articles Top CA trouvés dans le stock<br>
+    <strong>Numérateur</strong> : articles avec stock &gt; 0 (tous codes état)
   </div>
 </div>""", unsafe_allow_html=True)
     with c2:
         st.markdown("""
-<div style='background:#FFFFFF;border:0.5px solid #E5E5EA;border-radius:12px;padding:16px;border-left:3px solid #FF3B30;margin-bottom:10px'>
-  <div style='font-size:13px;font-weight:600;color:#1C1C1E;margin-bottom:8px'>Exclus — signalés</div>
+<div style='background:#FFFFFF;border:0.5px solid #E5E5EA;border-radius:12px;
+            padding:16px;border-left:3px solid #FFD700;margin-bottom:10px'>
+  <div style='font-size:13px;font-weight:600;color:#1C1C1E;margin-bottom:8px'>Niveaux de priorité</div>
   <div style='font-size:12px;color:#3A3A3C;line-height:2'>
-    <span style='background:#FFF2F2;color:#FF3B30;padding:2px 8px;border-radius:100px;font-weight:600;font-size:11px'>B · Bloqué</span> → stock immobilisé valorisé au PMP<br>
-    <span style='background:#FFFBF0;color:#FF9500;padding:2px 8px;border-radius:100px;font-weight:600;font-size:11px'>S · Saisonnier</span> → exclu du calcul<br>
-    <span style='background:#F2F2F7;color:#8E8E93;padding:2px 8px;border-radius:100px;font-weight:600;font-size:11px'>F · Fin de vie</span> → signalé séparément
+    <span style='background:#FFF8E1;color:#B8860B;padding:2px 8px;border-radius:100px;
+                 font-weight:700;font-size:11px;border:1px solid #FFD700'>GOLD</span>
+    Articles prioritaires — alertes critiques<br>
+    <span style='background:#F2F2F7;color:#636366;padding:2px 8px;border-radius:100px;
+                 font-weight:700;font-size:11px;border:1px solid #C7C7CC'>SILVER</span>
+    Articles secondaires — alertes standard<br>
+    Le code état est affiché à titre informatif sur chaque article.
   </div>
 </div>""", unsafe_allow_html=True)
 
@@ -410,272 +431,319 @@ if not f_topca or not f_stocks:
         st.markdown("""
 <div class='col-required'><div style='font-size:16px'>📋</div>
 <div><div class='col-name'>Liste Top CA</div>
-<div class='col-desc'>CSV ou Excel · 1 colonne · codes articles sans en-tête</div>
-<div class='col-ex'>ex: 10002101 / 14005975 / 14006617…</div></div></div>""", unsafe_allow_html=True)
+<div class='col-desc'>CSV avec en-tête · 3 colonnes</div>
+<div class='col-ex'>CODE ARTICLE ; LIBELLÉ ARTICLE ; TYPE (GOLD/SILVER)</div></div></div>""",
+        unsafe_allow_html=True)
     with c2:
         st.markdown("""
 <div class='col-required'><div style='font-size:16px'>🏪</div>
 <div><div class='col-name'>Stock consolidé ERP</div>
-<div class='col-desc'>1 seul CSV · produit par <strong>consolider_stock.py</strong> · séparateur ; · UTF-8</div>
-<div class='col-ex'>stock_consolide_YYYYMMDD.csv · tous magasins</div></div></div>""", unsafe_allow_html=True)
+<div class='col-desc'>Produit par consolider_stock.py · 1 seul fichier · tous magasins</div>
+<div class='col-ex'>stock_consolide_YYYYMMDD.csv</div></div></div>""",
+        unsafe_allow_html=True)
 
-    st.info("⬆️ Charge la liste Top CA et les extractions stock dans la sidebar pour lancer l'analyse.")
+    st.info("⬆️ Charge les deux fichiers dans la sidebar pour lancer l'analyse.")
     st.stop()
 
 # ─── TRAITEMENT ───────────────────────────────────────────────────────────────
 with st.spinner("Lecture des fichiers…"):
-    top_codes = load_topca(f_topca.read(), f_topca.name)
-    stock_bytes = f_stocks.read()
-    df_stock  = load_stock(stock_bytes, f_stocks.name)
+    df_topca = load_topca(f_topca.read(), f_topca.name)
+    df_stock = load_stock(f_stock.read(), f_stock.name)
 
-if df_stock.empty:
-    st.error("Aucune donnée PGC lue."); st.stop()
-if not top_codes:
-    st.error("Liste Top CA vide."); st.stop()
+if df_stock.empty: st.error("Stock vide ou illisible."); st.stop()
+if df_topca.empty: st.error("Liste Top CA vide."); st.stop()
 
+# ─── SÉLECTEUR GOLD / SILVER ─────────────────────────────────────────────────
+st.markdown("<div class='section-label'>Niveau d'analyse</div>", unsafe_allow_html=True)
+types_dispo = sorted(df_topca["type"].unique())
+options     = ["Tous"] + types_dispo
+labels      = {"Tous":"🔵 Tous", "GOLD":"🥇 GOLD", "SILVER":"🥈 SILVER"}
+
+type_filtre = st.radio(
+    "Type à analyser",
+    options,
+    format_func=lambda x: labels.get(x, x),
+    horizontal=True,
+    label_visibility="collapsed",
+)
+
+# Sous-titre contextuel
+n_type = len(df_topca[df_topca["type"]==type_filtre]) if type_filtre!="Tous" else len(df_topca)
+if type_filtre == "GOLD":
+    st.markdown(f"<div style='font-size:12px;color:#B8860B;background:#FFF8E1;padding:6px 12px;border-radius:8px;border:0.5px solid #FFD700;margin-bottom:12px;display:inline-block'>🥇 Analyse GOLD · <strong>{n_type}</strong> articles prioritaires</div>", unsafe_allow_html=True)
+elif type_filtre == "SILVER":
+    st.markdown(f"<div style='font-size:12px;color:#636366;background:#F2F2F7;padding:6px 12px;border-radius:8px;border:0.5px solid #C7C7CC;margin-bottom:12px;display:inline-block'>🥈 Analyse SILVER · <strong>{n_type}</strong> articles</div>", unsafe_allow_html=True)
+else:
+    n_gold   = len(df_topca[df_topca["type"]=="GOLD"])
+    n_silver = len(df_topca[df_topca["type"]=="SILVER"])
+    st.markdown(f"<div style='font-size:12px;color:#007AFF;background:#E6F1FB;padding:6px 12px;border-radius:8px;border:0.5px solid #B3D9FF;margin-bottom:12px;display:inline-block'>🔵 Tous · <strong>{n_gold}</strong> GOLD + <strong>{n_silver}</strong> SILVER = <strong>{n_type}</strong> articles</div>", unsafe_allow_html=True)
+
+# ─── CALCUL ───────────────────────────────────────────────────────────────────
 with st.spinner("Calcul des taux de détention…"):
-    grp, grp_perm, absents, n_perm_top = compute(df_stock, top_codes)
-    grp["Alerte"]      = grp.apply(compute_alerte, axis=1)
-    grp_perm["Alerte"] = grp_perm.apply(compute_alerte, axis=1)
-    taux_df = compute_taux(grp_perm, top_codes, cible)
+    grp, absents_df, top_codes = compute(df_stock, df_topca, type_filtre, cible)
+    taux_df = compute_taux(grp, top_codes, cible)
 
-n_sites       = df_stock["Libellé site"].nunique()
-taux_all      = taux_df[taux_df["flux"]=="ALL"]
-taux_im       = taux_df[taux_df["flux"]=="IM"]
-taux_lo       = taux_df[taux_df["flux"]=="LO"]
-taux_moy      = taux_all["taux"].mean()
-taux_im_moy   = taux_im["taux"].mean()
-taux_lo_moy   = taux_lo["taux"].mean()
-stock_immo_total = grp["stock_immo"].sum()
-n_urgences    = (grp_perm["Alerte"]!="✅ OK").sum()
-n_saisonniers = len(top_codes) - n_perm_top
+n_sites     = df_stock["Libellé site"].nunique()
+taux_all    = taux_df[taux_df["flux"]=="ALL"]
+taux_im     = taux_df[taux_df["flux"]=="IM"]
+taux_lo     = taux_df[taux_df["flux"]=="LO"]
+taux_moy    = taux_all["taux"].mean()
+taux_im_moy = taux_im["taux"].mean()
+taux_lo_moy = taux_lo["taux"].mean()
+taux_gold   = taux_all["taux_gold"].mean()
+n_urgences  = (grp["alerte"]!="✅ OK").sum()
+n_gold_rupt = (grp[grp["type_ca"]=="GOLD"]["detenu"]==False).sum()
 
 # ─── KPIs ─────────────────────────────────────────────────────────────────────
-st.markdown(f"<div class='section-label'>{n_sites} magasin(s) · {len(top_codes)} références Top CA · {n_perm_top} permanentes</div>", unsafe_allow_html=True)
+st.markdown("---")
+st.markdown(f"<div class='section-label'>{n_sites} magasin(s) · {len(top_codes)} références · Permanents</div>", unsafe_allow_html=True)
 
 k1, k2, k3, k4, k5 = st.columns(5)
-k1.metric("Réf permanentes",   str(n_perm_top),
-          f"{n_saisonniers} saisonniers exclus" if n_saisonniers else "")
-k2.metric("Taux détention moy",
-          f"{taux_moy:.1f}%" if taux_moy else "—",
+k1.metric("Réf analysées",  str(len(top_codes)), f"{len(absents_df)} absents ERP" if len(absents_df) else "")
+k2.metric("Taux détention", f"{taux_moy:.1f}%" if taux_moy else "—",
           f"{taux_moy-cible:+.1f} pt vs cible" if taux_moy else "")
 k3.metric("Taux IM · Import",
           f"{taux_im_moy:.1f}%" if taux_im_moy else "—",
-          f"{taux_im_moy-cible:+.1f} pt vs cible" if taux_im_moy else "")
+          f"{taux_im_moy-cible:+.1f} pt" if taux_im_moy else "")
 k4.metric("Taux LO · Local",
           f"{taux_lo_moy:.1f}%" if taux_lo_moy else "—",
-          f"{taux_lo_moy-cible:+.1f} pt vs cible" if taux_lo_moy else "")
+          f"{taux_lo_moy-cible:+.1f} pt" if taux_lo_moy else "")
 
-# KPI Stock immobilisé — mis en avant avec style rouge
+# KPI GOLD mis en avant
 with k5:
+    gold_color = "#34C759" if (taux_gold or 0)>=cible else "#FF9500" if (taux_gold or 0)>=cible-10 else "#FF3B30"
+    gold_sub   = f"{(taux_gold or 0)-cible:+.1f} pt vs cible" if taux_gold else "—"
     st.markdown(f"""
-<div class='kpi-immo'>
-  <div class='kpi-immo-label'>Stock immobilisé (B)</div>
-  <div class='kpi-immo-value'>{fmt(stock_immo_total)}</div>
-  <div class='kpi-immo-sub'>FCFA · code B · PMP</div>
+<div class='kpi-gold'>
+  <div class='kpi-gold-label'>🥇 Taux GOLD</div>
+  <div class='kpi-gold-value' style='color:{gold_color}'>{f"{taux_gold:.1f}%" if taux_gold else "—"}</div>
+  <div class='kpi-gold-sub'>{gold_sub} · {n_gold_rupt} ruptures</div>
 </div>""", unsafe_allow_html=True)
 
 # ─── ALERTES ──────────────────────────────────────────────────────────────────
 st.markdown("---")
 st.markdown("<div class='section-label'>Alertes &amp; actions prioritaires</div>", unsafe_allow_html=True)
 
-if stock_immo_total > 0:
+# Ruptures GOLD en priorité absolue
+if n_gold_rupt > 0:
+    sites_gold = grp[(grp["type_ca"]=="GOLD")&(grp["detenu"]==False)]["Libellé site"].value_counts()
+    top3 = ", ".join([f"{s} ({n})" for s,n in sites_gold.head(3).items()])
     st.markdown(f"""
 <div class='alert-card alert-red'>
-  <strong>⚠️ {fmt(stock_immo_total)} FCFA immobilisés en code état B</strong> sur {n_sites} magasin(s)<br>
-  <span style='font-size:12px;opacity:.85'>→ Ce stock bloqué ne génère aucun CA. Débloquer, liquider ou substituer en priorité.</span>
+  <strong>🥇 {n_gold_rupt} article(s) GOLD non détenus</strong> — {top3}<br>
+  <span style='font-size:12px;opacity:.85'>→ Priorité absolue. Commander en urgence ou identifier substitut.</span>
 </div>""", unsafe_allow_html=True)
 
+# Magasins sous cible
 sites_sous = taux_all[taux_all["taux"]<cible].sort_values("taux")
 if not sites_sous.empty:
     liste = ", ".join([f"{r['site']} ({r['taux']:.0f}%)" for _,r in sites_sous.iterrows()])
     st.markdown(f"""
 <div class='alert-card alert-amber'>
   <strong>⚠️ {len(sites_sous)} magasin(s) sous la cible {cible}%</strong> — {liste}<br>
-  <span style='font-size:12px;opacity:.85'>→ Vérifier commandes IM en attente. Délai réappro Import : 4–8 semaines.</span>
+  <span style='font-size:12px;opacity:.85'>→ Analyser les ruptures par flux. IM : délai 4–8 sem. LO : réassort 48h.</span>
 </div>""", unsafe_allow_html=True)
 
+# IM sous cible
 im_sous = taux_im[taux_im["taux"]<cible]
-if not im_sous.empty and len(im_sous) > len(sites_sous):
+if not im_sous.empty:
     st.markdown(f"""
 <div class='alert-card alert-amber'>
   <strong>⚠️ Flux Import sous cible sur {len(im_sous)} magasin(s)</strong> — taux IM moyen {taux_im_moy:.1f}%<br>
-  <span style='font-size:12px;opacity:.85'>→ Anticiper les commandes Import. Le flux LO peut pallier en attendant.</span>
+  <span style='font-size:12px;opacity:.85'>→ Anticiper les commandes Import. Délai réappro 4–8 semaines.</span>
 </div>""", unsafe_allow_html=True)
 
-if absents:
+if len(absents_df) > 0:
     st.markdown(f"""
 <div class='alert-card alert-amber'>
-  <strong>⚠️ {len(absents)} référence(s) Top CA absentes de toutes les extractions</strong><br>
+  <strong>⚠️ {len(absents_df)} référence(s) Top CA absentes de toutes les extractions</strong><br>
   <span style='font-size:12px;opacity:.85'>→ Vérifier déréférencement ou erreur de code dans la liste Top CA.</span>
 </div>""", unsafe_allow_html=True)
 
-if n_urgences == 0 and sites_sous.empty and stock_immo_total == 0:
-    st.success("✅ Tous les magasins au-dessus de la cible · aucun stock immobilisé détecté.")
+if n_urgences==0 and sites_sous.empty and n_gold_rupt==0:
+    st.success("✅ Tous les magasins au-dessus de la cible · aucune rupture GOLD détectée.")
 
 # ─── TABS ─────────────────────────────────────────────────────────────────────
 st.markdown("---")
 tab1, tab2, tab3, tab4 = st.tabs([
-    "📊 Synthèse réseau", "🔄 IM vs LO", "🚨 Plan d'action", "🚫 Absents ERP"
+    "📊 Synthèse réseau",
+    "🔄 IM vs LO",
+    "🚨 Plan d'action",
+    "🚫 Absents ERP"
 ])
 
-# ═══ TAB 1 — SYNTHÈSE RÉSEAU ══════════════════════════════════════════════════
+# ═══ TAB 1 — SYNTHÈSE ═════════════════════════════════════════════════════════
 with tab1:
-    st.caption("Articles permanents (Type saisonnalité = P) · Code état 2 dans le calcul · Stock immobilisé = code B × PMP")
+    st.caption("Détenu = stock > 0 · Tous codes état · Permanents · " + ("GOLD + SILVER" if type_filtre=="Tous" else type_filtre))
 
-    disp1 = taux_all[["site","n_perm","n_actifs","n_stock","taux",
-                       "n_bloques","stock_immo","n_rupture"]].copy()
-    disp1.columns = ["Magasin","Réf perm.","Actifs (état 2)",
-                     "En stock","Taux %","Bloqués (B)",
-                     "Stock immobilisé (FCFA)","Ruptures"]
+    disp1 = taux_all[["site","n_total","n_detenu","taux","taux_gold","taux_silver","n_rupture","n_bloque","n_gold_rupt"]].copy()
+    disp1.columns = ["Magasin","Réf","Détenues","Taux %","Taux GOLD %","Taux SILVER %","Ruptures","Bloqués (B)","Ruptures GOLD"]
     disp1 = disp1.sort_values("Taux %")
-    disp1["Taux %"]                 = disp1["Taux %"].apply(lambda x: f"{x:.1f}%" if x else "—")
-    disp1["Stock immobilisé (FCFA)"]= disp1["Stock immobilisé (FCFA)"].apply(fmt)
+    for c in ["Taux %","Taux GOLD %","Taux SILVER %"]:
+        disp1[c] = disp1[c].apply(lambda x: f"{x:.1f}%" if x is not None and not (isinstance(x,float) and np.isnan(x)) else "—")
     disp1["Statut"] = taux_all.sort_values("taux")["taux"].apply(
         lambda x: "🟢 OK" if x and x>=cible else ("🟡 Surveiller" if x and x>=cible-10 else "🔴 Action"))
 
-    st.dataframe(disp1, use_container_width=True, hide_index=True,
-                 column_config={"Stock immobilisé (FCFA)": st.column_config.TextColumn(
-                     "Stock immo. (FCFA)", help="Articles bloqués code B × PMP")})
+    st.dataframe(disp1, use_container_width=True, hide_index=True)
 
-    # Graphique taux par magasin
+    # Graphique
     try:
         import plotly.graph_objects as go
-        sorted_sites = taux_all.sort_values("taux")
-        colors = [color_taux(v, cible) for v in sorted_sites["taux"]]
-        fig = go.Figure(go.Bar(
-            x=sorted_sites["taux"].tolist(),
-            y=sorted_sites["site"].tolist(),
-            orientation="h",
-            marker_color=colors, marker_line_width=0,
-            text=[f"{v:.1f}%" if v else "—" for v in sorted_sites["taux"]],
+        fig = go.Figure()
+        s = taux_all.sort_values("taux")
+        fig.add_bar(
+            x=s["taux"].tolist(), y=s["site"].tolist(),
+            name="Taux global", orientation="h",
+            marker_color=[color_taux(v,cible) for v in s["taux"]],
+            marker_line_width=0,
+            text=[f"{v:.1f}%" if v else "—" for v in s["taux"]],
             textposition="outside",
-        ))
+        )
+        if type_filtre in ("Tous","GOLD"):
+            fig.add_bar(
+                x=s["taux_gold"].tolist(), y=s["site"].tolist(),
+                name="GOLD", orientation="h",
+                marker_color="rgba(184,134,11,0.35)",
+                marker_line_width=0,
+                text=[f"G:{v:.0f}%" if v else "" for v in s["taux_gold"]],
+                textposition="inside",
+            )
         fig.add_vline(x=cible, line_width=1.5, line_dash="dash", line_color="#007AFF",
-                      annotation_text=f"Cible {cible}%", annotation_position="top right",
-                      annotation_font_color="#007AFF")
+                      annotation_text=f"Cible {cible}%", annotation_font_color="#007AFF")
         fig.update_layout(
             plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
             font=dict(family="-apple-system, Helvetica Neue", color="#3A3A3C", size=12),
-            height=max(260, n_sites*50+80), margin=dict(t=20,b=20,l=10,r=80),
+            height=max(280, n_sites*56+80),
+            barmode="overlay",
+            margin=dict(t=20,b=20,l=10,r=80),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02),
             xaxis=dict(title="Taux de détention (%)", ticksuffix="%",
-                       showgrid=True, gridcolor="#F2F2F7", range=[0,110]),
+                       showgrid=True, gridcolor="#F2F2F7", range=[0,115]),
             yaxis=dict(showgrid=False, title=""),
         )
         st.plotly_chart(fig, use_container_width=True)
     except ImportError:
         pass
 
-# ═══ TAB 2 — IM vs LO ════════════════════════════════════════════════════════
+# ═══ TAB 2 — IM vs LO ═════════════════════════════════════════════════════════
 with tab2:
-    # Jauges IM / LO
-    tot_im  = taux_im["n_actifs"].sum(); pres_im = taux_im["n_stock"].sum()
-    tot_lo  = taux_lo["n_actifs"].sum(); pres_lo = taux_lo["n_stock"].sum()
-    g_im    = pres_im/tot_im*100 if tot_im else 0
-    g_lo    = pres_lo/tot_lo*100 if tot_lo else 0
-    immo_im = taux_im["stock_immo"].sum()
-    immo_lo = taux_lo["stock_immo"].sum()
-
-    c1, c2 = st.columns(2)
-    for col_w, label, taux_g, tot, pres, immo, flux_col in [
-        (c1,"IM · Import",g_im,tot_im,pres_im,immo_im,"#7C3AED"),
-        (c2,"LO · Local", g_lo,tot_lo,pres_lo,immo_lo,"#007AFF"),
-    ]:
-        with col_w:
-            col_v = "#34C759" if taux_g>=cible else "#FF9500" if taux_g>=cible-10 else "#FF3B30"
-            st.markdown(f"""
-<div style='background:#FFFFFF;border:0.5px solid #E5E5EA;border-left:3px solid {flux_col};border-radius:12px;padding:16px 18px;margin-bottom:12px'>
-  <div style='font-size:11px;font-weight:600;color:#8E8E93;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px'>{label}</div>
-  <div style='font-size:28px;font-weight:700;color:{col_v};letter-spacing:-.02em'>{taux_g:.1f}%</div>
-  <div style='font-size:12px;color:#8E8E93;margin-top:3px'>{int(pres)} / {int(tot)} actifs permanents en stock · {n_sites} magasins</div>
-  <div style='background:#E5E5EA;border-radius:3px;height:5px;margin-top:10px'>
-    <div style='width:{min(taux_g,100):.0f}%;background:{flux_col};height:5px;border-radius:3px'></div>
-  </div>
-  <div style='font-size:12px;color:#FF3B30;margin-top:8px;font-weight:500'>Stock immo. : {fmt(immo)} FCFA</div>
+    st.markdown("""
+<div class='alert-card alert-blue'>
+  Flux <strong>IM (Import)</strong> : délai réappro 4–8 semaines.
+  Flux <strong>LO (Local)</strong> : réassort possible en 48h.
+  Un écart important entre les deux signale des tensions à anticiper.
 </div>""", unsafe_allow_html=True)
 
-    # Tableau IM vs LO
+    tot_im  = taux_im["n_total"].sum(); det_im = taux_im["n_detenu"].sum()
+    tot_lo  = taux_lo["n_total"].sum(); det_lo = taux_lo["n_detenu"].sum()
+    g_im    = det_im/tot_im*100 if tot_im else 0
+    g_lo    = det_lo/tot_lo*100 if tot_lo else 0
+
+    c1, c2 = st.columns(2)
+    for col_w, label, tg, tot, det, flux_col in [
+        (c1,"IM · Import", g_im, tot_im, det_im, "#7C3AED"),
+        (c2,"LO · Local",  g_lo, tot_lo, det_lo, "#007AFF"),
+    ]:
+        with col_w:
+            cv = color_taux(tg, cible)
+            st.markdown(f"""
+<div style='background:#FFFFFF;border:0.5px solid #E5E5EA;border-left:3px solid {flux_col};
+            border-radius:12px;padding:16px 18px;margin-bottom:12px'>
+  <div style='font-size:11px;font-weight:600;color:#8E8E93;text-transform:uppercase;
+              letter-spacing:.05em;margin-bottom:4px'>{label}</div>
+  <div style='font-size:28px;font-weight:700;color:{cv};letter-spacing:-.02em'>{tg:.1f}%</div>
+  <div style='font-size:12px;color:#8E8E93;margin-top:3px'>{int(det)} / {int(tot)} articles détenus · {n_sites} magasins</div>
+  <div style='background:#E5E5EA;border-radius:3px;height:5px;margin-top:10px'>
+    <div style='width:{min(tg,100):.0f}%;background:{flux_col};height:5px;border-radius:3px'></div>
+  </div>
+</div>""", unsafe_allow_html=True)
+
     try:
         pivot = taux_df[taux_df["flux"]!="ALL"].pivot_table(
             index="site", columns="flux",
-            values=["n_actifs","n_stock","taux","stock_immo"],
+            values=["n_total","n_detenu","taux","taux_gold"],
             aggfunc="first"
         ).reset_index()
         pivot.columns = ["Magasin",
-                         "Actifs IM","Actifs LO",
-                         "En stock IM","En stock LO",
-                         "Stock immo IM","Stock immo LO",
+                         "Réf IM","Réf LO",
+                         "Détenues IM","Détenues LO",
+                         "Taux GOLD IM","Taux GOLD LO",
                          "Taux IM %","Taux LO %"]
-        pivot = pivot[["Magasin","Actifs IM","En stock IM","Taux IM %",
-                        "Actifs LO","En stock LO","Taux LO %",
-                        "Stock immo IM","Stock immo LO"]].sort_values("Taux IM %")
-        for c in ["Taux IM %","Taux LO %"]:
-            pivot[c] = pivot[c].apply(lambda x: f"{x:.1f}%" if pd.notna(x) else "—")
-        for c in ["Stock immo IM","Stock immo LO"]:
-            pivot[c] = pivot[c].apply(fmt)
+        pivot = pivot[["Magasin","Réf IM","Détenues IM","Taux IM %","Taux GOLD IM",
+                        "Réf LO","Détenues LO","Taux LO %","Taux GOLD LO"]].sort_values("Taux IM %")
+        for c in ["Taux IM %","Taux LO %","Taux GOLD IM","Taux GOLD LO"]:
+            pivot[c] = pivot[c].apply(lambda x: f"{x:.1f}%" if pd.notna(x) and x is not None else "—")
         st.dataframe(pivot, use_container_width=True, hide_index=True)
     except Exception:
         st.dataframe(taux_df[taux_df["flux"]!="ALL"], use_container_width=True, hide_index=True)
 
 # ═══ TAB 3 — PLAN D'ACTION ════════════════════════════════════════════════════
 with tab3:
-    urgences = grp_perm[grp_perm["Alerte"]!="✅ OK"].copy()
+    urgences = grp[grp["alerte"]!="✅ OK"].copy()
 
-    fc1, fc2, fc3 = st.columns(3)
+    # Filtres inline
+    fc1, fc2, fc3, fc4 = st.columns(4)
     with fc1:
-        sel_site  = st.selectbox("Magasin", ["Tous"]+sorted(grp_perm["Libellé site"].unique()))
+        sel_site  = st.selectbox("Magasin", ["Tous"]+sorted(grp["Libellé site"].unique()))
     with fc2:
         sel_flux  = st.selectbox("Flux", ["Tous","IM","LO"])
     with fc3:
-        al_dispo  = sorted(urgences["Alerte"].unique())
+        types_opt = ["Tous"] + sorted(grp["type_ca"].unique())
+        sel_type  = st.selectbox("Type", types_opt)
+    with fc4:
+        al_dispo  = sorted(urgences["alerte"].unique())
         sel_al    = st.multiselect("Alerte", al_dispo, default=al_dispo)
 
-    if sel_site!="Tous": urgences = urgences[urgences["Libellé site"]==sel_site]
-    if sel_flux!="Tous": urgences = urgences[urgences["flux"]==sel_flux]
-    if sel_al:           urgences = urgences[urgences["Alerte"].isin(sel_al)]
+    if sel_site!="Tous": urgences=urgences[urgences["Libellé site"]==sel_site]
+    if sel_flux!="Tous": urgences=urgences[urgences["flux"]==sel_flux]
+    if sel_type!="Tous": urgences=urgences[urgences["type_ca"]==sel_type]
+    if sel_al:           urgences=urgences[urgences["alerte"].isin(sel_al)]
 
-    st.markdown(f"<div style='font-size:12px;color:#8E8E93;margin-bottom:8px'>{len(urgences)} article(s) permanents nécessitant une action</div>", unsafe_allow_html=True)
+    # Trier GOLD en premier, puis par alerte
+    urgences = urgences.sort_values(["type_ca","alerte"], ascending=[True, True])
+
+    st.markdown(f"<div style='font-size:12px;color:#8E8E93;margin-bottom:8px'><strong>{len(urgences)}</strong> article(s) nécessitant une action · GOLD en priorité</div>", unsafe_allow_html=True)
 
     if urgences.empty:
         st.success("✅ Aucune urgence sur la sélection.")
     else:
-        disp3 = urgences[["Code article","lib_article","Libellé site","flux",
-                           "code_etat","saisonnalite","stock","ral","stock_immo","Alerte"]].copy()
-        disp3.columns = ["Code","Libellé","Magasin","Flux","Code état",
-                         "Saisonnalité","Stock","RAL","Stock immo (FCFA)","Alerte"]
-        disp3["Stock"]            = disp3["Stock"].apply(lambda x: int(x))
-        disp3["RAL"]              = disp3["RAL"].apply(lambda x: int(x))
-        disp3["Stock immo (FCFA)"]= disp3["Stock immo (FCFA)"].apply(lambda x: fmt(x) if x>0 else "—")
-        st.dataframe(disp3.sort_values("Alerte"), use_container_width=True, hide_index=True,
-                     column_config={
-                         "Flux":       st.column_config.TextColumn("Flux",  width="small"),
-                         "Code état":  st.column_config.TextColumn("État",  width="small"),
-                         "Saisonnalité": st.column_config.TextColumn("Saison",width="small"),
-                     })
+        disp3 = urgences[["Code article","lib_topca","type_ca","Libellé site",
+                           "flux","code_etat","stock","ral","alerte"]].copy()
+        disp3.columns = ["Code","Libellé","Type","Magasin","Flux","Code état","Stock","RAL","Alerte"]
+        disp3["Stock"] = disp3["Stock"].apply(lambda x: int(x))
+        disp3["RAL"]   = disp3["RAL"].apply(lambda x: int(x))
+        st.dataframe(
+            disp3, use_container_width=True, hide_index=True,
+            column_config={
+                "Type":      st.column_config.TextColumn("Type",      width="small"),
+                "Flux":      st.column_config.TextColumn("Flux",      width="small"),
+                "Code état": st.column_config.TextColumn("Code état", width="small"),
+                "Stock":     st.column_config.NumberColumn("Stock",   format="%d"),
+                "RAL":       st.column_config.NumberColumn("RAL",     format="%d"),
+            }
+        )
 
 # ═══ TAB 4 — ABSENTS ERP ══════════════════════════════════════════════════════
 with tab4:
-    if not absents:
+    if absents_df.empty:
         st.success("✅ Toutes les références Top CA sont présentes dans au moins une extraction.")
     else:
-        st.warning(f"⚠️ {len(absents)} référence(s) Top CA absentes de toutes les extractions ERP")
-        df_abs = pd.DataFrame({
-            "Code article": absents,
-            "Statut": "Absent ERP",
-            "Action suggérée": "Vérifier référentiel ou déréférencement non planifié"
-        })
-        st.dataframe(df_abs, use_container_width=True, hide_index=True)
+        st.warning(f"⚠️ {len(absents_df)} référence(s) Top CA absentes de toutes les extractions ERP")
+        disp4 = absents_df[["code","lib","type"]].copy()
+        disp4.columns = ["Code article","Libellé","Type"]
+        disp4["Action"] = "Vérifier référentiel ou déréférencement"
+        st.dataframe(disp4, use_container_width=True, hide_index=True)
 
 # ─── EXPORT ───────────────────────────────────────────────────────────────────
 st.markdown("---")
-with st.expander("📥 Export Excel — Synthèse · IM vs LO · Plan d'action · Stock immobilisé · Absents ERP"):
-    st.caption("5 onglets · Articles permanents · Code état 2 · Valorisation PMP")
+with st.expander("📥 Export Excel — Synthèse · IM vs LO · GOLD Ruptures · Plan d'action · Absents ERP"):
+    st.caption(f"5 onglets · {type_filtre} · Articles permanents · Détenu = stock > 0")
     if st.button("Générer le fichier Excel", type="primary"):
         with st.spinner("Génération…"):
-            buf = gen_excel(grp, grp_perm, taux_df, absents, top_codes)
+            buf = gen_excel(grp, taux_df, absents_df, type_filtre)
         st.download_button(
             "⬇️ Télécharger",
             data=buf,
-            file_name="SmartBuyer_Detention_TopCA.xlsx",
+            file_name=f"SmartBuyer_Detention_{type_filtre}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
