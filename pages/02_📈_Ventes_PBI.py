@@ -99,11 +99,9 @@ RED   = "#FF3B30"
 GREEN = "#34C759"
 AMBER = "#FF9500"
 
-PLOTLY_BASE = dict(
-    plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-    font=dict(family="-apple-system, Helvetica Neue, Arial", color="#3A3A3C", size=12),
-    margin=dict(t=16, b=16, l=8, r=8),
-)
+PL_BG   = "rgba(0,0,0,0)"
+PL_FONT = dict(family="-apple-system, Helvetica Neue, Arial", color="#3A3A3C", size=12)
+PL_GRID = "#F2F2F7"
 
 REQUIRED_COLS = {
     "Rayon":          ("Rayon de l'article",                    "ex: 00014 - EPICERIE"),
@@ -456,9 +454,10 @@ with tab1:
         marker_line_width=0,
     )
     fig.update_layout(
-        **PLOTLY_BASE, barmode="group", height=370,
+        plot_bgcolor=PL_BG, paper_bgcolor=PL_BG, font=PL_FONT,
+        barmode="group", height=370, margin=dict(t=16,b=16,l=8,r=8),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, font=dict(size=12)),
-        yaxis=dict(showgrid=True, gridcolor="#F2F2F7", title=""),
+        yaxis=dict(showgrid=True, gridcolor=PL_GRID, title=""),
         xaxis=dict(showgrid=False, title=""),
     )
     st.plotly_chart(fig, use_container_width=True)
@@ -482,8 +481,10 @@ with tab2:
         textposition="outside", marker_line_width=0,
     ))
     fig2.update_layout(
-        **PLOTLY_BASE, height=380, margin=dict(t=10,b=10,l=10,r=80),
-        xaxis=dict(title="Évolution CA %", ticksuffix="%", showgrid=True, gridcolor="#F2F2F7"),
+        plot_bgcolor=PL_BG, paper_bgcolor=PL_BG, font=PL_FONT,
+        height=380, margin=dict(t=10,b=10,l=10,r=80),
+        xaxis=dict(title="Évolution CA %", ticksuffix="%", showgrid=True, gridcolor=PL_GRID),
+        yaxis=dict(showgrid=False, title=""),
     )
     fig2.add_vline(x=0, line_width=1, line_color="#E5E5EA")
     st.plotly_chart(fig2, use_container_width=True)
@@ -508,9 +509,11 @@ with tab3:
                       orientation="h", color="rayon", color_discrete_map=COLORS,
                       labels={"evol_ca":"Évol CA %","famille":""})
         fig3.update_layout(
-            **PLOTLY_BASE, height=max(340, len(fam_recul.head(20))*36+80),
+            plot_bgcolor=PL_BG, paper_bgcolor=PL_BG, font=PL_FONT,
+            height=max(340, len(fam_recul.head(20))*36+80),
+            margin=dict(t=16,b=16,l=8,r=8),
             legend=dict(orientation="h", yanchor="bottom", y=1.02, font=dict(size=12)),
-            xaxis=dict(ticksuffix="%", showgrid=True, gridcolor="#F2F2F7"),
+            xaxis=dict(ticksuffix="%", showgrid=True, gridcolor=PL_GRID),
             yaxis=dict(showgrid=False, title=""),
         )
         fig3.add_vline(x=0, line_width=1, line_color="#E5E5EA")
