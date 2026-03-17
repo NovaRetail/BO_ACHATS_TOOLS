@@ -586,40 +586,57 @@ with tab1:
 
     st.dataframe(disp1, use_container_width=True, hide_index=True)
 
-    # Graphique
+    # Graphique — barres groupées GOLD / Global
     try:
         import plotly.graph_objects as go
-        fig = go.Figure()
         s = taux_all.sort_values("taux")
+        fig = go.Figure()
+
+        # Barre GOLD
+        if type_filtre in ("Tous", "GOLD"):
+            gold_vals = s["taux_gold"].tolist()
+            fig.add_bar(
+                x=gold_vals, y=s["site"].tolist(),
+                name="GOLD", orientation="h",
+                marker_color="#FFD700",
+                marker_line_color="#B8860B", marker_line_width=0.8,
+                opacity=0.9,
+                text=[f"{v:.1f}%" if v is not None and v==v else "" for v in gold_vals],
+                textposition="inside",
+                textfont=dict(color="#7A5800", size=11),
+                width=0.35,
+            )
+
+        # Barre taux global
         fig.add_bar(
             x=s["taux"].tolist(), y=s["site"].tolist(),
             name="Taux global", orientation="h",
-            marker_color=[color_taux(v,cible) for v in s["taux"]],
-            marker_line_width=0,
-            text=[f"{v:.1f}%" if v else "—" for v in s["taux"]],
+            marker_color=[color_taux(v, cible) for v in s["taux"]],
+            marker_line_width=0, opacity=0.9,
+            text=[f"{v:.1f}%" if v else "" for v in s["taux"]],
             textposition="outside",
+            textfont=dict(size=12),
+            width=0.35,
         )
-        if type_filtre in ("Tous","GOLD"):
-            fig.add_bar(
-                x=s["taux_gold"].tolist(), y=s["site"].tolist(),
-                name="GOLD", orientation="h",
-                marker_color="rgba(184,134,11,0.35)",
-                marker_line_width=0,
-                text=[f"G:{v:.0f}%" if v else "" for v in s["taux_gold"]],
-                textposition="inside",
-            )
-        fig.add_vline(x=cible, line_width=1.5, line_dash="dash", line_color="#007AFF",
-                      annotation_text=f"Cible {cible}%", annotation_font_color="#007AFF")
+
+        # Ligne cible
+        fig.add_vline(x=cible, line_width=2, line_dash="dot", line_color="#007AFF",
+                      annotation_text=f" Cible {cible}%",
+                      annotation_position="top right",
+                      annotation_font=dict(color="#007AFF", size=11))
+
         fig.update_layout(
             plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-            font=dict(family="-apple-system, Helvetica Neue", color="#3A3A3C", size=12),
-            height=max(280, n_sites*56+80),
-            barmode="overlay",
-            margin=dict(t=20,b=20,l=10,r=80),
-            legend=dict(orientation="h", yanchor="bottom", y=1.02),
+            font=dict(family="-apple-system, Helvetica Neue, Arial", color="#3A3A3C", size=12),
+            height=max(300, n_sites*76+80),
+            barmode="group", bargap=0.28, bargroupgap=0.06,
+            margin=dict(t=30, b=20, l=10, r=90),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0,
+                        bgcolor="rgba(0,0,0,0)", font=dict(size=12)),
             xaxis=dict(title="Taux de détention (%)", ticksuffix="%",
-                       showgrid=True, gridcolor="#F2F2F7", range=[0,115]),
-            yaxis=dict(showgrid=False, title=""),
+                       showgrid=True, gridcolor="#F2F2F7", gridwidth=0.5,
+                       range=[0, 115], zeroline=False),
+            yaxis=dict(showgrid=False, title="", tickfont=dict(size=11)),
         )
         st.plotly_chart(fig, use_container_width=True)
     except ImportError:
