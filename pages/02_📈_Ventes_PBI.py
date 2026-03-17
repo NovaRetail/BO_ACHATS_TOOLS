@@ -103,8 +103,6 @@ PLOTLY_BASE = dict(
     plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
     font=dict(family="-apple-system, Helvetica Neue, Arial", color="#3A3A3C", size=12),
     margin=dict(t=16, b=16, l=8, r=8),
-    yaxis=dict(showgrid=True, gridcolor="#F2F2F7"),
-    xaxis=dict(showgrid=False),
 )
 
 REQUIRED_COLS = {
@@ -460,6 +458,8 @@ with tab1:
     fig.update_layout(
         **PLOTLY_BASE, barmode="group", height=370,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, font=dict(size=12)),
+        yaxis=dict(showgrid=True, gridcolor="#F2F2F7", title=""),
+        xaxis=dict(showgrid=False, title=""),
     )
     st.plotly_chart(fig, use_container_width=True)
 
@@ -511,6 +511,7 @@ with tab3:
             **PLOTLY_BASE, height=max(340, len(fam_recul.head(20))*36+80),
             legend=dict(orientation="h", yanchor="bottom", y=1.02, font=dict(size=12)),
             xaxis=dict(ticksuffix="%", showgrid=True, gridcolor="#F2F2F7"),
+            yaxis=dict(showgrid=False, title=""),
         )
         fig3.add_vline(x=0, line_width=1, line_color="#E5E5EA")
         st.plotly_chart(fig3, use_container_width=True)
