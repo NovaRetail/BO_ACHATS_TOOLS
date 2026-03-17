@@ -120,11 +120,22 @@ def load_stock(file_bytes, file_name):
     return raw
 
 @st.cache_data(show_spinner=False)
-def load_topca(byt):
+def load_topca(byt, fname=""):
+    """
+    Lit la liste Top CA.
+    Accepte CSV avec ou sans en-tête, séparateur , ou ;
+    Prend toujours la 1ère colonne comme code article.
+    """
     try:
-        df = pd.read_csv(BytesIO(byt), header=None, names=["Code article"], dtype=str)
-    except Exception:
-        df = pd.read_excel(BytesIO(byt), header=None, names=["Code article"], dtype=str)
+        raw = byt.decode("utf-8-sig", errors="replace")
+        sep = ";" if raw.count(";") > raw.count(",") else ","
+        df  = pd.read_csv(BytesIO(byt), sep=sep, encoding="utf-8-sig", dtype=str)
+        # Prendre la 1ère colonne quelle que soit son nom
+        df  = df.iloc[:, [0]].copy()
+        df.columns = ["Code article"]
+    except Exception as e:
+        st.error(f"Erreur lecture liste Top CA : {e}")
+        return set()
     df["Code article"] = norm_code(df["Code article"])
     return set(df["Code article"].dropna().unique())
 
@@ -410,7 +421,7 @@ if not f_topca or not f_stocks:
 
 # ─── TRAITEMENT ───────────────────────────────────────────────────────────────
 with st.spinner("Lecture des fichiers…"):
-    top_codes = load_topca(f_topca.read())
+    top_codes = load_topca(f_topca.read(), f_topca.name)
     stock_bytes = f_stocks.read()
     df_stock  = load_stock(stock_bytes, f_stocks.name)
 
