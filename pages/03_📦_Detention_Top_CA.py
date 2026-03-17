@@ -123,21 +123,24 @@ def load_stock(file_bytes, file_name):
 def load_topca(byt, fname=""):
     """
     Lit la liste Top CA.
-    Accepte CSV avec ou sans en-tête, séparateur , ou ;
+    Gère automatiquement les encodages UTF-8, UTF-8-BOM, latin-1, Windows-1252.
     Prend toujours la 1ère colonne comme code article.
     """
-    try:
-        raw = byt.decode("utf-8-sig", errors="replace")
-        sep = ";" if raw.count(";") > raw.count(",") else ","
-        df  = pd.read_csv(BytesIO(byt), sep=sep, encoding="utf-8-sig", dtype=str)
-        # Prendre la 1ère colonne quelle que soit son nom
-        df  = df.iloc[:, [0]].copy()
-        df.columns = ["Code article"]
-    except Exception as e:
-        st.error(f"Erreur lecture liste Top CA : {e}")
-        return set()
-    df["Code article"] = norm_code(df["Code article"])
-    return set(df["Code article"].dropna().unique())
+    for encoding in ("utf-8-sig", "utf-8", "latin-1", "cp1252"):
+        try:
+            raw = byt.decode(encoding, errors="strict")
+            sep = ";" if raw.count(";") > raw.count(",") else ","
+            df  = pd.read_csv(BytesIO(byt), sep=sep, encoding=encoding, dtype=str)
+            df  = df.iloc[:, [0]].copy()
+            df.columns = ["Code article"]
+            df["Code article"] = norm_code(df["Code article"])
+            codes = set(df["Code article"].dropna().unique())
+            if codes:
+                return codes
+        except Exception:
+            continue
+    st.error("Erreur lecture liste Top CA : encodage non reconnu. Sauvegarder le fichier en UTF-8 ou CSV standard.")
+    return set()
 
 # ─── CALCUL PRINCIPAL ────────────────────────────────────────────────────────
 def compute(df_stock, top_codes):
