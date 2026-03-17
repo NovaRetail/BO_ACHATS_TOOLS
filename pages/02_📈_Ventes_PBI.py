@@ -233,11 +233,12 @@ def gen_excel(df_curr, df_prev, p_curr, p_prev):
         for i,h in enumerate(headers,1):
             c = ws.cell(3,i); c.fill=HDR_F; c.font=HDR_T; c.alignment=CTR
         for row in data_rows: ws.append(row)
+        NEU_F = PatternFill("solid", fgColor="FFFFFF")
         ec = [i+1 for i,h in enumerate(headers) if "évol" in h.lower()]
         for r in ws.iter_rows(min_row=4, max_row=ws.max_row):
             for cell in r:
                 if cell.column in ec and isinstance(cell.value,(int,float)):
-                    cell.fill = RED_F if cell.value<=-10 else AMB_F if cell.value<=-5 else GRN_F if cell.value>=5 else cell.fill
+                    cell.fill = RED_F if cell.value<=-10 else AMB_F if cell.value<=-5 else GRN_F if cell.value>=5 else NEU_F
         for col in ws.columns:
             ws.column_dimensions[get_column_letter(col[0].column)].width = max(len(str(col[0].value or ""))+4,12)
 
