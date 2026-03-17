@@ -625,21 +625,21 @@ with tab1:
         # Légende
         lx = LBL_W
         lines.append(f'<rect x="{lx}" y="10" width="14" height="10" rx="5" fill="url(#gg)" opacity=".9"/>')
-        lines.append(f'<text x="{lx+18}" y="19" font-size="11" fill="var(--color-text-secondary)">Taux global</text>')
+        lines.append(f'<text x="{lx+18}" y="19" font-size="10" fill="var(--color-text-secondary)">Taux global</text>')
         if show_gold:
             lines.append(f'<rect x="{lx+110}" y="10" width="14" height="10" rx="5" fill="url(#gd)" opacity=".9"/>')
-            lines.append(f'<text x="{lx+128}" y="19" font-size="11" fill="var(--color-text-secondary)">GOLD</text>')
+            lines.append(f'<text x="{lx+128}" y="19" font-size="10" fill="var(--color-text-secondary)">GOLD</text>')
 
         # Grille + labels axe
         for pct in [0, 20, 40, 60, 80, 100]:
             x = LBL_W + pct * SCALE
             lines.append(f'<line x1="{x:.1f}" y1="28" x2="{x:.1f}" y2="{SVG_H-26}" stroke="var(--color-border-tertiary)" stroke-width="0.5"/>')
-            lines.append(f'<text x="{x:.1f}" y="38" text-anchor="middle" font-size="10" fill="var(--color-text-tertiary)">{pct}%</text>')
+            lines.append(f'<text x="{x:.1f}" y="38" text-anchor="middle" font-size="10" fill="var(--color-text-tertiary)" font-size="9">{pct}%</text>')
 
         # Ligne cible
         xc = LBL_W + cible * SCALE
-        lines.append(f'<line x1="{xc:.1f}" y1="26" x2="{xc:.1f}" y2="{SVG_H-26}" stroke="#007AFF" stroke-width="1.5" stroke-dasharray="4,3"/>')
-        lines.append(f'<text x="{xc+4:.1f}" y="38" font-size="10" fill="#007AFF" font-weight="600">Cible {cible}%</text>')
+        lines.append(f'<line x1="{xc:.1f}" y1="26" x2="{xc:.1f}" y2="{SVG_H-14}" stroke="#007AFF" stroke-width="1.5" stroke-dasharray="4,3"/>')
+        lines.append(f'<text x="{xc:.1f}" y="{SVG_H-2}" text-anchor="middle" font-size="9" fill="#007AFF" font-weight="600">Cible {cible}%</text>')
 
         # Barres
         for i, row in enumerate(rows):
@@ -656,7 +656,7 @@ with tab1:
             label_y = cy_global + BAR_G // 2 + (BAR_g // 2 + GAP // 2 if show_gold else 0) + 4
             lines.append(
                 f'<text x="{LBL_W-10}" y="{label_y}" text-anchor="end" font-size="11"'
-                f' fill="var(--color-text-primary)" font-weight="500">{site}</text>'
+                f' fill="var(--color-text-primary)" font-weight="500" font-size="10">{site}</text>'
             )
 
             def rr(bx, by, bw, bh, r, fill_ref, opacity=1.0):
@@ -676,7 +676,7 @@ with tab1:
                 tx = LBL_W + bw + 6
                 lines.append(
                     f'<text x="{tx:.1f}" y="{cy_global + BAR_G//2 + 4}"'
-                    f' font-size="12" fill="var(--color-text-primary)" font-weight="600">{v:.1f}%</text>'
+                    f' font-size="11" fill="var(--color-text-primary)" font-weight="600">{v:.1f}%</text>'
                 )
 
             # Barre GOLD
@@ -689,17 +689,17 @@ with tab1:
                     if bwg > 55:
                         lines.append(
                             f'<text x="{LBL_W + bwg / 2:.1f}" y="{cy_gold + BAR_g//2 + 3}"'
-                            f' text-anchor="middle" font-size="10" fill="#7A5800" font-weight="600">{vg:.1f}%</text>'
+                            f' text-anchor="middle" font-size="9" fill="#7A5800" font-weight="600">{vg:.1f}%</text>'
                         )
                     else:
                         lines.append(
                             f'<text x="{LBL_W + bwg + 5:.1f}" y="{cy_gold + BAR_g//2 + 3}"'
-                            f' font-size="10" fill="#B8860B" font-weight="600">{vg:.1f}%</text>'
+                            f' font-size="9" fill="#B8860B" font-weight="600">{vg:.1f}%</text>'
                         )
 
         # Axe bas
         lines.append(f'<line x1="{LBL_W}" y1="{SVG_H-26}" x2="{LBL_W+W}" y2="{SVG_H-26}" stroke="var(--color-border-tertiary)" stroke-width="0.5"/>')
-        lines.append(f'<text x="{LBL_W + W/2:.1f}" y="{SVG_H-12}" text-anchor="middle" font-size="11" fill="var(--color-text-tertiary)">Taux de détention (%)</text>')
+        lines.append(f'<text x="{LBL_W + W/2:.1f}" y="{SVG_H-12}" text-anchor="middle" font-size="10" fill="var(--color-text-tertiary)">Taux de détention (%)</text>')
         lines.append("</svg>")
         return "".join(lines)
 
