@@ -3,27 +3,13 @@ import pandas as pd
 import numpy as np
 import unicodedata
 import io
-from datetime import date
 
 st.set_page_config(page_title="Suivi Implantation", layout="wide")
 
-TODAY = date.today().strftime("%d %b %Y")
-
 # ==============================
-# HEADER
+# NORMALISATION COLONNES
 # ==============================
-st.markdown(f"""
-<div style="background:#0f1729;color:white;padding:14px 20px;
-border-radius:8px;margin-bottom:20px;display:flex;justify-content:space-between">
-<b>📦 Suivi Implantation — Data Quality Monitor</b>
-<span style="color:#94a3b8">{TODAY}</span>
-</div>
-""", unsafe_allow_html=True)
-
-# ==============================
-# CLEAN COLUMNS
-# ==============================
-def clean_columns(df):
+def normalize_columns(df):
     df.columns = [
         unicodedata.normalize('NFKD', str(c))
         .encode('ascii', 'ignore')
@@ -35,88 +21,91 @@ def clean_columns(df):
     return df
 
 # ==============================
-# REMOVE DUPLICATES
-# ==============================
-def remove_duplicate_columns(df):
-    return df.loc[:, ~df.columns.duplicated()]
-
-# ==============================
-# FIND COLUMN
-# ==============================
-def find_column(df, keywords):
-    for col in df.columns:
-        for k in keywords:
-            if k in col:
-                return col
-    return None
-
-# ==============================
-# MAPPING SAFE
-# ==============================
-def auto_map_columns(df):
-    return {
-        "ARTICLE": find_column(df, ["ARTICLE"]),
-        "SITE": find_column(df, ["SITE", "MAGASIN"]),
-        "STOCK": find_column(df, ["STOCK"]),
-        "RAL": find_column(df, ["RAL"]),
-    }
-
-# ==============================
-# SAFE SKU (ULTRA ROBUST)
+# SAFE SKU (corrigé)
 # ==============================
 def safe_sku(series):
     if isinstance(series, pd.DataFrame):
         series = series.iloc[:, 0]
 
-    if hasattr(series, "ndim") and series.ndim > 1:
-        series = series.iloc[:, 0]
-
-    result = []
-    for val in series:
-        try:
-            v = str(val)
-            v = v.replace(".0", "")
-            v = v.strip()
-            v = v.zfill(8)
-        except:
-            v = "00000000"
-        result.append(v)
-
-    return pd.Series(result)
+    return series.apply(lambda x: str(x).replace(".0", "").strip().zfill(8)[:8])
 
 # ==============================
-# DATA HEALTH CHECK
-# ==============================
-def data_health_check(df, name="Fichier"):
-    score = 100
-    issues = []
-
-    # colonnes dupliquées
-    dup_cols = df.columns[df.columns.duplicated()].tolist()
-    if dup_cols:
-        issues.append(f"Colonnes dupliquées : {dup_cols}")
-        score -= 20
-
-    # colonnes vides
-    empty_cols = df.columns[df.isna().all()].tolist()
-    if empty_cols:
-        issues.append(f"Colonnes vides : {empty_cols}")
-        score -= 10
-
-    # taille dataset
-    if df.shape[0] == 0:
-        issues.append("Fichier vide")
-        score -= 50
-
-    return score, issues
-
-# ==============================
-# FILE LOADER
+# LECTURE FICHIER
 # ==============================
 def read_file(file):
     if file.name.endswith(".xlsx"):
         return pd.read_excel(file)
     return pd.read_csv(file, sep=None, engine="python", encoding="latin1")
+
+# ==============================
+# LOAD T1
+# ==============================
+def load_t1(file):
+    df = read_file(file)
+    df = normalize_columns(df)
+
+    # 🔥 fix colonnes dupliquées
+    df = df.loc[:, ~df.columns.duplicated()]
+
+    if "CODE ARTICLE" not in df.columns:
+        st.error("❌ Colonne CODE ARTICLE manquante dans T1")
+        st.stop()
+
+    df["SKU"] = safe_sku(df["CODE ARTICLE"])
+    return df
+
+# ==============================
+# LOAD STOCK
+# ==============================
+def load_stock(files):
+    dfs = []
+
+    for f in files:
+        df = read_file(f)
+        df = normalize_columns(df)
+
+        # 🔥 fix colonnes dupliquées
+        df = df.loc[:, ~df.columns.duplicated()]
+
+        if "CODE ARTICLE" not in df.columns:
+            st.warning(f"{f.name} ignoré (pas de CODE ARTICLE)")
+            continue
+
+        df["SKU"] = safe_sku(df["CODE ARTICLE"])
+
+        df["STOCK"] = pd.to_numeric(df.get("STOCK", 0), errors="coerce").fillna(0)
+        df["RAL"] = pd.to_numeric(df.get("RAL", 0), errors="coerce").fillna(0)
+
+        dfs.append(df)
+
+    if not dfs:
+        st.error("❌ Aucun fichier exploitable")
+        st.stop()
+
+    return pd.concat(dfs)
+
+# ==============================
+# DATA QUALITY (discret)
+# ==============================
+def compute_dq(df):
+    score = 100
+    issues = []
+
+    dup = df.columns[df.columns.duplicated()]
+    if len(dup) > 0:
+        score -= 10
+        issues.append("colonnes dupliquées")
+
+    null_rate = df.isna().mean().mean()
+    if null_rate > 0.15:
+        score -= 15
+        issues.append("valeurs manquantes")
+
+    if len(df) == 0:
+        score -= 50
+        issues.append("dataset vide")
+
+    return max(score, 0), issues
 
 # ==============================
 # SIDEBAR
@@ -126,84 +115,49 @@ with st.sidebar:
     t1_file = st.file_uploader("Fichier T1")
     stock_files = st.file_uploader("Stocks", accept_multiple_files=True)
 
-# ==============================
-# LOAD T1
-# ==============================
 if not t1_file:
     st.stop()
 
-t1 = read_file(t1_file)
-t1 = clean_columns(t1)
-t1 = remove_duplicate_columns(t1)
-
-score, issues = data_health_check(t1, "T1")
-
-st.subheader("🧠 Data Quality T1")
-st.metric("Score qualité", f"{score}%")
-
-if issues:
-    for i in issues:
-        st.warning(i)
-else:
-    st.success("Fichier propre")
-
-map_t1 = auto_map_columns(t1)
-
-if map_t1["ARTICLE"] is None:
-    st.error("❌ Colonne ARTICLE non détectée")
-    st.write(list(t1.columns))
-    st.stop()
-
-t1 = t1.rename(columns={map_t1["ARTICLE"]: "ARTICLE"})
-t1["SKU"] = safe_sku(t1["ARTICLE"])
+# ==============================
+# LOAD DATA
+# ==============================
+t1 = load_t1(t1_file)
+df_stock = load_stock(stock_files)
 
 # ==============================
-# LOAD STOCK
+# DATA QUALITY CARD
 # ==============================
-dfs = []
+dq_score, dq_issues = compute_dq(df_stock)
 
-for f in stock_files:
-    df = read_file(f)
-    df = clean_columns(df)
-    df = remove_duplicate_columns(df)
+color = "#059669" if dq_score >= 85 else "#0284c7" if dq_score >= 60 else "#dc2626"
+bg    = "#ecfdf5" if dq_score >= 85 else "#f0f9ff" if dq_score >= 60 else "#fef2f2"
 
-    score, issues = data_health_check(df, f.name)
-
-    st.subheader(f"🧠 Data Quality {f.name}")
-    st.metric("Score", f"{score}%")
-
-    for i in issues:
-        st.warning(i)
-
-    mapping = auto_map_columns(df)
-
-    if mapping["ARTICLE"] is None:
-        st.error(f"{f.name} ignoré (pas de colonne ARTICLE)")
-        continue
-
-    df = df.rename(columns={
-        mapping["ARTICLE"]: "ARTICLE",
-        mapping["SITE"]: "SITE",
-        mapping["STOCK"]: "STOCK",
-        mapping["RAL"]: "RAL"
-    })
-
-    df["SKU"] = safe_sku(df["ARTICLE"])
-    df["STOCK"] = pd.to_numeric(df.get("STOCK", 0), errors="coerce").fillna(0)
-    df["RAL"] = pd.to_numeric(df.get("RAL", 0), errors="coerce").fillna(0)
-
-    dfs.append(df)
-
-if not dfs:
-    st.error("❌ Aucun fichier exploitable")
-    st.stop()
-
-stock = pd.concat(dfs)
+st.markdown(f"""
+<div style="
+background:{bg};
+border:1px solid #e2e8f0;
+border-left:4px solid {color};
+border-radius:8px;
+padding:10px 14px;
+margin-bottom:12px;
+max-width:320px;
+">
+    <div style="font-size:10px;color:#64748b;font-weight:700;">
+        DATA QUALITY
+    </div>
+    <div style="font-size:22px;font-weight:800;color:{color};">
+        {dq_score}%
+    </div>
+    <div style="font-size:10px;color:#64748b;">
+        {" · ".join(dq_issues) if dq_issues else "OK"}
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
 # ==============================
 # MERGE
 # ==============================
-df = stock.merge(t1[["SKU"]], on="SKU", how="inner")
+df = df_stock.merge(t1[["SKU"]], on="SKU", how="inner")
 
 if df.empty:
     st.warning("⚠️ Aucun matching SKU")
@@ -229,17 +183,15 @@ ok = (df["Statut"] == "Implanté").sum()
 att = (df["Statut"] == "Attente").sum()
 alert = (df["Statut"] == "Alerte").sum()
 
-pct = int(ok / total * 100) if total > 0 else 0
-
 c1, c2, c3 = st.columns(3)
 c1.metric("Implanté", ok)
 c2.metric("Attente", att)
 c3.metric("Alerte", alert)
 
-st.progress(pct / 100)
+st.progress(ok / total if total > 0 else 0)
 
 # ==============================
-# TABLE MAGASIN
+# TABLE MAGASINS
 # ==============================
 pivot = (
     df.groupby(["SITE", "Statut"])
@@ -252,6 +204,18 @@ pivot["Total"] = pivot.sum(axis=1, numeric_only=True)
 pivot["Taux (%)"] = (pivot.get("Implanté", 0) / pivot["Total"] * 100).round(0)
 
 st.dataframe(pivot, use_container_width=True)
+
+# ==============================
+# ALERTES
+# ==============================
+st.subheader("🚨 Alertes")
+
+df_alert = df[df["Statut"] == "Alerte"]
+
+if df_alert.empty:
+    st.success("Aucune alerte")
+else:
+    st.dataframe(df_alert, use_container_width=True)
 
 # ==============================
 # EXPORT EXCEL
