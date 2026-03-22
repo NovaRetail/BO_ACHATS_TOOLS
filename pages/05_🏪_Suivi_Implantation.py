@@ -15,13 +15,13 @@ TODAY = date.today().strftime("%d %b %Y")
 st.markdown(f"""
 <div style="background:#0f1729;color:white;padding:14px 20px;
 border-radius:8px;margin-bottom:20px;display:flex;justify-content:space-between">
-<b>📦 Suivi Implantation — Version Safe</b>
+<b>📦 Suivi Implantation — Data Quality Monitor</b>
 <span style="color:#94a3b8">{TODAY}</span>
 </div>
 """, unsafe_allow_html=True)
 
 # ==============================
-# AUTO CLEAN DATA
+# CLEAN COLUMNS
 # ==============================
 def clean_columns(df):
     df.columns = [
@@ -34,6 +34,15 @@ def clean_columns(df):
     ]
     return df
 
+# ==============================
+# REMOVE DUPLICATES
+# ==============================
+def remove_duplicate_columns(df):
+    return df.loc[:, ~df.columns.duplicated()]
+
+# ==============================
+# FIND COLUMN
+# ==============================
 def find_column(df, keywords):
     for col in df.columns:
         for k in keywords:
@@ -41,6 +50,9 @@ def find_column(df, keywords):
                 return col
     return None
 
+# ==============================
+# MAPPING SAFE
+# ==============================
 def auto_map_columns(df):
     return {
         "ARTICLE": find_column(df, ["ARTICLE"]),
@@ -50,12 +62,16 @@ def auto_map_columns(df):
     }
 
 # ==============================
-# SAFE SKU (ULTRA ROBUSTE)
+# SAFE SKU (ULTRA ROBUST)
 # ==============================
 def safe_sku(series):
-    series = pd.Series(series)
-    result = []
+    if isinstance(series, pd.DataFrame):
+        series = series.iloc[:, 0]
 
+    if hasattr(series, "ndim") and series.ndim > 1:
+        series = series.iloc[:, 0]
+
+    result = []
     for val in series:
         try:
             v = str(val)
@@ -69,24 +85,30 @@ def safe_sku(series):
     return pd.Series(result)
 
 # ==============================
-# INTRO
+# DATA HEALTH CHECK
 # ==============================
-st.markdown("""
-<div style="background:#f8fafc;border:1px solid #e2e8f0;
-padding:18px;border-radius:10px;margin-bottom:20px">
+def data_health_check(df, name="Fichier"):
+    score = 100
+    issues = []
 
-<b>📊 Module intelligent :</b><br>
-Correction automatique des fichiers (colonnes, accents, formats)
+    # colonnes dupliquées
+    dup_cols = df.columns[df.columns.duplicated()].tolist()
+    if dup_cols:
+        issues.append(f"Colonnes dupliquées : {dup_cols}")
+        score -= 20
 
-<b>Statuts :</b>
-<ul>
-<li>Implanté = stock > 0</li>
-<li>Attente = stock = 0 & RAL > 0</li>
-<li>Alerte = stock = 0 & RAL = 0</li>
-</ul>
+    # colonnes vides
+    empty_cols = df.columns[df.isna().all()].tolist()
+    if empty_cols:
+        issues.append(f"Colonnes vides : {empty_cols}")
+        score -= 10
 
-</div>
-""", unsafe_allow_html=True)
+    # taille dataset
+    if df.shape[0] == 0:
+        issues.append("Fichier vide")
+        score -= 50
+
+    return score, issues
 
 # ==============================
 # FILE LOADER
@@ -108,40 +130,55 @@ with st.sidebar:
 # LOAD T1
 # ==============================
 if not t1_file:
-    st.info("Charge le fichier T1")
     st.stop()
 
 t1 = read_file(t1_file)
 t1 = clean_columns(t1)
+t1 = remove_duplicate_columns(t1)
+
+score, issues = data_health_check(t1, "T1")
+
+st.subheader("🧠 Data Quality T1")
+st.metric("Score qualité", f"{score}%")
+
+if issues:
+    for i in issues:
+        st.warning(i)
+else:
+    st.success("Fichier propre")
 
 map_t1 = auto_map_columns(t1)
 
 if map_t1["ARTICLE"] is None:
     st.error("❌ Colonne ARTICLE non détectée")
-    st.write("Colonnes trouvées :", list(t1.columns))
+    st.write(list(t1.columns))
     st.stop()
 
 t1 = t1.rename(columns={map_t1["ARTICLE"]: "ARTICLE"})
 t1["SKU"] = safe_sku(t1["ARTICLE"])
 
-st.success("✅ T1 chargé")
-
 # ==============================
 # LOAD STOCK
 # ==============================
-if not stock_files:
-    st.info("Charge les fichiers stock")
-    st.stop()
-
 dfs = []
 
 for f in stock_files:
     df = read_file(f)
     df = clean_columns(df)
+    df = remove_duplicate_columns(df)
+
+    score, issues = data_health_check(df, f.name)
+
+    st.subheader(f"🧠 Data Quality {f.name}")
+    st.metric("Score", f"{score}%")
+
+    for i in issues:
+        st.warning(i)
 
     mapping = auto_map_columns(df)
 
     if mapping["ARTICLE"] is None:
+        st.error(f"{f.name} ignoré (pas de colonne ARTICLE)")
         continue
 
     df = df.rename(columns={
@@ -151,21 +188,17 @@ for f in stock_files:
         mapping["RAL"]: "RAL"
     })
 
-    df["ARTICLE"] = df["ARTICLE"].fillna("")
     df["SKU"] = safe_sku(df["ARTICLE"])
-
     df["STOCK"] = pd.to_numeric(df.get("STOCK", 0), errors="coerce").fillna(0)
     df["RAL"] = pd.to_numeric(df.get("RAL", 0), errors="coerce").fillna(0)
 
     dfs.append(df)
 
 if not dfs:
-    st.error("❌ Aucun fichier stock valide")
+    st.error("❌ Aucun fichier exploitable")
     st.stop()
 
 stock = pd.concat(dfs)
-
-st.success("✅ Stock chargé")
 
 # ==============================
 # MERGE
@@ -173,7 +206,7 @@ st.success("✅ Stock chargé")
 df = stock.merge(t1[["SKU"]], on="SKU", how="inner")
 
 if df.empty:
-    st.warning("⚠️ Aucun matching SKU entre T1 et stock")
+    st.warning("⚠️ Aucun matching SKU")
     st.stop()
 
 # ==============================
@@ -199,14 +232,14 @@ alert = (df["Statut"] == "Alerte").sum()
 pct = int(ok / total * 100) if total > 0 else 0
 
 c1, c2, c3 = st.columns(3)
-c1.metric("✅ Implanté", ok)
-c2.metric("🚚 Attente", att)
-c3.metric("🚨 Alerte", alert)
+c1.metric("Implanté", ok)
+c2.metric("Attente", att)
+c3.metric("Alerte", alert)
 
 st.progress(pct / 100)
 
 # ==============================
-# PAR MAGASIN
+# TABLE MAGASIN
 # ==============================
 pivot = (
     df.groupby(["SITE", "Statut"])
@@ -218,22 +251,7 @@ pivot = (
 pivot["Total"] = pivot.sum(axis=1, numeric_only=True)
 pivot["Taux (%)"] = (pivot.get("Implanté", 0) / pivot["Total"] * 100).round(0)
 
-pivot["Taux (%)"] = pivot["Taux (%)"].astype(str) + "%"
-
-st.subheader("🏪 Performance magasins")
 st.dataframe(pivot, use_container_width=True)
-
-# ==============================
-# ALERTES
-# ==============================
-st.subheader("🚨 Articles bloqués")
-
-df_alert = df[df["Statut"] == "Alerte"]
-
-if df_alert.empty:
-    st.success("✅ Aucune alerte")
-else:
-    st.dataframe(df_alert, use_container_width=True)
 
 # ==============================
 # EXPORT EXCEL
@@ -242,34 +260,16 @@ def build_excel(df, pivot):
     output = io.BytesIO()
 
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-
-        # Résumé
-        resume = pd.DataFrame({
-            "Indicateur": ["Implanté", "Attente", "Alerte"],
-            "Valeur": [
-                (df["Statut"] == "Implanté").sum(),
-                (df["Statut"] == "Attente").sum(),
-                (df["Statut"] == "Alerte").sum()
-            ]
-        })
-        resume.to_excel(writer, sheet_name="Résumé", index=False)
-
-        # Magasins
+        df.to_excel(writer, sheet_name="Detail", index=False)
         pivot.to_excel(writer, sheet_name="Magasins", index=False)
-
-        # Alertes
         df[df["Statut"] == "Alerte"].to_excel(writer, sheet_name="Alertes", index=False)
-
-        # Détail
-        df.to_excel(writer, sheet_name="Détail", index=False)
 
     return output.getvalue()
 
-# Bouton téléchargement
 excel_file = build_excel(df, pivot)
 
 st.download_button(
-    label="📥 Télécharger le rapport Excel",
+    label="📥 Télécharger Excel",
     data=excel_file,
     file_name="rapport_implantation.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
