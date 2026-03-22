@@ -6,8 +6,11 @@ from datetime import date
 import plotly.express as px
 import plotly.graph_objects as go
 
+# ══════════════════════════════════════════════════════════════════════════════
+# CONFIG
+# ══════════════════════════════════════════════════════════════════════════════
 st.set_page_config(
-    page_title="Dashboard Implantation COMEX",
+    page_title="Dashboard Implantation COPIL",
     page_icon="🏪",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -22,47 +25,59 @@ TODAY_FILE = TODAY.strftime("%Y%m%d")
 # ══════════════════════════════════════════════════════════════════════════════
 st.markdown("""
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+
 :root{
   --bg:#f6f8fc;
-  --card:#ffffff;
+  --surface:#ffffff;
   --border:#e2e8f0;
   --text:#0f172a;
   --muted:#64748b;
+
   --green:#059669;
   --blue:#2563eb;
+  --cyan:#0284c7;
   --amber:#d97706;
   --red:#dc2626;
+
   --green-bg:#ecfdf5;
   --blue-bg:#eff6ff;
+  --cyan-bg:#f0f9ff;
   --amber-bg:#fffbeb;
   --red-bg:#fef2f2;
 }
+
 html, body, [class*="css"]{
-  font-family: Inter, sans-serif !important;
+  font-family:'Inter', sans-serif !important;
+  color:var(--text) !important;
 }
 .main, section[data-testid="stMain"]{
-  background: linear-gradient(180deg,#f8fafc 0%, #f6f8fc 100%) !important;
+  background:linear-gradient(180deg,#f8fafc 0%, #f6f8fc 100%) !important;
 }
 .block-container{
-  max-width: 1600px !important;
-  padding-top: 1rem !important;
-  padding-bottom: 2rem !important;
+  max-width:1600px !important;
+  padding-top:1rem !important;
+  padding-bottom:2.5rem !important;
 }
 header[data-testid="stHeader"], #MainMenu, footer{
   display:none !important;
 }
+section[data-testid="stSidebar"]{
+  background:linear-gradient(180deg,#ffffff 0%, #f8fbff 100%) !important;
+  border-right:1px solid var(--border) !important;
+}
 .topbar{
   background:linear-gradient(135deg,#0f172a,#1e293b);
   border-radius:24px;
-  padding:22px 26px;
-  margin-bottom:18px;
-  color:white;
-  box-shadow:0 12px 32px rgba(15,23,42,.20);
+  padding:24px 28px;
+  margin-bottom:20px;
+  color:#fff;
+  box-shadow:0 18px 40px rgba(15,23,42,.18);
 }
 .topbar-title{
   font-size:28px;
-  font-weight:800;
-  line-height:1.1;
+  font-weight:900;
+  line-height:1.05;
 }
 .topbar-sub{
   margin-top:6px;
@@ -76,7 +91,7 @@ header[data-testid="stHeader"], #MainMenu, footer{
   margin-bottom:18px;
 }
 .kpi-card{
-  background:white;
+  background:#fff;
   border:1px solid var(--border);
   border-radius:18px;
   padding:18px;
@@ -86,8 +101,8 @@ header[data-testid="stHeader"], #MainMenu, footer{
   font-size:11px;
   text-transform:uppercase;
   letter-spacing:.12em;
-  font-weight:800;
   color:var(--muted);
+  font-weight:800;
   margin-bottom:10px;
 }
 .kpi-value{
@@ -100,14 +115,34 @@ header[data-testid="stHeader"], #MainMenu, footer{
   font-size:12px;
   color:var(--muted);
 }
+.banner{
+  border-radius:18px;
+  padding:16px 18px;
+  border:1px solid;
+  margin-bottom:18px;
+  display:flex;
+  justify-content:space-between;
+  gap:18px;
+  flex-wrap:wrap;
+  align-items:center;
+}
+.banner.red{background:var(--red-bg);border-color:#fecaca;}
+.banner.green{background:var(--green-bg);border-color:#a7f3d0;}
+.banner.blue{background:var(--blue-bg);border-color:#bfdbfe;}
+.banner.amber{background:var(--amber-bg);border-color:#fcd34d;}
+.banner-title{font-size:16px;font-weight:800;}
+.banner-sub{font-size:12px;color:#64748b;margin-top:4px;}
+.banner-big{font-size:42px;font-weight:900;line-height:1;}
+
 .section-title{
   margin:24px 0 10px 0;
   font-size:12px;
   text-transform:uppercase;
   letter-spacing:.14em;
-  font-weight:900;
   color:var(--muted);
+  font-weight:900;
 }
+
 .rag-grid{
   display:grid;
   grid-template-columns:repeat(auto-fill,minmax(270px,1fr));
@@ -115,21 +150,27 @@ header[data-testid="stHeader"], #MainMenu, footer{
   margin-bottom:24px;
 }
 .rag-card{
-  background:white;
+  background:#fff;
   border:1px solid var(--border);
   border-radius:22px;
   padding:18px;
   min-height:160px;
   box-shadow:0 8px 24px rgba(15,23,42,.06);
 }
-.rag-card.good{background:linear-gradient(180deg,#f7fffb 0%, #ecfdf5 100%);}
-.rag-card.mid{background:linear-gradient(180deg,#fffef7 0%, #fffbeb 100%);}
-.rag-card.bad{background:linear-gradient(180deg,#fff8f8 0%, #fef2f2 100%);}
+.rag-card.good{
+  background:linear-gradient(180deg,#f7fffb 0%, #ecfdf5 100%);
+}
+.rag-card.mid{
+  background:linear-gradient(180deg,#fffef7 0%, #fffbeb 100%);
+}
+.rag-card.bad{
+  background:linear-gradient(180deg,#fff8f8 0%, #fef2f2 100%);
+}
 .rag-top{
   display:flex;
   justify-content:space-between;
-  gap:12px;
   align-items:flex-start;
+  gap:12px;
 }
 .rag-name{
   font-size:14px;
@@ -174,23 +215,14 @@ header[data-testid="stHeader"], #MainMenu, footer{
   font-size:11px;
   color:#64748b;
 }
-.banner{
+.comment-box{
+  background:#fff;
+  border:1px solid var(--border);
   border-radius:18px;
-  padding:16px 18px;
-  border:1px solid;
-  margin-bottom:18px;
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-  gap:18px;
-  flex-wrap:wrap;
+  padding:18px;
+  box-shadow:0 8px 24px rgba(15,23,42,.06);
+  line-height:1.6;
 }
-.banner.red{background:var(--red-bg);border-color:#fecaca;}
-.banner.blue{background:var(--blue-bg);border-color:#bfdbfe;}
-.banner.green{background:var(--green-bg);border-color:#a7f3d0;}
-.banner-title{font-size:16px;font-weight:800;}
-.banner-sub{font-size:12px;color:#64748b;margin-top:4px;}
-.banner-big{font-size:42px;font-weight:900;line-height:1;}
 .stDownloadButton > button{
   width:100% !important;
   border:none !important;
@@ -202,6 +234,10 @@ header[data-testid="stHeader"], #MainMenu, footer{
 }
 @media (max-width:1200px){
   .kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr));}
+}
+@media (max-width:780px){
+  .kpi-grid{grid-template-columns:1fr;}
+  .rag-grid{grid-template-columns:1fr;}
 }
 </style>
 """, unsafe_allow_html=True)
@@ -247,10 +283,8 @@ def load_implant(file_bytes: bytes, filename: str):
     df = normalize_columns(df)
     df.columns = [c.upper() for c in df.columns]
 
-    required = {"ARTICLE"}
-    missing = required - set(df.columns)
-    if missing:
-        return None, f"Colonnes manquantes dans IMPLANT : {missing}. Colonnes détectées : {list(df.columns)[:12]}"
+    if "ARTICLE" not in df.columns:
+        return None, f"Colonne ARTICLE absente dans {filename}"
 
     rename_map = {
         "LIBELLÉ ARTICLE": "LIBELLE ARTICLE",
@@ -258,20 +292,25 @@ def load_implant(file_bytes: bytes, filename: str):
     }
     df = df.rename(columns=rename_map)
 
-    optional = [
+    optional_cols = [
         "LIBELLE ARTICLE",
-        "FOURNISSEUR D'ORIGINE",
-        "LIBELLE FOURNISSEUR ORIGINE",
         "MODE APPRO",
-        "DATE CDE",
         "DATE LIV.",
-        "SEMAINE RECEPTION"
+        "SEMAINE RECEPTION",
+        "LIBELLE FOURNISSEUR ORIGINE"
     ]
-    for c in optional:
+    for c in optional_cols:
         if c not in df.columns:
             df[c] = ""
 
-    df["SKU"] = df["ARTICLE"].astype(str).str.strip().str.replace(".0", "", regex=False).str.zfill(8).str[-8:]
+    df["SKU"] = (
+        df["ARTICLE"]
+        .astype(str)
+        .str.strip()
+        .str.replace(".0", "", regex=False)
+        .str.zfill(8)
+        .str[-8:]
+    )
     df = df[df["SKU"].str.match(r"^\d{8}$", na=False)].copy()
 
     df["ORIGINE"] = np.where(
@@ -279,8 +318,8 @@ def load_implant(file_bytes: bytes, filename: str):
         "IM",
         "LO"
     )
-
     df["SEMAINE RECEPTION"] = df["SEMAINE RECEPTION"].astype(str).str.strip().replace("nan", "")
+
     return df.drop_duplicates(subset=["SKU"]).copy(), None
 
 @st.cache_data(show_spinner=False)
@@ -292,17 +331,24 @@ def load_stock(file_bytes: bytes, filename: str):
     required = {"Libellé site", "Code article", "Libellé rayon", "Libellé famille", "Nouveau stock", "Ral"}
     missing = required - set(df.columns)
     if missing:
-        return None, f"Colonnes manquantes dans STOCK : {missing}. Colonnes détectées : {list(df.columns)[:20]}"
+        return None, f"{filename} : colonnes manquantes {missing}"
 
-    keep_optional = [
+    optional = [
         "Code etat", "Code marketing", "Libellé marketing",
-        "Nom fourn.", "Four.", "Site", "Ray", "Famille"
+        "Nom fourn.", "Four.", "Libellé article"
     ]
-    for c in keep_optional:
+    for c in optional:
         if c not in df.columns:
             df[c] = ""
 
-    df["SKU"] = df["Code article"].astype(str).str.strip().str.replace(".0", "", regex=False).str.zfill(8).str[-8:]
+    df["SKU"] = (
+        df["Code article"]
+        .astype(str)
+        .str.strip()
+        .str.replace(".0", "", regex=False)
+        .str.zfill(8)
+        .str[-8:]
+    )
     df["Nouveau stock"] = pd.to_numeric(df["Nouveau stock"], errors="coerce").fillna(0)
     df["Ral"] = pd.to_numeric(df["Ral"], errors="coerce").fillna(0)
 
@@ -324,13 +370,55 @@ def classify_taux(t):
         return "mid", "WATCH", "#d97706", "linear-gradient(90deg,#f59e0b,#d97706)"
     return "bad", "RISK", "#dc2626", "linear-gradient(90deg,#ef4444,#dc2626)"
 
-def build_export_excel(detail_df, pivot_df, destructeurs_df, magasin_alert_df):
+def diagnostic_statut(taux, alerte_share):
+    if taux >= 80 and alerte_share < 10:
+        return "Situation maîtrisée"
+    if taux < 65 and alerte_share >= 20:
+        return "Risque fort de non-implantation"
+    if taux < 80 and alerte_share >= 10:
+        return "Situation sous tension"
+    return "Situation à surveiller"
+
+def build_copil_comment(avg_impl, cal, ca, top_rayon_alertes, im_taux, lo_taux, worst_store):
+    parts = []
+
+    if avg_impl >= 80:
+        parts.append(f"Le niveau global d’implantation ressort à {avg_impl}%, ce qui traduit une situation globalement maîtrisée sur le périmètre suivi.")
+    elif avg_impl >= 65:
+        parts.append(f"Le niveau global d’implantation ressort à {avg_impl}%, ce qui montre une situation sous tension nécessitant un suivi rapproché.")
+    else:
+        parts.append(f"Le niveau global d’implantation ressort à {avg_impl}%, ce qui traduit un niveau critique d’exécution en magasin.")
+
+    if cal > 0:
+        parts.append(f"On dénombre {cal} alertes sans mouvement, qui constituent le principal point de vigilance opérationnel.")
+    if ca > 0:
+        parts.append(f"{ca} lignes sont encore en attente de livraison, ce qui indique qu’une partie du retard reste liée au pipeline d’approvisionnement.")
+
+    if im_taux > lo_taux:
+        parts.append(f"Le flux IMPORT affiche une meilleure exécution ({im_taux}%) que le flux LOCAL ({lo_taux}%).")
+    elif lo_taux > im_taux:
+        parts.append(f"Le flux LOCAL affiche une meilleure exécution ({lo_taux}%) que le flux IMPORT ({im_taux}%).")
+    else:
+        parts.append(f"Les flux IMPORT et LOCAL affichent un niveau d’exécution comparable ({im_taux}% / {lo_taux}%).")
+
+    if top_rayon_alertes:
+        parts.append(f"Le rayon le plus exposé est {top_rayon_alertes}.")
+    if worst_store:
+        parts.append(f"Le magasin le plus en difficulté à date est {worst_store}.")
+
+    parts.append("La priorité COPIL doit porter sur les articles sans mouvement, la sécurisation des livraisons en cours et la levée ciblée des alertes sur les magasins les moins performants.")
+
+    return " ".join(parts)
+
+def build_export_excel(detail_df, pivot_df, destructeurs_df, top_mags_df, rayon_df, origine_df):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         detail_df.to_excel(writer, index=False, sheet_name="Detail")
-        pivot_df.to_excel(writer, index=False, sheet_name="Vue magasins")
-        destructeurs_df.to_excel(writer, index=False, sheet_name="Articles destructeurs")
-        magasin_alert_df.to_excel(writer, index=False, sheet_name="Top magasins")
+        pivot_df.to_excel(writer, index=False, sheet_name="Magasins")
+        top_mags_df.to_excel(writer, index=False, sheet_name="Top magasins")
+        destructeurs_df.to_excel(writer, index=False, sheet_name="Destructeurs")
+        rayon_df.to_excel(writer, index=False, sheet_name="Rayons")
+        origine_df.to_excel(writer, index=False, sheet_name="IM vs LO")
     output.seek(0)
     return output.getvalue()
 
@@ -339,8 +427,8 @@ def build_export_excel(detail_df, pivot_df, destructeurs_df, magasin_alert_df):
 # ══════════════════════════════════════════════════════════════════════════════
 st.markdown(f"""
 <div class="topbar">
-  <div class="topbar-title">Dashboard Implantation COMEX</div>
-  <div class="topbar-sub">Nouvelles références · Détention magasins · Alertes réseau · {TODAY_STR}</div>
+  <div class="topbar-title">Dashboard Implantation COPIL</div>
+  <div class="topbar-sub">Pilotage réseau · Détention · Alertes · Analyse COPIL · {TODAY_STR}</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -348,7 +436,7 @@ st.markdown(f"""
 # SIDEBAR
 # ══════════════════════════════════════════════════════════════════════════════
 with st.sidebar:
-    st.markdown("### 📁 Chargement des fichiers")
+    st.markdown("### 📁 Chargement")
     implant_file = st.file_uploader("Fichier IMPLANT", type=["csv"], key="implant")
     stock_files = st.file_uploader("Fichier(s) STOCK", type=["csv"], accept_multiple_files=True, key="stocks")
 
@@ -360,27 +448,27 @@ if not stock_files:
     st.info("Charge au moins un fichier STOCK.")
     st.stop()
 
-with st.spinner("Lecture IMPLANT…"):
+with st.spinner("Lecture du fichier IMPLANT…"):
     implant_df, err_implant = load_implant(implant_file.read(), implant_file.name)
 
 if err_implant:
     st.error(err_implant)
     st.stop()
 
-stock_frames = []
+frames = []
 with st.spinner(f"Lecture de {len(stock_files)} fichier(s) STOCK…"):
     for f in stock_files:
         df_tmp, err_stock = load_stock(f.read(), f.name)
         if err_stock:
-            st.error(f"{f.name} : {err_stock}")
+            st.error(err_stock)
         else:
-            stock_frames.append(df_tmp)
+            frames.append(df_tmp)
 
-if not stock_frames:
+if not frames:
     st.error("Aucun fichier STOCK valide.")
     st.stop()
 
-stock_df = pd.concat(stock_frames, ignore_index=True)
+stock_df = pd.concat(frames, ignore_index=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # FILTRES
@@ -389,7 +477,10 @@ rayons = sorted(stock_df["Libellé rayon"].dropna().astype(str).unique().tolist(
 familles = sorted(stock_df["Libellé famille"].dropna().astype(str).unique().tolist())
 magasins = sorted(stock_df["Libellé site"].dropna().astype(str).unique().tolist())
 origines = sorted(implant_df["ORIGINE"].dropna().astype(str).unique().tolist())
-semaines = sorted([s for s in implant_df["SEMAINE RECEPTION"].unique().tolist() if str(s).strip() not in ("", "nan")], key=sem_sort)
+semaines = sorted(
+    [s for s in implant_df["SEMAINE RECEPTION"].unique().tolist() if str(s).strip() not in ("", "nan")],
+    key=sem_sort
+)
 
 with st.sidebar:
     st.markdown("---")
@@ -407,17 +498,14 @@ if not mag_sel:
 # ══════════════════════════════════════════════════════════════════════════════
 # PREP DATA
 # ══════════════════════════════════════════════════════════════════════════════
-# Limiter le stock aux magasins choisis
 stock_scope = stock_df[stock_df["Libellé site"].isin(mag_sel)].copy()
 
-# Articles implant à retenir
 implant_scope = implant_df[implant_df["ORIGINE"].isin(origine_sel)].copy()
 if semaine_sel:
     implant_scope = implant_scope[implant_scope["SEMAINE RECEPTION"].isin(semaine_sel)].copy()
 
 implant_sku = implant_scope["SKU"].unique().tolist()
 
-# On récupère les attributs rayon/famille depuis le stock pour les SKU de l'implant
 sku_attr = (
     stock_scope[stock_scope["SKU"].isin(implant_sku)]
     .sort_values(["SKU"])
@@ -431,8 +519,6 @@ sku_attr = (
 )
 
 implant_scope = implant_scope.merge(sku_attr, on="SKU", how="left")
-
-# filtres rayon/famille sur le périmètre implant
 implant_scope["Libellé rayon"] = implant_scope["Libellé rayon"].fillna("Non classé")
 implant_scope["Libellé famille"] = implant_scope["Libellé famille"].fillna("Non classé")
 
@@ -448,26 +534,23 @@ if implant_scope.empty:
 sku_scope = implant_scope["SKU"].unique().tolist()
 total_sku = len(sku_scope)
 
-# base magasin × SKU implant
 base_df = pd.MultiIndex.from_product(
     [mag_sel, sku_scope], names=["Magasin", "SKU"]
 ).to_frame(index=False)
 
-# stock à joindre
 stock_join = stock_scope[stock_scope["SKU"].isin(sku_scope)].copy()
-
 stock_join = stock_join.rename(columns={
     "Libellé site": "Magasin",
     "Nouveau stock": "Stock",
     "Ral": "RAL"
 })
 
-cols_stock_join = [
+cols_stock = [
     "Magasin", "SKU", "Stock", "RAL", "Libellé rayon", "Libellé famille",
     "Libellé article", "Code etat", "Code marketing", "Libellé marketing",
     "Nom fourn.", "Four."
 ]
-stock_join = stock_join[cols_stock_join].drop_duplicates(subset=["Magasin", "SKU"])
+stock_join = stock_join[cols_stock].drop_duplicates(subset=["Magasin", "SKU"])
 
 detail_df = base_df.merge(stock_join, on=["Magasin", "SKU"], how="left")
 detail_df = detail_df.merge(
@@ -486,7 +569,6 @@ detail_df["Libellé rayon"] = detail_df["Libellé rayon"].fillna("Non classé")
 detail_df["Libellé famille"] = detail_df["Libellé famille"].fillna("Non classé")
 detail_df["Libellé article"] = detail_df["Libellé article"].fillna(detail_df["LIBELLE ARTICLE"]).fillna("")
 
-# statut
 conds = [
     detail_df["Stock"] > 0,
     (detail_df["Stock"] <= 0) & (detail_df["RAL"] > 0)
@@ -495,7 +577,7 @@ choices = ["Implantation Terminée", "En Attente Livraison"]
 detail_df["Statut"] = np.select(conds, choices, default="Alerte Aucun Mouvement")
 
 # ══════════════════════════════════════════════════════════════════════════════
-# KPI
+# KPI GLOBAUX
 # ══════════════════════════════════════════════════════════════════════════════
 pivot = (
     detail_df.groupby(["Magasin", "Statut"]).size()
@@ -509,6 +591,11 @@ for c in ["Implantation Terminée", "En Attente Livraison", "Alerte Aucun Mouvem
 
 pivot["Total"] = total_sku
 pivot["Taux (%)"] = ((pivot["Implantation Terminée"] / pivot["Total"]) * 100).round(0).astype(int)
+pivot["Alerte (%)"] = ((pivot["Alerte Aucun Mouvement"] / pivot["Total"]) * 100).round(1)
+pivot["Diagnostic"] = pivot.apply(
+    lambda x: diagnostic_statut(x["Taux (%)"], x["Alerte (%)"]),
+    axis=1
+)
 
 ct = int(pivot["Implantation Terminée"].sum())
 ca = int(pivot["En Attente Livraison"].sum())
@@ -516,14 +603,15 @@ cal = int(pivot["Alerte Aucun Mouvement"].sum())
 total_cells = len(mag_sel) * total_sku
 avg_impl = int(round(pivot["Taux (%)"].mean(), 0)) if not pivot.empty else 0
 
-# top magasins en alerte
+# ══════════════════════════════════════════════════════════════════════════════
+# ANALYSES COMPLÉMENTAIRES
+# ══════════════════════════════════════════════════════════════════════════════
 top_magasins_alerte = (
-    pivot[["Magasin", "Alerte Aucun Mouvement", "En Attente Livraison", "Implantation Terminée", "Taux (%)"]]
-    .sort_values(["Alerte Aucun Mouvement", "En Attente Livraison"], ascending=False)
+    pivot[["Magasin", "Alerte Aucun Mouvement", "En Attente Livraison", "Implantation Terminée", "Taux (%)", "Diagnostic"]]
+    .sort_values(["Alerte Aucun Mouvement", "En Attente Livraison", "Taux (%)"], ascending=[False, False, True])
     .reset_index(drop=True)
 )
 
-# articles destructeurs
 articles_destructeurs = (
     detail_df[detail_df["Statut"] == "Alerte Aucun Mouvement"]
     .groupby(["SKU", "Libellé article", "Libellé rayon", "Libellé famille", "ORIGINE"], as_index=False)
@@ -536,10 +624,67 @@ articles_destructeurs = (
     .reset_index(drop=True)
 )
 
-top20_destructeurs = articles_destructeurs.head(20).copy()
+rayon_perf = (
+    detail_df.groupby(["Libellé rayon", "Statut"]).size()
+    .unstack(fill_value=0)
+    .reset_index()
+)
+for c in ["Implantation Terminée", "En Attente Livraison", "Alerte Aucun Mouvement"]:
+    if c not in rayon_perf.columns:
+        rayon_perf[c] = 0
+rayon_perf["Total"] = (
+    rayon_perf["Implantation Terminée"] +
+    rayon_perf["En Attente Livraison"] +
+    rayon_perf["Alerte Aucun Mouvement"]
+)
+rayon_perf["Taux (%)"] = ((rayon_perf["Implantation Terminée"] / rayon_perf["Total"]) * 100).round(0).astype(int)
+rayon_perf["Alerte (%)"] = ((rayon_perf["Alerte Aucun Mouvement"] / rayon_perf["Total"]) * 100).round(1)
+rayon_perf["Diagnostic"] = rayon_perf.apply(
+    lambda x: diagnostic_statut(x["Taux (%)"], x["Alerte (%)"]),
+    axis=1
+)
+rayon_perf = rayon_perf.sort_values(["Alerte Aucun Mouvement", "Taux (%)"], ascending=[False, True]).reset_index(drop=True)
 
-# export
-export_bytes = build_export_excel(detail_df, pivot, articles_destructeurs, top_magasins_alerte)
+origine_perf = (
+    detail_df.groupby(["ORIGINE", "Statut"]).size()
+    .unstack(fill_value=0)
+    .reset_index()
+)
+for c in ["Implantation Terminée", "En Attente Livraison", "Alerte Aucun Mouvement"]:
+    if c not in origine_perf.columns:
+        origine_perf[c] = 0
+origine_perf["Total"] = (
+    origine_perf["Implantation Terminée"] +
+    origine_perf["En Attente Livraison"] +
+    origine_perf["Alerte Aucun Mouvement"]
+)
+origine_perf["Taux (%)"] = ((origine_perf["Implantation Terminée"] / origine_perf["Total"]) * 100).round(0).astype(int)
+origine_perf = origine_perf.sort_values("ORIGINE").reset_index(drop=True)
+
+im_taux = int(origine_perf.loc[origine_perf["ORIGINE"] == "IM", "Taux (%)"].iloc[0]) if "IM" in origine_perf["ORIGINE"].values else 0
+lo_taux = int(origine_perf.loc[origine_perf["ORIGINE"] == "LO", "Taux (%)"].iloc[0]) if "LO" in origine_perf["ORIGINE"].values else 0
+
+top_rayon_alertes = rayon_perf.iloc[0]["Libellé rayon"] if not rayon_perf.empty else ""
+worst_store = top_magasins_alerte.iloc[0]["Magasin"] if not top_magasins_alerte.empty else ""
+
+copil_comment = build_copil_comment(
+    avg_impl=avg_impl,
+    cal=cal,
+    ca=ca,
+    top_rayon_alertes=top_rayon_alertes,
+    im_taux=im_taux,
+    lo_taux=lo_taux,
+    worst_store=worst_store
+)
+
+export_bytes = build_export_excel(
+    detail_df=detail_df,
+    pivot_df=pivot,
+    destructeurs_df=articles_destructeurs,
+    top_mags_df=top_magasins_alerte,
+    rayon_df=rayon_perf,
+    origine_df=origine_perf
+)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # KPI HEADER
@@ -574,7 +719,7 @@ if cal > 0 or ca > 0:
     <div class="banner red">
       <div>
         <div class="banner-title" style="color:#dc2626">⚠️ Réseau sous tension</div>
-        <div class="banner-sub">{cal} alertes sans mouvement · {ca} en attente livraison</div>
+        <div class="banner-sub">{cal} alertes sans mouvement · {ca} lignes en attente livraison</div>
       </div>
       <div class="banner-big" style="color:#dc2626">{cal + ca}</div>
     </div>
@@ -591,12 +736,18 @@ else:
     """, unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
+# COMMENTAIRE AUTO COPIL
+# ══════════════════════════════════════════════════════════════════════════════
+st.markdown('<div class="section-title">Commentaire automatique COPIL</div>', unsafe_allow_html=True)
+st.markdown(f'<div class="comment-box">{copil_comment}</div>', unsafe_allow_html=True)
+
+# ══════════════════════════════════════════════════════════════════════════════
 # SCORECARDS MAGASINS
 # ══════════════════════════════════════════════════════════════════════════════
 st.markdown('<div class="section-title">Scorecard magasins</div>', unsafe_allow_html=True)
 
 rag_html = '<div class="rag-grid">'
-for _, row in pivot.sort_values("Taux (%)", ascending=False).iterrows():
+for _, row in pivot.sort_values(["Alerte Aucun Mouvement", "Taux (%)"], ascending=[False, True]).iterrows():
     taux = int(row["Taux (%)"])
     cls, lbl, color_hex, progress = classify_taux(taux)
     rag_html += f"""
@@ -622,10 +773,11 @@ st.markdown(rag_html, unsafe_allow_html=True)
 # ══════════════════════════════════════════════════════════════════════════════
 # TABS
 # ══════════════════════════════════════════════════════════════════════════════
-tab1, tab2, tab3, tab4 = st.tabs([
-    "📊 Vue COMEX",
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "📊 Vue COPIL",
     "🚨 Top magasins en alerte",
     "📉 Articles destructeurs",
+    "🏷️ Analyse rayons",
     "📋 Détail & Export"
 ])
 
@@ -678,19 +830,22 @@ with tab1:
         fig_d.update_layout(**PLOTLY_LAYOUT, height=430, title="Répartition globale")
         st.plotly_chart(fig_d, use_container_width=True)
 
-    st.dataframe(
-        pivot.sort_values("Taux (%)", ascending=False).reset_index(drop=True),
-        use_container_width=True,
-        hide_index=True
-    )
+    st.markdown("### Analyse IM vs LO")
+    st.dataframe(origine_perf, use_container_width=True, hide_index=True)
+
+    fig_orig = go.Figure(go.Bar(
+        x=origine_perf["ORIGINE"],
+        y=origine_perf["Taux (%)"],
+        marker=dict(color=["#2563eb" if x == "IM" else "#059669" for x in origine_perf["ORIGINE"]]),
+        text=origine_perf["Taux (%)"].astype(str) + "%",
+        textposition="outside"
+    ))
+    fig_orig.update_layout(**PLOTLY_LAYOUT, height=350, title="Taux d’implantation IM vs LO")
+    st.plotly_chart(fig_orig, use_container_width=True)
 
 with tab2:
     st.markdown("### Top magasins en alerte")
-    st.dataframe(
-        top_magasins_alerte.head(15),
-        use_container_width=True,
-        hide_index=True
-    )
+    st.dataframe(top_magasins_alerte.head(15), use_container_width=True, hide_index=True)
 
     fig_alert = go.Figure(go.Bar(
         x=top_magasins_alerte.head(10)["Magasin"],
@@ -704,27 +859,47 @@ with tab2:
 
 with tab3:
     st.markdown("### Articles destructeurs")
-    st.dataframe(
-        top20_destructeurs,
-        use_container_width=True,
-        hide_index=True
-    )
+    st.dataframe(articles_destructeurs.head(20), use_container_width=True, hide_index=True)
 
-    top_graph = top20_destructeurs.head(10).copy()
-    top_graph["Label"] = top_graph["SKU"] + " - " + top_graph["Libellé article"].astype(str).str[:35]
-
-    fig_dest = go.Figure(go.Bar(
-        x=top_graph["Nb_Magasins_Alertes"],
-        y=top_graph["Label"],
-        orientation="h",
-        marker=dict(color="#dc2626"),
-        text=top_graph["Nb_Magasins_Alertes"],
-        textposition="outside"
-    ))
-    fig_dest.update_layout(**PLOTLY_LAYOUT, height=500, title="Top 10 articles destructeurs")
-    st.plotly_chart(fig_dest, use_container_width=True)
+    top_graph = articles_destructeurs.head(10).copy()
+    if not top_graph.empty:
+        top_graph["Label"] = top_graph["SKU"] + " - " + top_graph["Libellé article"].astype(str).str[:35]
+        fig_dest = go.Figure(go.Bar(
+            x=top_graph["Nb_Magasins_Alertes"],
+            y=top_graph["Label"],
+            orientation="h",
+            marker=dict(color="#dc2626"),
+            text=top_graph["Nb_Magasins_Alertes"],
+            textposition="outside"
+        ))
+        fig_dest.update_layout(**PLOTLY_LAYOUT, height=500, title="Top 10 articles destructeurs")
+        st.plotly_chart(fig_dest, use_container_width=True)
 
 with tab4:
+    st.markdown("### Performance par rayon")
+    st.dataframe(rayon_perf, use_container_width=True, hide_index=True)
+
+    fig_rayon = go.Figure(go.Bar(
+        x=rayon_perf.head(12)["Libellé rayon"],
+        y=rayon_perf.head(12)["Alerte Aucun Mouvement"],
+        marker=dict(color="#dc2626"),
+        text=rayon_perf.head(12)["Alerte Aucun Mouvement"],
+        textposition="outside"
+    ))
+    fig_rayon.update_layout(**PLOTLY_LAYOUT, height=420, title="Rayons les plus exposés aux alertes")
+    st.plotly_chart(fig_rayon, use_container_width=True)
+
+    fig_rayon_taux = go.Figure(go.Bar(
+        x=rayon_perf.sort_values("Taux (%)", ascending=True).head(12)["Libellé rayon"],
+        y=rayon_perf.sort_values("Taux (%)", ascending=True).head(12)["Taux (%)"],
+        marker=dict(color="#d97706"),
+        text=rayon_perf.sort_values("Taux (%)", ascending=True).head(12)["Taux (%)"].astype(str) + "%",
+        textposition="outside"
+    ))
+    fig_rayon_taux.update_layout(**PLOTLY_LAYOUT, height=420, title="Rayons les moins performants")
+    st.plotly_chart(fig_rayon_taux, use_container_width=True)
+
+with tab5:
     st.markdown("### Détail opérationnel")
     st.dataframe(
         detail_df.sort_values(["Magasin", "Statut", "Libellé rayon", "Libellé famille"]).reset_index(drop=True),
@@ -733,10 +908,10 @@ with tab4:
         height=520
     )
 
-    st.markdown('<div class="section-title">Export Excel</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Export Excel COPIL</div>', unsafe_allow_html=True)
     st.download_button(
-        label="📥 Télécharger le pack Excel COMEX",
+        label="📥 Télécharger le pack Excel COPIL",
         data=export_bytes,
-        file_name=f"dashboard_implantation_comex_{TODAY_FILE}.xlsx",
+        file_name=f"dashboard_implantation_copil_{TODAY_FILE}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
