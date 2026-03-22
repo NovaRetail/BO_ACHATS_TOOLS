@@ -2,12 +2,8 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import unicodedata
-import io
 from datetime import date
 
-# ==============================
-# CONFIG
-# ==============================
 st.set_page_config(page_title="Suivi Implantation", layout="wide")
 
 TODAY = date.today().strftime("%d %b %Y")
@@ -18,13 +14,13 @@ TODAY = date.today().strftime("%d %b %Y")
 st.markdown(f"""
 <div style="background:#0f1729;color:white;padding:14px 20px;
 border-radius:8px;margin-bottom:20px;display:flex;justify-content:space-between">
-<b>📦 Suivi Implantation — Data Quality Ready</b>
+<b>📦 Suivi Implantation — Data Quality Safe</b>
 <span style="color:#94a3b8">{TODAY}</span>
 </div>
 """, unsafe_allow_html=True)
 
 # ==============================
-# AUTO CLEAN DATA MODULE
+# AUTO CLEAN
 # ==============================
 def clean_columns(df):
     df.columns = [
@@ -45,54 +41,37 @@ def find_column(df, keywords):
     return None
 
 def auto_map_columns(df):
-    mapping = {}
+    return {
+        "ARTICLE": find_column(df, ["ARTICLE"]),
+        "SITE": find_column(df, ["SITE", "MAGASIN"]),
+        "STOCK": find_column(df, ["STOCK"]),
+        "RAL": find_column(df, ["RAL"]),
+    }
 
-    mapping["ARTICLE"] = find_column(df, ["ARTICLE", "CODE"])
-    mapping["SITE"] = find_column(df, ["SITE", "MAGASIN"])
-    mapping["STOCK"] = find_column(df, ["STOCK"])
-    mapping["RAL"] = find_column(df, ["RAL"])
-
-    return mapping
+def safe_sku(series):
+    return (
+        series.fillna("")
+        .astype(str)
+        .str.replace(".0", "", regex=False)
+        .str.strip()
+        .str.zfill(8)
+    )
 
 # ==============================
-# INTRO UX
+# INTRO
 # ==============================
 st.markdown("""
 <div style="background:#f8fafc;border:1px solid #e2e8f0;
-padding:20px;border-radius:10px;margin-bottom:20px">
+padding:18px;border-radius:10px;margin-bottom:20px">
 
-<h4>📊 Module Suivi Implantation — Version Data Intelligent</h4>
+<b>ℹ️ Module intelligent :</b><br>
+Correction automatique des fichiers (colonnes, accents, formats)
 
-<b>Objectif :</b><br>
-Suivre en temps réel l’implantation des nouvelles références en magasin.
-
-<hr>
-
-<b>🧠 Intelligence intégrée :</b><br>
-Ce module corrige automatiquement les erreurs fichiers :
+<b>Statuts :</b>
 <ul>
-<li>Colonnes mal nommées</li>
-<li>Accents / encodage Excel</li>
-<li>Formats incohérents</li>
-</ul>
-
-<hr>
-
-<b>📈 Indicateurs calculés :</b>
-<ul>
-<li>✅ Taux d’implantation réel</li>
-<li>🚚 Retards logistiques (RAL)</li>
-<li>🚨 Blocages supply</li>
-<li>🏪 Performance par magasin</li>
-</ul>
-
-<hr>
-
-<b>🎯 Lecture métier :</b>
-<ul>
-<li><b>Implanté :</b> stock > 0</li>
-<li><b>Attente :</b> stock = 0 & RAL > 0</li>
-<li><b>Alerte :</b> stock = 0 & RAL = 0</li>
+<li>Implanté = stock > 0</li>
+<li>Attente = stock = 0 & RAL > 0</li>
+<li>Alerte = stock = 0 & RAL = 0</li>
 </ul>
 
 </div>
@@ -110,15 +89,14 @@ def read_file(file):
 # SIDEBAR
 # ==============================
 with st.sidebar:
-    st.header("📁 Chargement")
-    t1_file = st.file_uploader("Fichier T1", type=["csv", "xlsx"])
-    stock_files = st.file_uploader("Stocks magasins", accept_multiple_files=True)
+    st.header("📁 Fichiers")
+    t1_file = st.file_uploader("T1")
+    stock_files = st.file_uploader("Stocks", accept_multiple_files=True)
 
 # ==============================
 # LOAD T1
 # ==============================
 if not t1_file:
-    st.info("Charge le fichier T1")
     st.stop()
 
 t1 = read_file(t1_file)
@@ -127,19 +105,18 @@ t1 = clean_columns(t1)
 map_t1 = auto_map_columns(t1)
 
 if not map_t1["ARTICLE"]:
-    st.error(f"❌ Impossible de détecter la colonne ARTICLE\n{list(t1.columns)}")
+    st.error(f"❌ Colonne ARTICLE introuvable\n{list(t1.columns)}")
     st.stop()
 
 t1 = t1.rename(columns={map_t1["ARTICLE"]: "ARTICLE"})
-t1["SKU"] = t1["ARTICLE"].astype(str).str.zfill(8)
+t1["SKU"] = safe_sku(t1["ARTICLE"])
 
-st.success("✅ T1 chargé et nettoyé automatiquement")
+st.success("✅ T1 OK")
 
 # ==============================
 # LOAD STOCK
 # ==============================
 if not stock_files:
-    st.info("Charge les fichiers stock")
     st.stop()
 
 dfs = []
@@ -160,24 +137,31 @@ for f in stock_files:
         mapping["RAL"]: "RAL"
     })
 
-    df["SKU"] = df["ARTICLE"].astype(str).str.zfill(8)
+    # SAFE CONVERSION
+    df["ARTICLE"] = df["ARTICLE"].fillna("").astype(str)
+
+    df["SKU"] = safe_sku(df["ARTICLE"])
     df["STOCK"] = pd.to_numeric(df.get("STOCK", 0), errors="coerce").fillna(0)
     df["RAL"] = pd.to_numeric(df.get("RAL", 0), errors="coerce").fillna(0)
 
     dfs.append(df)
 
 if not dfs:
-    st.error("Aucun fichier stock exploitable")
+    st.error("❌ Aucun fichier stock valide")
     st.stop()
 
 stock = pd.concat(dfs)
 
-st.success("✅ Stocks chargés et nettoyés automatiquement")
+st.success("✅ Stock OK")
 
 # ==============================
 # MERGE
 # ==============================
 df = stock.merge(t1[["SKU"]], on="SKU", how="inner")
+
+if df.empty:
+    st.warning("⚠️ Aucun matching SKU")
+    st.stop()
 
 # ==============================
 # STATUT
@@ -187,10 +171,7 @@ df["Statut"] = np.select(
         df["STOCK"] > 0,
         (df["STOCK"] == 0) & (df["RAL"] > 0)
     ],
-    [
-        "Implanté",
-        "Attente"
-    ],
+    ["Implanté", "Attente"],
     default="Alerte"
 )
 
@@ -202,12 +183,12 @@ ok = (df["Statut"] == "Implanté").sum()
 att = (df["Statut"] == "Attente").sum()
 alert = (df["Statut"] == "Alerte").sum()
 
-pct = int(ok / total * 100) if total > 0 else 0
+pct = int(ok / total * 100)
 
 c1, c2, c3 = st.columns(3)
-c1.metric("✅ Implanté", ok)
-c2.metric("🚚 Attente", att)
-c3.metric("🚨 Alerte", alert)
+c1.metric("Implanté", ok)
+c2.metric("Attente", att)
+c3.metric("Alerte", alert)
 
 st.progress(pct / 100)
 
@@ -226,17 +207,17 @@ pivot["Taux (%)"] = (pivot.get("Implanté", 0) / pivot["Total"] * 100).round(0)
 
 pivot["Taux (%)"] = pivot["Taux (%)"].astype(str) + "%"
 
-st.subheader("🏪 Performance magasins")
+st.subheader("🏪 Magasins")
 st.dataframe(pivot, use_container_width=True)
 
 # ==============================
 # ALERTES
 # ==============================
-st.subheader("🚨 Articles bloqués")
+st.subheader("🚨 Alertes")
 
 df_alert = df[df["Statut"] == "Alerte"]
 
 if df_alert.empty:
-    st.success("Aucune alerte")
+    st.success("RAS")
 else:
     st.dataframe(df_alert, use_container_width=True)
