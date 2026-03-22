@@ -2,161 +2,275 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import unicodedata
-from datetime import date
 import io
+from datetime import date
 
-# Configuration de la page
-st.set_page_config(page_title="Data Quality Safe - Implantation", layout="wide", page_icon="📦")
+st.set_page_config(page_title="Suivi Implantation", layout="wide")
 
-# --- FONCTIONS UTILES ---
-def clean_column_name(col):
-    """Nettoie les noms de colonnes : majuscules, sans accents, sans espaces inutiles."""
-    col = str(col).strip().upper()
-    col = unicodedata.normalize('NFKD', col).encode('ascii', 'ignore').decode('utf-8')
-    return col
+TODAY = date.today().strftime("%d %b %Y")
 
-@st.cache_data
-def load_data(file):
-    """Lecture intelligente des fichiers CSV, XLSX ou XLSB."""
-    try:
-        if file.name.endswith('.csv'):
-            # Détection automatique du séparateur (souvent ';' dans tes fichiers)
-            return pd.read_csv(file, sep=None, engine='python', encoding='latin1')
-        elif file.name.endswith('.xlsb'):
-            return pd.read_excel(file, engine='pyxlsb')
-        else:
-            return pd.read_excel(file)
-    except Exception as e:
-        st.error(f"Erreur lors de la lecture de {file.name}: {e}")
-        return None
-
-def format_sku(series):
-    """Formatage rigoureux des codes articles sur 8 chiffres."""
-    return series.astype(str).str.replace(r'\.0$', '', regex=True).str.strip().str.zfill(8)
-
-# --- INTERFACE ---
+# ==============================
+# HEADER
+# ==============================
 st.markdown(f"""
-<div style="background:#0f1729;color:white;padding:15px;border-radius:10px;display:flex;justify-content:space-between;align-items:center;">
-    <h2 style="margin:0;">📦 Suivi Implantation</h2>
-    <span style="opacity:0.8;">Mise à jour : {date.today().strftime("%d/%m/%Y")}</span>
+<div style="background:#0f1729;color:white;padding:14px 20px;
+border-radius:8px;margin-bottom:20px;display:flex;justify-content:space-between">
+<b>📦 Suivi Implantation — Version Safe</b>
+<span style="color:#94a3b8">{TODAY}</span>
 </div>
 """, unsafe_allow_html=True)
 
-# Barre latérale pour l'import
+# ==============================
+# AUTO CLEAN DATA
+# ==============================
+def clean_columns(df):
+    df.columns = [
+        unicodedata.normalize('NFKD', str(c))
+        .encode('ascii', 'ignore')
+        .decode('utf-8')
+        .strip()
+        .upper()
+        for c in df.columns
+    ]
+    return df
+
+def find_column(df, keywords):
+    for col in df.columns:
+        for k in keywords:
+            if k in col:
+                return col
+    return None
+
+def auto_map_columns(df):
+    return {
+        "ARTICLE": find_column(df, ["ARTICLE"]),
+        "SITE": find_column(df, ["SITE", "MAGASIN"]),
+        "STOCK": find_column(df, ["STOCK"]),
+        "RAL": find_column(df, ["RAL"]),
+    }
+
+# ==============================
+# SAFE SKU (ULTRA ROBUSTE)
+# ==============================
+def safe_sku(series):
+    series = pd.Series(series)
+    result = []
+
+    for val in series:
+        try:
+            v = str(val)
+            v = v.replace(".0", "")
+            v = v.strip()
+            v = v.zfill(8)
+        except:
+            v = "00000000"
+        result.append(v)
+
+    return pd.Series(result)
+
+# ==============================
+# INTRO
+# ==============================
+st.markdown("""
+<div style="background:#f8fafc;border:1px solid #e2e8f0;
+padding:18px;border-radius:10px;margin-bottom:20px">
+
+<b>📊 Module intelligent :</b><br>
+Correction automatique des fichiers (colonnes, accents, formats)
+
+<b>Statuts :</b>
+<ul>
+<li>Implanté = stock > 0</li>
+<li>Attente = stock = 0 & RAL > 0</li>
+<li>Alerte = stock = 0 & RAL = 0</li>
+</ul>
+
+</div>
+""", unsafe_allow_html=True)
+
+# ==============================
+# FILE LOADER
+# ==============================
+def read_file(file):
+    if file.name.endswith(".xlsx"):
+        return pd.read_excel(file)
+    return pd.read_csv(file, sep=None, engine="python", encoding="latin1")
+
+# ==============================
+# SIDEBAR
+# ==============================
 with st.sidebar:
-    st.header("📂 Chargement des données")
-    t1_input = st.file_uploader("Fichier Référentiel (T1 / IMPLANT)", type=["csv", "xlsx", "xlsb"])
-    stock_inputs = st.file_uploader("Fichiers Extraction Stock", type=["csv", "xlsx", "xlsb"], accept_multiple_files=True)
-    
-    st.divider()
-    st.info("💡 Les colonnes sont détectées automatiquement même si les noms varient légèrement.")
+    st.header("📁 Chargement")
+    t1_file = st.file_uploader("Fichier T1")
+    stock_files = st.file_uploader("Stocks", accept_multiple_files=True)
 
-if not t1_input or not stock_inputs:
-    st.warning("Veuillez charger le fichier référentiel et au moins un fichier de stock pour commencer.")
+# ==============================
+# LOAD T1
+# ==============================
+if not t1_file:
+    st.info("Charge le fichier T1")
     st.stop()
 
-# --- TRAITEMENT DU RÉFÉRENTIEL (T1) ---
-with st.spinner("Analyse du référentiel..."):
-    df_t1_raw = load_data(t1_input)
-    if df_t1_raw is not None:
-        df_t1_raw.columns = [clean_column_name(c) for c in df_t1_raw.columns]
-        # Recherche de la colonne article
-        col_art_t1 = next((c for c in df_t1_raw.columns if "ARTICLE" in c), None)
-        
-        if col_art_t1:
-            df_t1_raw['SKU'] = format_sku(df_t1_raw[col_art_t1])
-            list_sku_ref = df_t1_raw[['SKU']].drop_duplicates()
-        else:
-            st.error("Colonne 'ARTICLE' introuvable dans le fichier référentiel.")
-            st.stop()
+t1 = read_file(t1_file)
+t1 = clean_columns(t1)
 
-# --- TRAITEMENT DES STOCKS ---
-all_stocks = []
-for f in stock_inputs:
-    df_s = load_data(f)
-    if df_s is not None:
-        df_s.columns = [clean_column_name(c) for c in df_s.columns]
-        
-        # Mapping dynamique basé sur tes fichiers
-        mapping = {
-            'SKU': next((c for c in df_s.columns if "ARTICLE" in c), None),
-            'SITE': next((c for c in df_s.columns if any(k in c for k in ["SITE", "MAGASIN", "LIBELLE SITE"])), "SITE_INCONNU"),
-            'STOCK': next((c for c in df_s.columns if "STOCK" in c), None),
-            'RAL': next((c for c in df_s.columns if "RAL" in c), None)
-        }
-        
-        if mapping['SKU']:
-            df_s['SKU'] = format_sku(df_s[mapping['SKU']])
-            # Conversion numérique sécurisée
-            for col in ['STOCK', 'RAL']:
-                if mapping[col] in df_s.columns:
-                    df_s[col] = pd.to_numeric(df_s[mapping[col]], errors='coerce').fillna(0)
-                else:
-                    df_s[col] = 0
-            
-            # On ne garde que les colonnes utiles pour la fusion
-            cols_to_keep = ['SKU', mapping['SITE'], 'STOCK', 'RAL']
-            all_stocks.append(df_s[[c for c in cols_to_keep if c in df_s.columns]].rename(columns={mapping['SITE']: 'SITE'}))
+map_t1 = auto_map_columns(t1)
 
-if not all_stocks:
-    st.error("Aucune donnée de stock valide trouvée.")
+if map_t1["ARTICLE"] is None:
+    st.error("❌ Colonne ARTICLE non détectée")
+    st.write("Colonnes trouvées :", list(t1.columns))
     st.stop()
 
-df_final = pd.concat(all_stocks)
-# On filtre uniquement sur les articles présents dans le référentiel T1
-df_final = df_final.merge(list_sku_ref, on="SKU", how="inner")
+t1 = t1.rename(columns={map_t1["ARTICLE"]: "ARTICLE"})
+t1["SKU"] = safe_sku(t1["ARTICLE"])
 
-# --- CALCUL DES STATUTS ---
-conditions = [
-    (df_final['STOCK'] > 0),
-    (df_final['STOCK'] <= 0) & (df_final['RAL'] > 0)
-]
-choices = ["Implanté", "Attente"]
-df_final['STATUT'] = np.select(conditions, choices, default="Alerte")
+st.success("✅ T1 chargé")
 
-# --- DASHBOARD ---
-tab1, tab2 = st.tabs(["📊 Synthèse", "🔍 Détail des Alertes"])
+# ==============================
+# LOAD STOCK
+# ==============================
+if not stock_files:
+    st.info("Charge les fichiers stock")
+    st.stop()
 
-with tab1:
-    # Métriques globales
-    c1, c2, c3, c4 = st.columns(4)
-    total = len(df_final)
-    imp = (df_final['STATUT'] == "Implanté").sum()
-    att = (df_final['STATUT'] == "Attente").sum()
-    ale = (df_final['STATUT'] == "Alerte").sum()
-    taux = (imp / total * 100) if total > 0 else 0
-    
-    c1.metric("Total SKU", total)
-    c2.metric("Implanté ✅", imp, f"{taux:.1f}%")
-    c3.metric("Attente ⏳", att)
-    c4.metric("Alerte 🚨", ale)
-    
-    st.progress(taux / 100)
-    
-    # Vue par magasin
-    st.subheader("Performance par Site")
-    pivot = df_final.groupby(['SITE', 'STATUT']).size().unstack(fill_value=0).reset_index()
-    if "Implanté" in pivot.columns:
-        pivot['Taux %'] = (pivot['Implanté'] / pivot.sum(axis=1, numeric_only=True) * 100).round(1)
-    st.dataframe(pivot.sort_values(by="Taux %", ascending=True), use_container_width=True)
+dfs = []
 
-with tab2:
-    st.subheader("Articles en Alerte (Stock 0 / RAL 0)")
-    df_alertes = df_final[df_final['STATUT'] == "Alerte"]
-    
-    if not df_alertes.empty:
-        # --- BOUTON DE TÉLÉCHARGEMENT ---
-        buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-            df_alertes.to_excel(writer, index=False, sheet_name='Alertes')
-        
-        st.download_button(
-            label="📥 Télécharger les Alertes en Excel",
-            data=buffer.getvalue(),
-            file_name=f"Alertes_Implantation_{date.today()}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-        
-        st.dataframe(df_alertes, use_container_width=True)
-    else:
-        st.success("Félicitations ! Aucune alerte détectée.")
+for f in stock_files:
+    df = read_file(f)
+    df = clean_columns(df)
+
+    mapping = auto_map_columns(df)
+
+    if mapping["ARTICLE"] is None:
+        continue
+
+    df = df.rename(columns={
+        mapping["ARTICLE"]: "ARTICLE",
+        mapping["SITE"]: "SITE",
+        mapping["STOCK"]: "STOCK",
+        mapping["RAL"]: "RAL"
+    })
+
+    df["ARTICLE"] = df["ARTICLE"].fillna("")
+    df["SKU"] = safe_sku(df["ARTICLE"])
+
+    df["STOCK"] = pd.to_numeric(df.get("STOCK", 0), errors="coerce").fillna(0)
+    df["RAL"] = pd.to_numeric(df.get("RAL", 0), errors="coerce").fillna(0)
+
+    dfs.append(df)
+
+if not dfs:
+    st.error("❌ Aucun fichier stock valide")
+    st.stop()
+
+stock = pd.concat(dfs)
+
+st.success("✅ Stock chargé")
+
+# ==============================
+# MERGE
+# ==============================
+df = stock.merge(t1[["SKU"]], on="SKU", how="inner")
+
+if df.empty:
+    st.warning("⚠️ Aucun matching SKU entre T1 et stock")
+    st.stop()
+
+# ==============================
+# STATUT
+# ==============================
+df["Statut"] = np.select(
+    [
+        df["STOCK"] > 0,
+        (df["STOCK"] == 0) & (df["RAL"] > 0)
+    ],
+    ["Implanté", "Attente"],
+    default="Alerte"
+)
+
+# ==============================
+# KPI
+# ==============================
+total = len(df)
+ok = (df["Statut"] == "Implanté").sum()
+att = (df["Statut"] == "Attente").sum()
+alert = (df["Statut"] == "Alerte").sum()
+
+pct = int(ok / total * 100) if total > 0 else 0
+
+c1, c2, c3 = st.columns(3)
+c1.metric("✅ Implanté", ok)
+c2.metric("🚚 Attente", att)
+c3.metric("🚨 Alerte", alert)
+
+st.progress(pct / 100)
+
+# ==============================
+# PAR MAGASIN
+# ==============================
+pivot = (
+    df.groupby(["SITE", "Statut"])
+    .size()
+    .unstack(fill_value=0)
+    .reset_index()
+)
+
+pivot["Total"] = pivot.sum(axis=1, numeric_only=True)
+pivot["Taux (%)"] = (pivot.get("Implanté", 0) / pivot["Total"] * 100).round(0)
+
+pivot["Taux (%)"] = pivot["Taux (%)"].astype(str) + "%"
+
+st.subheader("🏪 Performance magasins")
+st.dataframe(pivot, use_container_width=True)
+
+# ==============================
+# ALERTES
+# ==============================
+st.subheader("🚨 Articles bloqués")
+
+df_alert = df[df["Statut"] == "Alerte"]
+
+if df_alert.empty:
+    st.success("✅ Aucune alerte")
+else:
+    st.dataframe(df_alert, use_container_width=True)
+
+# ==============================
+# EXPORT EXCEL
+# ==============================
+def build_excel(df, pivot):
+    output = io.BytesIO()
+
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+
+        # Résumé
+        resume = pd.DataFrame({
+            "Indicateur": ["Implanté", "Attente", "Alerte"],
+            "Valeur": [
+                (df["Statut"] == "Implanté").sum(),
+                (df["Statut"] == "Attente").sum(),
+                (df["Statut"] == "Alerte").sum()
+            ]
+        })
+        resume.to_excel(writer, sheet_name="Résumé", index=False)
+
+        # Magasins
+        pivot.to_excel(writer, sheet_name="Magasins", index=False)
+
+        # Alertes
+        df[df["Statut"] == "Alerte"].to_excel(writer, sheet_name="Alertes", index=False)
+
+        # Détail
+        df.to_excel(writer, sheet_name="Détail", index=False)
+
+    return output.getvalue()
+
+# Bouton téléchargement
+excel_file = build_excel(df, pivot)
+
+st.download_button(
+    label="📥 Télécharger le rapport Excel",
+    data=excel_file,
+    file_name="rapport_implantation.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+)
