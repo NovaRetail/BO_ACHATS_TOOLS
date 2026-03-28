@@ -228,7 +228,7 @@ def prepare_dataset(df: pd.DataFrame, exclude_technical: bool = True, cap_sur_re
     # Règle temporaire : date prévue absente → On Time par défaut
     work["on_time"] = work["date_expected"].isna() | (work["date_received"] <= work["date_expected"])
     work["otif"]    = ((work["qte_rec_retained"] >= work["qte_cde"]) & work["on_time"]).astype(int)
-    work["criticality_score"] = work["qty_missing"] * (100 - work["line_fill_rate"] * 100) / 100
+    work["criticality_score"] = work["service_gap_value"] * (1 - work["line_fill_rate"])
 
     quality = {
         "raw_rows":              raw_len,
@@ -305,7 +305,10 @@ def agg_supplier(df: pd.DataFrame) -> pd.DataFrame:
         sites        =("site_label",         "nunique"),
     )
     g = _add_perf_cols(g)
-    g["criticality_score"] = g["qty_missing"] * (100 - g["score"]) / 100
+    # Criticité = Impact CA proxy × taux de défaillance (1 - Fill Rate)
+    # Logique : un fournisseur est critique s'il manque BEAUCOUP en valeur ET que son taux de service est faible
+    # Exemple : impact 100 M FCFA à 40% Fill Rate → criticité = 100M × 60% = 60 M
+    g["criticality_score"] = g["impact_value"] * (1 - g["fill_rate"] / 100)
     return g.sort_values(["criticality_score", "impact_value"], ascending=[False, False]).reset_index(drop=True)
 
 
@@ -321,7 +324,7 @@ def agg_site(df: pd.DataFrame) -> pd.DataFrame:
         articles     =("Code",              "nunique"),
     )
     g = _add_perf_cols(g)
-    g["criticality_score"] = g["qty_missing"] * (100 - g["score"]) / 100
+    g["criticality_score"] = g["impact_value"] * (1 - g["fill_rate"] / 100)
     return g.sort_values(["criticality_score", "impact_value"], ascending=[False, False]).reset_index(drop=True)
 
 
@@ -340,7 +343,7 @@ def agg_article(df: pd.DataFrame) -> pd.DataFrame:
         orders       =("N° Cde",            "nunique"),
     )
     g = _add_perf_cols(g)
-    g["criticality_score"] = g["qty_missing"] * (100 - g["score"]) / 100
+    g["criticality_score"] = g["impact_value"] * (1 - g["fill_rate"] / 100)
     return g.sort_values(["criticality_score", "impact_value"], ascending=[False, False]).reset_index(drop=True)
 
 
@@ -465,24 +468,144 @@ st.markdown("<div class='page-caption'>Pilotage OTIF fournisseur · Magasin · A
 
 if uploaded is None:
     st.markdown("---")
+    st.markdown("<div class='section-label'>Méthodologie de calcul</div>", unsafe_allow_html=True)
+
     st.markdown("""
 <div class='alert-card alert-blue'>
-  <strong>ℹ️ À quoi sert ce module ?</strong><br>
-  Ce dashboard mesure la performance fournisseur sur 4 axes :<br><br>
-  <strong>1. Fill Rate</strong> — quantité reçue vs quantité commandée<br>
-  <strong>2. On Time</strong> — respect du délai de livraison<br>
-  <strong>3. OTIF</strong> — livraison complète et à l'heure<br>
-  <strong>4. Criticité</strong> — poids du manque et niveau de service combinés<br><br>
-  Colonnes date prévue reconnues (par ordre de priorité) : <code>H Date</code> → <code>Date livraison</code> → <code>Date prévue</code> → <code>Date</code>
+  <strong>ℹ️ Objectif du module</strong><br>
+  Mesurer la performance de service fournisseur à partir d'un export ERP de réceptions.
+  Quatre indicateurs complémentaires permettent d'identifier les fournisseurs critiques,
+  les magasins impactés et les articles à risque.
 </div>
 """, unsafe_allow_html=True)
+
+    # KPI 1 — Fill Rate
+    st.markdown("""
+<div style='background:#FFFFFF;border:0.5px solid #E5E5EA;border-radius:12px;padding:20px 22px;margin-bottom:12px'>
+  <div style='font-size:13px;font-weight:700;color:#1C1C1E;margin-bottom:6px'>① Fill Rate — Taux de service quantitatif</div>
+  <div style='font-size:13px;color:#3A3A3C;line-height:1.7'>
+    Mesure la part de la quantité commandée effectivement reçue.<br>
+    <code style='background:#F2F2F7;padding:2px 6px;border-radius:4px;font-size:12px'>
+      Fill Rate = Qté reçue retenue / Qté commandée × 100
+    </code><br><br>
+    <strong>Règle cap :</strong> si la quantité reçue dépasse la quantité commandée (sur-réception),
+    elle est ramenée à la quantité commandée pour éviter un taux supérieur à 100%.<br>
+    <code style='background:#F2F2F7;padding:2px 6px;border-radius:4px;font-size:12px'>
+      Qté reçue retenue = min(Qté reçue, Qté commandée)
+    </code><br><br>
+    <span style='color:#34C759;font-weight:600'>✓ Objectif cible : ≥ 97%</span>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+    # KPI 2 — On Time
+    st.markdown("""
+<div style='background:#FFFFFF;border:0.5px solid #E5E5EA;border-radius:12px;padding:20px 22px;margin-bottom:12px'>
+  <div style='font-size:13px;font-weight:700;color:#1C1C1E;margin-bottom:6px'>② On Time — Taux de respect du délai</div>
+  <div style='font-size:13px;color:#3A3A3C;line-height:1.7'>
+    Mesure la proportion de lignes livrées à la date prévue ou avant.<br>
+    <code style='background:#F2F2F7;padding:2px 6px;border-radius:4px;font-size:12px'>
+      On Time = 1 si Date réception ≤ Date prévue, sinon 0
+    </code><br><br>
+    <strong>Colonne date prévue utilisée (ordre de priorité) :</strong>
+    <code>H Date</code> → <code>Date livraison</code> → <code>Date prévue</code> → <code>Date</code><br><br>
+    <strong>⚠️ Règle temporaire ERP :</strong> si la date prévue est absente,
+    la ligne est considérée <em>On Time</em> par défaut.
+    Si aucune date prévue n'est disponible dans l'export, le On Time sera <strong>100% artificiel</strong>
+    et l'OTIF ne reflétera que le Fill Rate.<br><br>
+    <span style='color:#34C759;font-weight:600'>✓ Objectif cible : ≥ 95%</span>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+    # KPI 3 — OTIF
+    st.markdown("""
+<div style='background:#FFFFFF;border:0.5px solid #E5E5EA;border-radius:12px;padding:20px 22px;margin-bottom:12px'>
+  <div style='font-size:13px;font-weight:700;color:#1C1C1E;margin-bottom:6px'>③ OTIF — On Time In Full</div>
+  <div style='font-size:13px;color:#3A3A3C;line-height:1.7'>
+    Indicateur synthétique : une livraison est OTIF uniquement si elle est <strong>à la fois complète ET à l'heure</strong>.<br>
+    <code style='background:#F2F2F7;padding:2px 6px;border-radius:4px;font-size:12px'>
+      OTIF = 1 si (Qté reçue retenue ≥ Qté commandée) ET (On Time = 1), sinon 0
+    </code><br><br>
+    Le taux OTIF global est la moyenne des OTIF ligne par ligne.<br><br>
+    <span style='color:#34C759;font-weight:600'>✓ Objectif cible : ≥ 95%</span>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+    # KPI 4 — Score global
+    st.markdown("""
+<div style='background:#FFFFFF;border:0.5px solid #E5E5EA;border-radius:12px;padding:20px 22px;margin-bottom:12px'>
+  <div style='font-size:13px;font-weight:700;color:#1C1C1E;margin-bottom:6px'>④ Score global — Synthèse pondérée</div>
+  <div style='font-size:13px;color:#3A3A3C;line-height:1.7'>
+    Agrège les trois indicateurs avec des pondérations reflétant leur priorité métier.<br>
+    <code style='background:#F2F2F7;padding:2px 6px;border-radius:4px;font-size:12px'>
+      Score = 50% × Fill Rate + 30% × On Time + 20% × OTIF
+    </code><br><br>
+    <strong>Niveaux de performance :</strong><br>
+    🟢 <strong>Excellent</strong> → Score ≥ 97% &nbsp;|&nbsp;
+    🟠 <strong>À surveiller</strong> → Score entre 90% et 97% &nbsp;|&nbsp;
+    🔴 <strong>Critique</strong> → Score &lt; 90%<br><br>
+    <strong>Exemple concret :</strong><br>
+    Un fournisseur livre <strong>850 unités sur 1 000 commandées</strong>, avec <strong>7 lignes sur 10 à l'heure</strong>.<br>
+    → Fill Rate = 850/1 000 = <strong>85%</strong><br>
+    → On Time = 7/10 = <strong>70%</strong><br>
+    → OTIF : parmi les 7 lignes à l'heure, seules celles avec réception complète comptent.
+    Supposons 5 lignes complètes et à l'heure → OTIF = 5/10 = <strong>50%</strong><br>
+    → Score = 50%×85 + 30%×70 + 20%×50 = 42.5 + 21 + 10 = <strong>73.5% 🔴 Critique</strong>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+    # KPI 5 — Criticité
+    st.markdown("""
+<div style='background:#FFFFFF;border:0.5px solid #E5E5EA;border-radius:12px;padding:20px 22px;margin-bottom:12px'>
+  <div style='font-size:13px;font-weight:700;color:#1C1C1E;margin-bottom:6px'>⑤ Score de criticité — Priorisation opérationnelle</div>
+  <div style='font-size:13px;color:#3A3A3C;line-height:1.7'>
+    Permet de classer les fournisseurs par ordre de priorité d'action en combinant
+    <strong>l'impact financier du manque</strong> et <strong>le taux de défaillance</strong>.<br><br>
+    <code style='background:#F2F2F7;padding:2px 6px;border-radius:4px;font-size:12px'>
+      Criticité = Impact CA proxy × (1 − Fill Rate)
+    </code><br>
+    <code style='background:#F2F2F7;padding:2px 6px;border-radius:4px;font-size:12px'>
+      Impact CA proxy = Qté manquante × Prix de vente HT
+    </code><br><br>
+    <strong>Pourquoi cette formule ?</strong><br>
+    Un fournisseur avec un fort volume manquant mais sur des articles peu chers sera moins
+    prioritaire qu'un fournisseur avec moins de manque mais sur des références à forte valeur.<br><br>
+    <strong>Exemple concret :</strong><br>
+    <em>Fournisseur A</em> — Impact CA proxy = 50 M FCFA, Fill Rate = 80% → Criticité = 50M × 20% = <strong>10 M</strong><br>
+    <em>Fournisseur B</em> — Impact CA proxy = 30 M FCFA, Fill Rate = 20% → Criticité = 30M × 80% = <strong>24 M</strong><br>
+    → Le fournisseur B est prioritaire malgré un impact brut inférieur, car il est <strong>beaucoup moins fiable</strong>.
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+    # Impact CA proxy
+    st.markdown("""
+<div style='background:#FFFFFF;border:0.5px solid #E5E5EA;border-radius:12px;padding:20px 22px;margin-bottom:12px'>
+  <div style='font-size:13px;font-weight:700;color:#1C1C1E;margin-bottom:6px'>⑥ Impact CA proxy — Valorisation du manque</div>
+  <div style='font-size:13px;color:#3A3A3C;line-height:1.7'>
+    Traduit le volume non livré en valeur commerciale potentiellement perdue.<br>
+    <code style='background:#F2F2F7;padding:2px 6px;border-radius:4px;font-size:12px'>
+      Impact CA proxy = Qté manquante × Prix de vente HT
+    </code><br><br>
+    Il s'agit d'une <strong>estimation haute</strong> (on suppose que les unités manquantes auraient
+    toutes été vendues au prix catalogue). Il ne tient pas compte des stocks disponibles en magasin.<br><br>
+    <span style='color:#FF9500;font-weight:600'>⚠️ Si Prix de vente HT = 0 pour certaines lignes, l'impact est sous-estimé — une alerte s'affiche.</span>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
     st.markdown("""
 <div class='alert-card alert-amber'>
-  <strong>⚠️ Règle temporaire ERP</strong><br>
-  Si la date prévue est absente ou nulle, la ligne est considérée <strong>On Time</strong> par défaut.
-  Le On Time sera artificiellement élevé si aucune date prévue n'est renseignée dans l'export.
+  <strong>⚠️ Règle temporaire ERP active</strong><br>
+  Si la date prévue est absente ou nulle dans l'export, la ligne est considérée <strong>On Time</strong> par défaut.
+  Le On Time sera artificiellement à 100% si aucune date prévue n'est renseignée.
+  Demandez à l'IT un export incluant la colonne <code>H Date</code> ou <code>Date livraison</code>.
 </div>
 """, unsafe_allow_html=True)
+
     st.stop()
 
 # ── Chargement (cache sur bytes + filename pour invalidation correcte)
