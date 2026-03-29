@@ -1327,21 +1327,27 @@ def build_export_all_fiches(df: pd.DataFrame, by_supplier: pd.DataFrame, seuil: 
         c.border = THIN
 
     # ── Jointure score fournisseur sur les lignes
-    sup_meta = by_supplier[["supplier_name", "Fou", "score", "Niveau", "criticality_score"]].copy()
-    sup_meta = sup_meta.rename(columns={"Fou": "fou_code"})
+    # On renomme criticality_score → crit_sup pour éviter la collision
+    # avec la colonne criticality_score déjà présente au niveau ligne dans df
+    sup_meta = (
+        by_supplier[["supplier_name", "Fou", "score", "Niveau", "criticality_score"]]
+        .copy()
+        .rename(columns={
+            "Fou":               "fou_code",
+            "criticality_score": "crit_sup",   # ← renommage anti-collision
+        })
+    )
 
     # Sélection lignes : fill rate < seuil OU otif = 0
     mask = (df["line_fill_rate"] < seuil / 100) | (df["otif"] == 0)
     export_df = df[mask].copy()
 
     # Jointure score & criticité fournisseur (pour tri)
-    export_df = export_df.merge(
-        sup_meta, on="supplier_name", how="left"
-    )
+    export_df = export_df.merge(sup_meta, on="supplier_name", how="left")
 
     # Tri : criticité fournisseur desc → volume manquant desc
     export_df = export_df.sort_values(
-        ["criticality_score", "qty_missing", "service_gap_value"],
+        ["crit_sup", "qty_missing", "service_gap_value"],
         ascending=[False, False, False],
     )
 
