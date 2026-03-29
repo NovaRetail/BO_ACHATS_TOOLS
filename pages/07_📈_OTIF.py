@@ -1266,18 +1266,198 @@ with tab6:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# EXPORT EXCEL — TOUTES LES FICHES FOURNISSEURS (1 ONGLET UNIQUE)
+# ══════════════════════════════════════════════════════════════════════════════
+def build_export_all_fiches(df: pd.DataFrame, by_supplier: pd.DataFrame, seuil: int) -> BytesIO:
+    """
+    Export Excel 1 onglet — toutes les livraisons incomplètes, tous fournisseurs.
+    Trié par criticité fournisseur décroissante puis volume manquant décroissant.
+    Colonnes : Fournisseur · Score · Niveau · N° Commande · Date réception ·
+               Date prévue · Magasin · Code · Article · Qté cde · Qté reçue ·
+               Qté manquante · Fill Rate ligne · Impact CA proxy · OTIF · Retard (j)
+    Lignes incluses : Fill Rate ligne < seuil/100 OU OTIF = 0
+    Mise en forme : en-têtes fixes (freeze), filtre automatique, coloration Fill Rate.
+    """
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Toutes livraisons incomplètes"
+    today_str = _date.today().strftime("%d/%m/%Y")
+
+    # ── Styles
+    H_FILL   = PatternFill("solid", fgColor="1C3557")
+    H_FONT   = Font(bold=True, color="FFFFFF", size=10)
+    T_FONT   = Font(bold=True, size=13, color="1C3557")
+    GRN_FILL = PatternFill("solid", fgColor="E8F8EE")   # vert pâle ≥ 97%
+    AMB_FILL = PatternFill("solid", fgColor="FFF8E8")   # amber 90–97%
+    RED_FILL = PatternFill("solid", fgColor="FFF0F0")   # rouge < 90%
+    CTR      = Alignment(horizontal="center", vertical="center")
+    LFT      = Alignment(horizontal="left",   vertical="center")
+    THIN_SIDE = Side(style="thin", color="E5E5EA")
+    THIN     = Border(left=THIN_SIDE, right=THIN_SIDE,
+                      top=THIN_SIDE,  bottom=THIN_SIDE)
+
+    # ── Titre
+    ws.cell(1, 1, f"LIVRAISONS INCOMPLÈTES — TOUS FOURNISSEURS").font = T_FONT
+    ws.cell(2, 1, (
+        f"Généré le {today_str}  ·  "
+        f"Seuil : Fill Rate < {seuil}% ou OTIF = 0  ·  "
+        f"Trié par criticité fournisseur"
+    )).font = Font(size=9, italic=True, color="8E8E93")
+    ws.merge_cells("A1:P1")
+    ws.merge_cells("A2:P2")
+    ws.append([])
+
+    # ── En-têtes
+    HEADERS = [
+        "Fournisseur", "Code Fou.", "Score four.", "Niveau",
+        "N° Commande", "Date réception", "Date prévue",
+        "Magasin", "Code article", "Désignation article",
+        "Qté commandée", "Qté reçue", "Qté manquante",
+        "Fill Rate ligne", "Impact CA proxy (FCFA)",
+        "OTIF", "Retard (j)",
+    ]
+    ws.append(HEADERS)
+    hdr_row = 4
+    for i, h in enumerate(HEADERS, 1):
+        c = ws.cell(hdr_row, i)
+        c.value = h
+        c.fill  = H_FILL
+        c.font  = H_FONT
+        c.alignment = CTR
+        c.border = THIN
+
+    # ── Jointure score fournisseur sur les lignes
+    sup_meta = by_supplier[["supplier_name", "Fou", "score", "Niveau", "criticality_score"]].copy()
+    sup_meta = sup_meta.rename(columns={"Fou": "fou_code"})
+
+    # Sélection lignes : fill rate < seuil OU otif = 0
+    mask = (df["line_fill_rate"] < seuil / 100) | (df["otif"] == 0)
+    export_df = df[mask].copy()
+
+    # Jointure score & criticité fournisseur (pour tri)
+    export_df = export_df.merge(
+        sup_meta, on="supplier_name", how="left"
+    )
+
+    # Tri : criticité fournisseur desc → volume manquant desc
+    export_df = export_df.sort_values(
+        ["criticality_score", "qty_missing", "service_gap_value"],
+        ascending=[False, False, False],
+    )
+
+    # ── Écriture des lignes
+    for _, row in export_df.iterrows():
+        fr  = row.get("line_fill_rate", np.nan)
+        ot  = row.get("otif", 0)
+        dly = row.get("delay_days", np.nan)
+
+        row_data = [
+            row.get("supplier_name", ""),
+            int(row.get("fou_code", 0)) if pd.notna(row.get("fou_code")) else "",
+            f"{row.get('score', 0):.1f}%",
+            row.get("Niveau", ""),
+            row.get("N° Cde", ""),
+            row.get("date_received", pd.NaT),
+            row.get("date_expected", pd.NaT),
+            row.get("site_label", ""),
+            row.get("Code", ""),
+            row.get("article_label", ""),
+            int(row.get("qte_cde", 0)),
+            int(row.get("qte_rec_retained", 0)),
+            int(row.get("qty_missing", 0)),
+            f"{fr * 100:.1f}%" if pd.notna(fr) else "—",
+            round(row.get("service_gap_value", 0), 0),
+            "OUI" if ot == 1 else "NON",
+            int(dly) if pd.notna(dly) else "—",
+        ]
+        n = ws.max_row + 1
+        ws.append(row_data)
+
+        # Bordures toutes colonnes
+        for col_i in range(1, len(HEADERS) + 1):
+            cell = ws.cell(n, col_i)
+            cell.border = THIN
+            cell.alignment = LFT if col_i in (1, 4, 8, 10) else CTR
+
+        # Coloration Fill Rate ligne (col 14)
+        if pd.notna(fr):
+            fr_pct = fr * 100
+            fill_fr = GRN_FILL if fr_pct >= 97 else (AMB_FILL if fr_pct >= 90 else RED_FILL)
+            ws.cell(n, 14).fill = fill_fr
+
+        # Coloration Niveau (col 4)
+        niv = row.get("Niveau", "")
+        if "Excellent"    in str(niv): ws.cell(n, 4).fill = GRN_FILL
+        elif "surveiller" in str(niv): ws.cell(n, 4).fill = AMB_FILL
+        elif "Critique"   in str(niv): ws.cell(n, 4).fill = RED_FILL
+
+        # Coloration OTIF (col 16)
+        ws.cell(n, 16).fill = GRN_FILL if ot == 1 else RED_FILL
+
+    # ── Largeurs colonnes
+    col_widths = [28, 10, 11, 14, 14, 16, 14, 22, 13, 32, 13, 11, 14, 14, 22, 8, 11]
+    for i, w in enumerate(col_widths, 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+
+    # ── Freeze panes (ligne 4 = en-têtes fixes) + filtre automatique
+    ws.freeze_panes = "A5"
+    ws.auto_filter.ref = f"A{hdr_row}:{get_column_letter(len(HEADERS))}{ws.max_row}"
+
+    # ── Hauteur lignes de données
+    ws.row_dimensions[1].height = 22
+    ws.row_dimensions[2].height = 14
+    ws.row_dimensions[hdr_row].height = 28
+
+    buf = BytesIO(); wb.save(buf); buf.seek(0)
+    return buf
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # EXPORT EXCEL GLOBAL
 # ══════════════════════════════════════════════════════════════════════════════
 st.markdown("---")
-with st.expander("📥 Export global — Synthèse · Fournisseur · Magasin · Article · Lignes critiques"):
-    st.caption(f"{len(by_supplier)} fournisseurs · {len(by_site)} magasin(s) · {len(by_article)} articles")
-    if st.button("Générer l'export global Excel", type="primary", key="btn_global"):
-        with st.spinner("Génération en cours…"):
+st.markdown("<div class='section-label'>Exports Excel</div>", unsafe_allow_html=True)
+
+col_exp1, col_exp2 = st.columns(2)
+
+# ── Export 1 : Toutes fiches fournisseurs (1 onglet, tous fournisseurs)
+with col_exp1:
+    st.markdown("""
+<div style='background:#FFFFFF;border:0.5px solid #E5E5EA;border-radius:12px;padding:16px 18px;margin-bottom:8px'>
+  <div style='font-size:13px;font-weight:700;color:#1C1C1E;margin-bottom:4px'>📋 Toutes les fiches fournisseurs</div>
+  <div style='font-size:12px;color:#8E8E93;line-height:1.5'>
+    1 onglet · toutes les livraisons incomplètes · tous fournisseurs<br>
+    Filtre automatique Excel · trié par criticité fournisseur
+  </div>
+</div>""", unsafe_allow_html=True)
+    if st.button("Générer l'export Fiches", type="primary", key="btn_all_fiches"):
+        with st.spinner("Génération…"):
+            buf_all = build_export_all_fiches(view, by_supplier, seuil_fill)
+        st.download_button(
+            "⬇️ Télécharger — Toutes les fiches",
+            data=buf_all,
+            file_name=f"SmartBuyer_OTIF_Fiches_Fournisseurs.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="dl_all_fiches",
+        )
+
+# ── Export 2 : Synthèse analytique globale (multi-onglets)
+with col_exp2:
+    st.markdown("""
+<div style='background:#FFFFFF;border:0.5px solid #E5E5EA;border-radius:12px;padding:16px 18px;margin-bottom:8px'>
+  <div style='font-size:13px;font-weight:700;color:#1C1C1E;margin-bottom:4px'>📊 Synthèse analytique globale</div>
+  <div style='font-size:12px;color:#8E8E93;line-height:1.5'>
+    Multi-onglets · Par fournisseur · Par magasin · Par article<br>
+    Lignes critiques · Qualité des données
+  </div>
+</div>""", unsafe_allow_html=True)
+    if st.button("Générer l'export Synthèse", type="primary", key="btn_global"):
+        with st.spinner("Génération…"):
             buf_global = build_export_excel(view, by_supplier, by_site, by_article, quality)
         st.download_button(
-            "⬇️ Télécharger l'export OTIF global",
+            "⬇️ Télécharger — Synthèse globale",
             data=buf_global,
-            file_name="SmartBuyer_OTIF_Global.xlsx",
+            file_name="SmartBuyer_OTIF_Synthese.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key="dl_global",
         )
