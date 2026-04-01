@@ -334,7 +334,7 @@ with st.sidebar:
     st.page_link("pages/03_📦_Detention_Top_CA.py",              label="📦  Détention Top CA",   disabled=True)
     st.page_link("pages/04_💸_Performance_Promo.py",             label="💸  Performance Promo",  disabled=True)
     st.page_link("pages/05_🏪_Suivi_Implantation.py",            label="🏪  Suivi Implantation", disabled=True)
-    st.page_link("pages/08_📦_Ruptures_Stock.py",                label="📦  Ruptures Stock")
+    st.page_link("pages/08_📦_OOS.py",                           label="📦  Ruptures Stock")
     st.markdown("---")
 
     st.markdown(
