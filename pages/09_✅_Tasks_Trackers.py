@@ -1,6 +1,6 @@
 """
 09 ✅ Tasks Tracker
-Suivi des tâches acheteurs · Google Sheets · SmartBuyer
+Style Trello · Clic sur carte · Archives · SmartBuyer
 """
 
 import streamlit as st
@@ -10,7 +10,7 @@ from google.oauth2.service_account import Credentials
 from datetime import date
 import plotly.graph_objects as go
 
-# ── CONFIG PAGE ───────────────────────────────────────────────────────────────
+# ── CONFIG ────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Tasks Tracker", page_icon="✅", layout="wide")
 
 # ── CHARTE SMARTBUYER ─────────────────────────────────────────────────────────
@@ -19,21 +19,16 @@ PL_FONT  = "#1C1C1E"
 PL_GRID  = "#E5E5EA"
 WHITE    = "#FFFFFF"
 BORDER   = "#E5E5EA"
-
-BLUE     = "#007AFF"
-BLUE_S   = "#E8F1FF"
-GREEN    = "#34C759"
-GREEN_S  = "#E8FAF0"
-ORANGE   = "#FF9500"
-ORANGE_S = "#FFF4E0"
-RED      = "#FF3B30"
-RED_S    = "#FFF0EF"
-PURPLE   = "#AF52DE"
-PURPLE_S = "#F5EEFF"
+BLUE     = "#007AFF"; BLUE_S   = "#E8F1FF"
+GREEN    = "#34C759"; GREEN_S  = "#E8FAF0"
+ORANGE   = "#FF9500"; ORANGE_S = "#FFF4E0"
+RED      = "#FF3B30"; RED_S    = "#FFF0EF"
+PURPLE   = "#AF52DE"; PURPLE_S = "#F5EEFF"
 GRAY_S   = "#F2F2F7"
 
-STATUTS   = ["À faire", "En cours", "Bloqué", "Terminé"]
-PRIORITES = ["Haute", "Moyenne", "Basse"]
+STATUTS      = ["À faire", "En cours", "Bloqué", "Terminé"]
+PRIORITES    = ["Haute", "Moyenne", "Basse"]
+ARCHIVE_DAYS = 30
 
 STATUT_CFG = {
     "À faire":  {"color": BLUE,   "soft": BLUE_S,   "icon": "●"},
@@ -46,13 +41,9 @@ PRIORITE_CFG = {
     "Moyenne": {"color": ORANGE, "soft": ORANGE_S},
     "Basse":   {"color": GREEN,  "soft": GREEN_S},
 }
-
 AVATAR_PALETTE = [
-    (BLUE,   BLUE_S),
-    (PURPLE, PURPLE_S),
-    (GREEN,  GREEN_S),
-    (ORANGE, ORANGE_S),
-    (RED,    RED_S),
+    (BLUE, BLUE_S), (PURPLE, PURPLE_S), (GREEN, GREEN_S),
+    (ORANGE, ORANGE_S), (RED, RED_S),
 ]
 
 def avatar_color(name):
@@ -64,6 +55,15 @@ def initiales(name):
         return (parts[0][0] + parts[-1][0]).upper()
     return str(name)[:2].upper() if name else "?"
 
+def is_archived(row, today):
+    if row.get("Statut") != "Terminé":
+        return False
+    for key in ["Échéance", "Créé le"]:
+        val = row.get(key)
+        if val and isinstance(val, date):
+            return (today - val).days > ARCHIVE_DAYS
+    return False
+
 # ── CSS ───────────────────────────────────────────────────────────────────────
 st.markdown(f"""
 <style>
@@ -72,101 +72,60 @@ st.markdown(f"""
   .block-container {{ padding-top: 1.5rem; max-width: 1400px; }}
 
   .kpi-box {{
-    background: {WHITE};
-    border: 1px solid {BORDER};
-    border-radius: 16px;
-    padding: 16px 18px;
-    text-align: center;
+    background: {WHITE}; border: 1px solid {BORDER};
+    border-radius: 16px; padding: 16px 18px; text-align: center;
   }}
   .kpi-val {{ font-size: 1.9rem; font-weight: 700; line-height: 1.1; }}
   .kpi-lbl {{ font-size: 0.72rem; color: #636366; margin-top: 3px; }}
 
-  .col-head {{
-    border-radius: 10px;
-    padding: 7px 12px;
-    margin-bottom: 10px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    font-size: 0.8rem;
-    font-weight: 700;
+  .kol {{ background: {GRAY_S}; border-radius: 14px; padding: 10px; }}
+  .kol-head {{
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 10px; padding: 0 2px;
   }}
-  .col-badge {{
-    font-size: 0.68rem;
-    font-weight: 700;
-    border-radius: 20px;
-    padding: 2px 8px;
-    color: {WHITE};
-  }}
+  .kol-name {{ font-size: 0.8rem; font-weight: 700; display: flex; align-items: center; gap: 6px; }}
+  .kol-dot  {{ width: 8px; height: 8px; border-radius: 50%; display: inline-block; }}
+  .kol-badge {{ font-size: 0.68rem; font-weight: 700; border-radius: 20px; padding: 2px 8px; color: {WHITE}; }}
 
   .tcard {{
-    background: {WHITE};
-    border: 1px solid {BORDER};
-    border-radius: 14px;
-    padding: 13px 14px;
-    margin-bottom: 9px;
+    background: {WHITE}; border: 0.5px solid {BORDER};
+    border-radius: 12px; padding: 12px 13px; margin-bottom: 8px;
   }}
-  .tcard.late {{
-    border-left: 3px solid {RED};
-    background: {RED_S};
-    border-radius: 0 14px 14px 0;
+  .tcard.late   {{ border-left: 3px solid {RED}; border-radius: 0 12px 12px 0; }}
+  .tcard.done   {{ opacity: 0.5; }}
+  .tcard.sel    {{ border: 1.5px solid {BLUE}; }}
+  .tcard-title  {{ font-size: 0.85rem; font-weight: 600; color: {PL_FONT}; margin-bottom: 5px; line-height: 1.3; }}
+  .tcard-desc   {{ font-size: 0.74rem; color: #636366; margin-bottom: 7px; line-height: 1.4; }}
+  .tcard-tags   {{ margin-bottom: 7px; display: flex; gap: 4px; flex-wrap: wrap; }}
+  .ttag         {{ font-size: 0.68rem; font-weight: 600; padding: 2px 7px; border-radius: 4px; }}
+  .tcard-footer {{ display: flex; align-items: center; justify-content: space-between; }}
+  .tav {{
+    width: 22px; height: 22px; border-radius: 50%;
+    font-size: 0.6rem; font-weight: 700;
+    display: inline-flex; align-items: center; justify-content: center;
   }}
-  .tcard.done {{ opacity: 0.55; }}
-
-  .tcard-title {{
-    font-size: 0.85rem;
-    font-weight: 600;
-    color: {PL_FONT};
-    margin-bottom: 4px;
-    line-height: 1.35;
+  .tdate      {{ font-size: 0.68rem; color: #8E8E93; }}
+  .tdate.late {{ color: {RED}; font-weight: 600; }}
+  .empty-kol  {{
+    border: 0.5px dashed {BORDER}; border-radius: 10px;
+    padding: 18px; text-align: center; font-size: 0.76rem; color: #8E8E93;
   }}
-  .tcard-desc {{
-    font-size: 0.74rem;
-    color: #636366;
-    margin-bottom: 8px;
-    line-height: 1.4;
+  .arch-banner {{
+    background: {GREEN_S}; border: 0.5px solid #A3D9B1;
+    border-radius: 10px; padding: 9px 14px;
+    font-size: 0.78rem; color: #1A6B35; margin-bottom: 12px;
   }}
-  .tcard-footer {{
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    flex-wrap: wrap;
-  }}
-  .av {{
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 22px;
-    height: 22px;
-    border-radius: 50%;
-    font-size: 0.6rem;
-    font-weight: 700;
-    flex-shrink: 0;
-  }}
-  .pill {{
-    display: inline-flex;
-    align-items: center;
-    padding: 2px 7px;
-    border-radius: 20px;
-    font-size: 0.68rem;
-    font-weight: 600;
-  }}
-  .dchip {{
-    font-size: 0.68rem;
-    color: #8E8E93;
-    margin-left: auto;
-  }}
-  .dchip.late {{ color: {RED}; font-weight: 600; }}
-  .empty-col {{
-    background: {GRAY_S};
-    border-radius: 12px;
-    padding: 20px;
-    text-align: center;
-    font-size: 0.76rem;
-    color: #8E8E93;
+  div[data-testid="stButton"] > button[kind="secondary"] {{
+    font-size: 0.7rem; padding: 3px 8px;
+    border-radius: 6px; margin-top: 2px; margin-bottom: 4px;
   }}
 </style>
 """, unsafe_allow_html=True)
+
+# ── SESSION STATE ─────────────────────────────────────────────────────────────
+for k, v in {"edit_id": None, "view_mode": "active"}.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
 
 # ── GOOGLE SHEETS ─────────────────────────────────────────────────────────────
 SCOPES = [
@@ -184,11 +143,11 @@ def get_client():
 @st.cache_data(ttl=30)
 def load_tasks():
     try:
-        gc = get_client()
-        sh = gc.open_by_key(st.secrets["sheet_id"])
-        ws = sh.worksheet("Tâches")
+        gc   = get_client()
+        sh   = gc.open_by_key(st.secrets["sheet_id"])
+        ws   = sh.worksheet("Tâches")
         data = ws.get_all_records()
-        df = pd.DataFrame(data)
+        df   = pd.DataFrame(data)
         if df.empty:
             return _empty_df()
         df["Échéance"] = pd.to_datetime(df["Échéance"], errors="coerce").dt.date
@@ -218,18 +177,29 @@ def save_task(row_data, row_index=None):
                 ws.update_cell(row_index + 1, col_idx, str(row_data[header]))
     load_tasks.clear()
 
+def delete_task(row_index):
+    gc = get_client()
+    sh = gc.open_by_key(st.secrets["sheet_id"])
+    ws = sh.worksheet("Tâches")
+    ws.delete_rows(row_index + 1)
+    load_tasks.clear()
+
 def next_id(df):
     if df.empty or df["ID"].dropna().empty:
         return "T001"
     nums = df["ID"].str.extract(r"(\d+)")[0].dropna().astype(int)
     return f"T{(nums.max() + 1):03d}"
 
+# ── DONNÉES ───────────────────────────────────────────────────────────────────
+df    = load_tasks()
+today = date.today()
+
 # ── HEADER ────────────────────────────────────────────────────────────────────
-c_title, c_btn = st.columns([6, 1])
-with c_title:
+ch, cb = st.columns([6, 1])
+with ch:
     st.markdown("## ✅ Tasks Tracker")
-    st.caption("Suivi des tâches en temps réel · Équipe Achats · Google Sheets")
-with c_btn:
+    st.caption("Suivi des tâches · Équipe Achats · Google Sheets")
+with cb:
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("🔄 Rafraîchir", use_container_width=True):
         load_tasks.clear()
@@ -237,20 +207,16 @@ with c_btn:
 
 st.divider()
 
-df    = load_tasks()
-today = date.today()
-
 # ── KPIs ──────────────────────────────────────────────────────────────────────
 total    = len(df)
 en_cours = len(df[df["Statut"] == "En cours"])  if not df.empty else 0
 bloques  = len(df[df["Statut"] == "Bloqué"])    if not df.empty else 0
 termines = len(df[df["Statut"] == "Terminé"])   if not df.empty else 0
-retards  = len(
-    df[(df["Échéance"] < today) & (df["Statut"] != "Terminé")]
-) if not df.empty else 0
+retards  = len(df[(df["Échéance"] < today) & (df["Statut"] != "Terminé")]) if not df.empty else 0
 taux     = round(termines / total * 100) if total > 0 else 0
+nb_arch  = len(df[df.apply(lambda r: is_archived(r, today), axis=1)]) if not df.empty else 0
 
-k1, k2, k3, k4, k5 = st.columns(5)
+k1,k2,k3,k4,k5 = st.columns(5)
 for col, val, lbl, color in [
     (k1, total,      "Total tâches", PL_FONT),
     (k2, en_cours,   "En cours",     ORANGE),
@@ -267,7 +233,7 @@ for col, val, lbl, color in [
 st.markdown("<br>", unsafe_allow_html=True)
 
 # ── ONGLETS ───────────────────────────────────────────────────────────────────
-tab_kanban, tab_form, tab_liste = st.tabs([
+tab_kanban, tab_new, tab_liste = st.tabs([
     "🗂  Kanban", "➕  Nouvelle tâche", "📋  Liste complète"
 ])
 
@@ -277,194 +243,223 @@ tab_kanban, tab_form, tab_liste = st.tabs([
 with tab_kanban:
     st.markdown("<br>", unsafe_allow_html=True)
 
-    resps_list = sorted(df["Responsable"].dropna().unique().tolist()) if not df.empty else []
-    fc1, fc2, _ = st.columns([2, 2, 4])
-    f_resp = fc1.selectbox("Responsable", ["Tous"] + resps_list, label_visibility="collapsed")
-    f_prio = fc2.selectbox("Priorité", ["Toutes"] + PRIORITES, label_visibility="collapsed")
+    # Toggles vue + filtres
+    t1, t2, t3, _, f1, f2 = st.columns([1.2, 1, 1.6, 1.5, 1.8, 1.8])
+    if t1.button("Actives",
+                 type="primary" if st.session_state.view_mode == "active" else "secondary",
+                 use_container_width=True):
+        st.session_state.view_mode = "active"; st.session_state.edit_id = None; st.rerun()
+    if t2.button("Toutes",
+                 type="primary" if st.session_state.view_mode == "all" else "secondary",
+                 use_container_width=True):
+        st.session_state.view_mode = "all"; st.session_state.edit_id = None; st.rerun()
+    if t3.button(f"📦 Archives ({nb_arch})",
+                 type="primary" if st.session_state.view_mode == "archive" else "secondary",
+                 use_container_width=True):
+        st.session_state.view_mode = "archive"; st.session_state.edit_id = None; st.rerun()
 
-    df_view = df.copy() if not df.empty else df
+    resps_list = sorted(df["Responsable"].dropna().unique().tolist()) if not df.empty else []
+    f_resp = f1.selectbox("Responsable", ["Tous"] + resps_list, label_visibility="collapsed")
+    f_prio = f2.selectbox("Priorité", ["Toutes"] + PRIORITES, label_visibility="collapsed")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    if st.session_state.view_mode == "archive" and nb_arch > 0:
+        st.markdown(f'<div class="arch-banner">📦 <b>{nb_arch} tâche(s)</b> archivée(s) — terminées depuis +{ARCHIVE_DAYS} jours</div>',
+                    unsafe_allow_html=True)
+
+    # Filtrage
+    def row_visible(row):
+        archived = is_archived(row, today)
+        mode = st.session_state.view_mode
+        if mode == "archive": return archived
+        if mode == "active":  return not archived
+        return True  # all
+
+    df_view = df[df.apply(row_visible, axis=1)].copy() if not df.empty else df
     if f_resp != "Tous" and not df_view.empty:
         df_view = df_view[df_view["Responsable"] == f_resp]
     if f_prio != "Toutes" and not df_view.empty:
         df_view = df_view[df_view["Priorité"] == f_prio]
 
-    st.markdown("<br>", unsafe_allow_html=True)
-    cols = st.columns(4)
-
-    for col, statut in zip(cols, STATUTS):
+    # Colonnes
+    kanban_cols = st.columns(4)
+    for col, statut in zip(kanban_cols, STATUTS):
         cfg = STATUT_CFG[statut]
         sub = df_view[df_view["Statut"] == statut] if not df_view.empty else pd.DataFrame()
 
         col.markdown(f"""
-        <div class="col-head" style="background:{cfg['soft']};color:{cfg['color']}">
-          <span>{cfg['icon']} {statut}</span>
-          <span class="col-badge" style="background:{cfg['color']}">{len(sub)}</span>
+        <div class="kol">
+          <div class="kol-head">
+            <div class="kol-name">
+              <span class="kol-dot" style="background:{cfg['color']}"></span>{statut}
+            </div>
+            <span class="kol-badge" style="background:{cfg['color']}">{len(sub)}</span>
+          </div>
         </div>""", unsafe_allow_html=True)
 
         if sub.empty:
-            col.markdown('<div class="empty-col">Aucune tâche</div>', unsafe_allow_html=True)
+            col.markdown('<div class="empty-kol">Aucune tâche</div>', unsafe_allow_html=True)
             continue
 
         for _, row in sub.iterrows():
             ech    = row.get("Échéance", "")
             retard = bool(ech and ech < today and statut != "Terminé")
-            css    = "late" if retard else ("done" if statut == "Terminé" else "")
-            prio   = row.get("Priorité", "")
-            pcfg   = PRIORITE_CFG.get(prio, {"color": BLUE, "soft": BLUE_S})
-            resp   = str(row.get("Responsable", ""))
-            av_c, av_bg = avatar_color(resp)
-            ini    = initiales(resp)
-            desc   = str(row.get("Description", "")).strip()
-            desc_html = (
-                f'<div class="tcard-desc">{desc[:65]}{"…" if len(desc)>65 else ""}</div>'
-                if desc else ""
-            )
-            date_lbl = f"📅 {ech}" + (" 🔴" if retard else "") if ech else ""
-            date_cls = "late" if retard else ""
+            done   = statut == "Terminé"
+            is_sel = str(row["ID"]) == str(st.session_state.edit_id)
+            css    = " ".join(filter(None,[
+                "sel"  if is_sel else "",
+                "late" if retard else "",
+                "done" if done   else "",
+            ]))
+            prio       = row.get("Priorité", "")
+            pcfg       = PRIORITE_CFG.get(prio, {"color": BLUE, "soft": BLUE_S})
+            resp       = str(row.get("Responsable",""))
+            av_c, av_bg= avatar_color(resp)
+            ini        = initiales(resp)
+            desc       = str(row.get("Description","")).strip()
+            desc_h     = f'<div class="tcard-desc">{desc[:60]}{"…" if len(desc)>60 else ""}</div>' if desc else ""
+            date_lbl   = f"📅 {ech}" + (" 🔴" if retard else "") if ech else ""
+            date_cls   = "late" if retard else ""
 
             col.markdown(f"""
             <div class="tcard {css}">
               <div class="tcard-title">{row.get("Titre","")}</div>
-              {desc_html}
+              {desc_h}
+              <div class="tcard-tags">
+                <span class="ttag" style="background:{pcfg['soft']};color:{pcfg['color']}">{prio}</span>
+              </div>
               <div class="tcard-footer">
-                <span class="av" style="background:{av_bg};color:{av_c}">{ini}</span>
-                <span class="pill" style="background:{pcfg['soft']};color:{pcfg['color']}">{prio}</span>
-                <span class="dchip {date_cls}">{date_lbl}</span>
+                <span class="tav" style="background:{av_bg};color:{av_c}">{ini}</span>
+                <span class="tdate {date_cls}">{date_lbl}</span>
               </div>
             </div>""", unsafe_allow_html=True)
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# FORMULAIRE
-# ═══════════════════════════════════════════════════════════════════════════════
-with tab_form:
-    st.markdown("<br>", unsafe_allow_html=True)
-    mode = st.radio("Mode", ["Nouvelle tâche", "Modifier une tâche existante"], horizontal=True)
+            lbl_btn = "✕ Fermer" if is_sel else "✏️ Modifier"
+            if col.button(lbl_btn, key=f"btn_{row['ID']}", use_container_width=True):
+                st.session_state.edit_id = None if is_sel else str(row["ID"])
+                st.rerun()
 
-    row_sel   = None
-    row_excel = None
+    # ── Panneau édition ────────────────────────────────────────────────────────
+    if st.session_state.edit_id:
+        st.markdown("<br>", unsafe_allow_html=True)
+        mask     = df["ID"] == st.session_state.edit_id
+        row_sel  = df[mask].iloc[0]   if mask.any() else None
+        row_excel= df.index.get_loc(df[mask].index[0]) + 1 if mask.any() else None
 
-    if mode == "Modifier une tâche existante" and not df.empty:
-        choices  = df.apply(lambda r: f"{r['ID']} — {r['Titre']}", axis=1).tolist()
-        selected = st.selectbox("Tâche à modifier", choices)
-        sel_id   = selected.split(" — ")[0]
-        row_sel  = df[df["ID"] == sel_id].iloc[0]
-        row_excel= df.index.get_loc(df[df["ID"] == sel_id].index[0]) + 1
+        if row_sel is not None:
+            st.markdown(f"**✏️ Modifier — {row_sel['Titre']}**")
+            with st.form("edit_form"):
+                ec1, ec2 = st.columns(2)
+                titre       = ec1.text_input("Titre *",       value=row_sel["Titre"])
+                responsable = ec2.text_input("Responsable *", value=row_sel["Responsable"])
+                description = st.text_area("Description",     value=row_sel["Description"], height=80)
+                ec3, ec4, ec5 = st.columns(3)
+                statut   = ec3.selectbox("Statut",   STATUTS,
+                    index=STATUTS.index(row_sel["Statut"]) if row_sel["Statut"] in STATUTS else 0)
+                priorite = ec4.selectbox("Priorité", PRIORITES,
+                    index=PRIORITES.index(row_sel["Priorité"]) if row_sel["Priorité"] in PRIORITES else 1)
+                echeance = ec5.date_input("Échéance",
+                    value=row_sel["Échéance"] if row_sel["Échéance"] else today)
+                commentaire = st.text_input("Commentaire", value=row_sel["Commentaire"])
 
-    st.markdown("<br>", unsafe_allow_html=True)
+                bs, bd, bx = st.columns([3, 1, 1])
+                save_btn   = bs.form_submit_button("💾 Enregistrer", type="primary", use_container_width=True)
+                delete_btn = bd.form_submit_button("🗑 Supprimer",   use_container_width=True)
+                cancel_btn = bx.form_submit_button("✕ Annuler",      use_container_width=True)
 
-    with st.form("task_form", clear_on_submit=True):
-        c1, c2 = st.columns(2)
-        titre       = c1.text_input(
-            "Titre *",
-            value=row_sel["Titre"] if row_sel is not None else "",
-            placeholder="Ex : Négociation remise MIPA"
-        )
-        responsable = c2.text_input(
-            "Responsable *",
-            value=row_sel["Responsable"] if row_sel is not None else "",
-            placeholder="Ex : Grace, Carine, Yves..."
-        )
-        description = st.text_area(
-            "Description",
-            value=row_sel["Description"] if row_sel is not None else "",
-            height=90,
-            placeholder="Contexte, objectif, détails..."
-        )
-        c3, c4, c5 = st.columns(3)
-        statut = c3.selectbox(
-            "Statut", STATUTS,
-            index=STATUTS.index(row_sel["Statut"])
-            if row_sel is not None and row_sel["Statut"] in STATUTS else 0
-        )
-        priorite = c4.selectbox(
-            "Priorité", PRIORITES,
-            index=PRIORITES.index(row_sel["Priorité"])
-            if row_sel is not None and row_sel["Priorité"] in PRIORITES else 1
-        )
-        echeance = c5.date_input(
-            "Échéance",
-            value=row_sel["Échéance"]
-            if row_sel is not None and row_sel["Échéance"] else today
-        )
-        commentaire = st.text_input(
-            "Commentaire",
-            value=row_sel["Commentaire"] if row_sel is not None else "",
-            placeholder="Bloquant, lien utile, note..."
-        )
+                if save_btn:
+                    if not titre or not responsable:
+                        st.error("Titre et responsable obligatoires.")
+                    else:
+                        save_task({
+                            "ID": row_sel["ID"], "Titre": titre,
+                            "Description": description, "Responsable": responsable,
+                            "Statut": statut, "Priorité": priorite,
+                            "Échéance": str(echeance),
+                            "Créé le": str(row_sel["Créé le"]),
+                            "Commentaire": commentaire,
+                        }, row_index=row_excel)
+                        st.session_state.edit_id = None
+                        st.success("✅ Tâche mise à jour !")
+                        st.rerun()
 
-        submitted = st.form_submit_button("💾 Enregistrer", type="primary", use_container_width=True)
-
-        if submitted:
-            if not titre or not responsable:
-                st.error("Le titre et le responsable sont obligatoires.")
-            else:
-                task_id  = row_sel["ID"] if row_sel is not None else next_id(df)
-                row_data = {
-                    "ID":          task_id,
-                    "Titre":       titre,
-                    "Description": description,
-                    "Responsable": responsable,
-                    "Statut":      statut,
-                    "Priorité":    priorite,
-                    "Échéance":    str(echeance),
-                    "Créé le":     str(row_sel["Créé le"]) if row_sel is not None else str(today),
-                    "Commentaire": commentaire,
-                }
-                try:
-                    save_task(row_data, row_index=row_excel)
-                    st.success(f"✅ Tâche **{task_id}** enregistrée avec succès !")
+                if delete_btn:
+                    delete_task(row_excel)
+                    st.session_state.edit_id = None
+                    st.success("🗑 Tâche supprimée.")
                     st.rerun()
-                except Exception as e:
-                    st.error(f"Erreur sauvegarde : {e}")
+
+                if cancel_btn:
+                    st.session_state.edit_id = None
+                    st.rerun()
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# NOUVELLE TÂCHE
+# ═══════════════════════════════════════════════════════════════════════════════
+with tab_new:
+    st.markdown("<br>", unsafe_allow_html=True)
+    with st.form("new_task_form", clear_on_submit=True):
+        nc1, nc2 = st.columns(2)
+        titre       = nc1.text_input("Titre *",       placeholder="Ex : Négociation remise MIPA")
+        responsable = nc2.text_input("Responsable *", placeholder="Ex : Grace, Carine, Yves...")
+        description = st.text_area("Description", height=90, placeholder="Contexte, objectif, détails...")
+        nc3, nc4, nc5 = st.columns(3)
+        statut   = nc3.selectbox("Statut",   STATUTS)
+        priorite = nc4.selectbox("Priorité", PRIORITES, index=1)
+        echeance = nc5.date_input("Échéance", value=today)
+        commentaire = st.text_input("Commentaire", placeholder="Bloquant, lien utile, note...")
+
+        if st.form_submit_button("➕ Ajouter la tâche", type="primary", use_container_width=True):
+            if not titre or not responsable:
+                st.error("Titre et responsable obligatoires.")
+            else:
+                task_id = next_id(df)
+                save_task({
+                    "ID": task_id, "Titre": titre, "Description": description,
+                    "Responsable": responsable, "Statut": statut, "Priorité": priorite,
+                    "Échéance": str(echeance), "Créé le": str(today),
+                    "Commentaire": commentaire,
+                })
+                st.success(f"✅ Tâche **{task_id}** ajoutée !")
+                st.rerun()
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # LISTE COMPLÈTE
 # ═══════════════════════════════════════════════════════════════════════════════
 with tab_liste:
     st.markdown("<br>", unsafe_allow_html=True)
-
     if df.empty:
         st.info("Aucune tâche enregistrée.")
     else:
         resps  = sorted(df["Responsable"].dropna().unique().tolist())
-        f1, f2, f3, f4 = st.columns(4)
-        f_resp2   = f1.multiselect("Responsable", resps,     default=resps)
-        f_stat2   = f2.multiselect("Statut",      STATUTS,   default=STATUTS)
-        f_prio2   = f3.multiselect("Priorité",    PRIORITES, default=PRIORITES)
-        f_retard2 = f4.checkbox("Retards uniquement")
+        lf1,lf2,lf3,lf4 = st.columns(4)
+        lf_resp   = lf1.multiselect("Responsable", resps,     default=resps)
+        lf_stat   = lf2.multiselect("Statut",      STATUTS,   default=STATUTS)
+        lf_prio   = lf3.multiselect("Priorité",    PRIORITES, default=PRIORITES)
+        lf_retard = lf4.checkbox("Retards uniquement")
 
         df_filt = df[
-            df["Responsable"].isin(f_resp2) &
-            df["Statut"].isin(f_stat2) &
-            df["Priorité"].isin(f_prio2)
+            df["Responsable"].isin(lf_resp) &
+            df["Statut"].isin(lf_stat) &
+            df["Priorité"].isin(lf_prio)
         ].copy()
 
-        if f_retard2:
-            df_filt = df_filt[
-                (df_filt["Échéance"] < today) & (df_filt["Statut"] != "Terminé")
-            ]
+        if lf_retard:
+            df_filt = df_filt[(df_filt["Échéance"] < today) & (df_filt["Statut"] != "Terminé")]
 
-        df_filt["⚠️"] = df_filt["Échéance"].apply(
-            lambda e: "🔴" if (e and e < today) else ""
-        )
+        df_filt["⚠️"]      = df_filt["Échéance"].apply(lambda e: "🔴" if (e and e < today) else "")
+        df_filt["Archive"] = df_filt.apply(lambda r: "📦" if is_archived(r, today) else "", axis=1)
 
         st.dataframe(
-            df_filt[["ID","Titre","Responsable","Statut","Priorité","Échéance","⚠️","Commentaire"]],
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Échéance": st.column_config.DateColumn("Échéance", format="DD/MM/YYYY"),
-            }
+            df_filt[["ID","Titre","Responsable","Statut","Priorité","Échéance","⚠️","Archive","Commentaire"]],
+            use_container_width=True, hide_index=True,
+            column_config={"Échéance": st.column_config.DateColumn("Échéance", format="DD/MM/YYYY")},
         )
 
-        nb_retards = len(df_filt[
-            (df_filt["Échéance"] < today) & (df_filt["Statut"] != "Terminé")
-        ]) if not df_filt.empty else 0
-        st.caption(
-            f"{len(df_filt)} tâche(s) · "
-            f"{len(df_filt[df_filt['Statut']=='Terminé'])} terminée(s) · "
-            f"{nb_retards} en retard"
-        )
+        nb_ret = len(df_filt[(df_filt["Échéance"] < today) & (df_filt["Statut"] != "Terminé")]) if not df_filt.empty else 0
+        nb_arc = len(df_filt[df_filt["Archive"] == "📦"])
+        st.caption(f"{len(df_filt)} tâche(s) · {len(df_filt[df_filt['Statut']=='Terminé'])} terminée(s) · {nb_ret} en retard · {nb_arc} archivée(s)")
 
         if not df_filt.empty and len(df_filt) > 1:
             st.markdown("<br>", unsafe_allow_html=True)
@@ -472,26 +467,16 @@ with tab_liste:
             fig = go.Figure()
             for statut in STATUTS:
                 sub = agg[agg["Statut"] == statut]
-                if sub.empty:
-                    continue
+                if sub.empty: continue
                 fig.add_trace(go.Bar(
-                    name=statut,
-                    x=sub["Responsable"],
-                    y=sub["n"],
-                    marker_color=STATUT_CFG[statut]["color"],
-                    marker_line_width=0,
+                    name=statut, x=sub["Responsable"], y=sub["n"],
+                    marker_color=STATUT_CFG[statut]["color"], marker_line_width=0,
                 ))
             fig.update_layout(
-                barmode="stack",
-                paper_bgcolor=WHITE,
-                plot_bgcolor=WHITE,
-                height=240,
-                margin=dict(l=10, r=10, t=10, b=10),
+                barmode="stack", paper_bgcolor=WHITE, plot_bgcolor=WHITE,
+                height=240, margin=dict(l=10,r=10,t=10,b=10),
                 legend=dict(orientation="h", y=-0.3, font_size=11, font_color=PL_FONT),
-                font=dict(
-                    family="SF Pro Display, -apple-system, sans-serif",
-                    color=PL_FONT, size=12
-                ),
+                font=dict(family="SF Pro Display,-apple-system,sans-serif", color=PL_FONT, size=12),
                 xaxis=dict(gridcolor=PL_GRID, linecolor=PL_GRID),
                 yaxis=dict(gridcolor=PL_GRID, tickformat="d"),
             )
