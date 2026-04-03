@@ -1,6 +1,6 @@
 """
 09 ✅ Tasks Tracker
-Style Trello · Clic sur carte · Archives · SmartBuyer
+Style Trello · Carte cliquable · Archives · SmartBuyer
 """
 
 import streamlit as st
@@ -71,6 +71,7 @@ st.markdown(f"""
   [data-testid="stHeader"]           {{ background-color: {PL_BG}; }}
   .block-container {{ padding-top: 1.5rem; max-width: 1400px; }}
 
+  /* KPIs */
   .kpi-box {{
     background: {WHITE}; border: 1px solid {BORDER};
     border-radius: 16px; padding: 16px 18px; text-align: center;
@@ -78,6 +79,7 @@ st.markdown(f"""
   .kpi-val {{ font-size: 1.9rem; font-weight: 700; line-height: 1.1; }}
   .kpi-lbl {{ font-size: 0.72rem; color: #636366; margin-top: 3px; }}
 
+  /* Colonne Kanban */
   .kol {{ background: {GRAY_S}; border-radius: 14px; padding: 10px; }}
   .kol-head {{
     display: flex; align-items: center; justify-content: space-between;
@@ -87,37 +89,68 @@ st.markdown(f"""
   .kol-dot  {{ width: 8px; height: 8px; border-radius: 50%; display: inline-block; }}
   .kol-badge {{ font-size: 0.68rem; font-weight: 700; border-radius: 20px; padding: 2px 8px; color: {WHITE}; }}
 
-  .tcard {{
-    background: {WHITE}; border: 0.5px solid {BORDER};
-    border-radius: 12px; padding: 12px 13px; margin-bottom: 8px;
+  /* ── Carte = bouton Streamlit déguisé ── */
+  div[data-testid="stButton"].card-btn > button {{
+    background: {WHITE} !important;
+    border: 0.5px solid {BORDER} !important;
+    border-radius: 12px !important;
+    padding: 12px 13px !important;
+    margin-bottom: 8px !important;
+    width: 100% !important;
+    text-align: left !important;
+    cursor: pointer !important;
+    color: {PL_FONT} !important;
+    font-size: 0.84rem !important;
+    font-weight: 400 !important;
+    line-height: 1.5 !important;
+    white-space: pre-wrap !important;
+    height: auto !important;
+    min-height: unset !important;
+    transition: border-color 0.12s, box-shadow 0.12s !important;
   }}
-  .tcard.late   {{ border-left: 3px solid {RED}; border-radius: 0 12px 12px 0; }}
-  .tcard.done   {{ opacity: 0.5; }}
-  .tcard.sel    {{ border: 1.5px solid {BLUE}; }}
-  .tcard-title  {{ font-size: 0.85rem; font-weight: 600; color: {PL_FONT}; margin-bottom: 5px; line-height: 1.3; }}
-  .tcard-desc   {{ font-size: 0.74rem; color: #636366; margin-bottom: 7px; line-height: 1.4; }}
-  .tcard-tags   {{ margin-bottom: 7px; display: flex; gap: 4px; flex-wrap: wrap; }}
-  .ttag         {{ font-size: 0.68rem; font-weight: 600; padding: 2px 7px; border-radius: 4px; }}
-  .tcard-footer {{ display: flex; align-items: center; justify-content: space-between; }}
-  .tav {{
-    width: 22px; height: 22px; border-radius: 50%;
-    font-size: 0.6rem; font-weight: 700;
-    display: inline-flex; align-items: center; justify-content: center;
+  div[data-testid="stButton"].card-btn > button:hover {{
+    border-color: #C7C7CC !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.07) !important;
+    background: {WHITE} !important;
   }}
-  .tdate      {{ font-size: 0.68rem; color: #8E8E93; }}
-  .tdate.late {{ color: {RED}; font-weight: 600; }}
-  .empty-kol  {{
+  div[data-testid="stButton"].card-btn > button:focus {{
+    box-shadow: none !important;
+    outline: none !important;
+  }}
+  div[data-testid="stButton"].card-btn.sel > button {{
+    border: 1.5px solid {BLUE} !important;
+    background: {BLUE_S} !important;
+  }}
+  div[data-testid="stButton"].card-btn.late > button {{
+    border-left: 3px solid {RED} !important;
+    border-radius: 0 12px 12px 0 !important;
+  }}
+  div[data-testid="stButton"].card-btn.done > button {{
+    opacity: 0.5 !important;
+  }}
+
+  /* Colonne vide */
+  .empty-kol {{
     border: 0.5px dashed {BORDER}; border-radius: 10px;
-    padding: 18px; text-align: center; font-size: 0.76rem; color: #8E8E93;
+    padding: 18px; text-align: center;
+    font-size: 0.76rem; color: #8E8E93;
   }}
+
+  /* Archive banner */
   .arch-banner {{
     background: {GREEN_S}; border: 0.5px solid #A3D9B1;
     border-radius: 10px; padding: 9px 14px;
     font-size: 0.78rem; color: #1A6B35; margin-bottom: 12px;
   }}
-  div[data-testid="stButton"] > button[kind="secondary"] {{
-    font-size: 0.7rem; padding: 3px 8px;
-    border-radius: 6px; margin-top: 2px; margin-bottom: 4px;
+
+  /* Panneau édition */
+  .edit-header {{
+    font-size: 0.88rem; font-weight: 700;
+    color: {PL_FONT}; margin-bottom: 6px;
+    padding: 12px 16px;
+    background: {WHITE}; border: 1px solid {BORDER};
+    border-radius: 14px 14px 0 0;
+    border-bottom: none;
   }}
 </style>
 """, unsafe_allow_html=True)
@@ -190,6 +223,18 @@ def next_id(df):
     nums = df["ID"].str.extract(r"(\d+)")[0].dropna().astype(int)
     return f"T{(nums.max() + 1):03d}"
 
+def card_label(row, today):
+    """Texte multi-ligne affiché dans le bouton-carte."""
+    prio   = row.get("Priorité", "")
+    resp   = str(row.get("Responsable", ""))
+    ini    = initiales(resp)
+    ech    = row.get("Échéance", "")
+    retard = bool(ech and ech < today and row.get("Statut") != "Terminé")
+    desc   = str(row.get("Description", "")).strip()
+    desc_s = f"\n{desc[:55]}{'…' if len(desc)>55 else ''}" if desc else ""
+    date_s = f"\n📅 {ech}{'  🔴 EN RETARD' if retard else ''}" if ech else ""
+    return f"**{row.get('Titre','')}**{desc_s}\n\n`{ini}`  ·  {prio}{date_s}"
+
 # ── DONNÉES ───────────────────────────────────────────────────────────────────
 df    = load_tasks()
 today = date.today()
@@ -198,7 +243,7 @@ today = date.today()
 ch, cb = st.columns([6, 1])
 with ch:
     st.markdown("## ✅ Tasks Tracker")
-    st.caption("Suivi des tâches · Équipe Achats · Google Sheets")
+    st.caption("Suivi des tâches · Équipe Achats · Google Sheets · Cliquer sur une carte pour l'éditer")
 with cb:
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("🔄 Rafraîchir", use_container_width=True):
@@ -243,24 +288,24 @@ tab_kanban, tab_new, tab_liste = st.tabs([
 with tab_kanban:
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # Toggles vue + filtres
+    # Toggles + filtres
     t1, t2, t3, _, f1, f2 = st.columns([1.2, 1, 1.6, 1.5, 1.8, 1.8])
     if t1.button("Actives",
-                 type="primary" if st.session_state.view_mode == "active" else "secondary",
+                 type="primary" if st.session_state.view_mode=="active" else "secondary",
                  use_container_width=True):
-        st.session_state.view_mode = "active"; st.session_state.edit_id = None; st.rerun()
+        st.session_state.view_mode="active"; st.session_state.edit_id=None; st.rerun()
     if t2.button("Toutes",
-                 type="primary" if st.session_state.view_mode == "all" else "secondary",
+                 type="primary" if st.session_state.view_mode=="all" else "secondary",
                  use_container_width=True):
-        st.session_state.view_mode = "all"; st.session_state.edit_id = None; st.rerun()
+        st.session_state.view_mode="all"; st.session_state.edit_id=None; st.rerun()
     if t3.button(f"📦 Archives ({nb_arch})",
-                 type="primary" if st.session_state.view_mode == "archive" else "secondary",
+                 type="primary" if st.session_state.view_mode=="archive" else "secondary",
                  use_container_width=True):
-        st.session_state.view_mode = "archive"; st.session_state.edit_id = None; st.rerun()
+        st.session_state.view_mode="archive"; st.session_state.edit_id=None; st.rerun()
 
     resps_list = sorted(df["Responsable"].dropna().unique().tolist()) if not df.empty else []
     f_resp = f1.selectbox("Responsable", ["Tous"] + resps_list, label_visibility="collapsed")
-    f_prio = f2.selectbox("Priorité", ["Toutes"] + PRIORITES, label_visibility="collapsed")
+    f_prio = f2.selectbox("Priorité", ["Toutes"] + PRIORITES,  label_visibility="collapsed")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -274,7 +319,7 @@ with tab_kanban:
         mode = st.session_state.view_mode
         if mode == "archive": return archived
         if mode == "active":  return not archived
-        return True  # all
+        return True
 
     df_view = df[df.apply(row_visible, axis=1)].copy() if not df.empty else df
     if f_resp != "Tous" and not df_view.empty:
@@ -282,7 +327,7 @@ with tab_kanban:
     if f_prio != "Toutes" and not df_view.empty:
         df_view = df_view[df_view["Priorité"] == f_prio]
 
-    # Colonnes
+    # Colonnes Kanban
     kanban_cols = st.columns(4)
     for col, statut in zip(kanban_cols, STATUTS):
         cfg = STATUT_CFG[statut]
@@ -303,40 +348,35 @@ with tab_kanban:
             continue
 
         for _, row in sub.iterrows():
-            ech    = row.get("Échéance", "")
+            ech    = row.get("Échéance","")
             retard = bool(ech and ech < today and statut != "Terminé")
             done   = statut == "Terminé"
             is_sel = str(row["ID"]) == str(st.session_state.edit_id)
-            css    = " ".join(filter(None,[
+
+            # CSS classes sur le conteneur du bouton via JS injection
+            css_classes = " ".join(filter(None,[
+                "card-btn",
                 "sel"  if is_sel else "",
                 "late" if retard else "",
                 "done" if done   else "",
             ]))
-            prio       = row.get("Priorité", "")
-            pcfg       = PRIORITE_CFG.get(prio, {"color": BLUE, "soft": BLUE_S})
-            resp       = str(row.get("Responsable",""))
-            av_c, av_bg= avatar_color(resp)
-            ini        = initiales(resp)
-            desc       = str(row.get("Description","")).strip()
-            desc_h     = f'<div class="tcard-desc">{desc[:60]}{"…" if len(desc)>60 else ""}</div>' if desc else ""
-            date_lbl   = f"📅 {ech}" + (" 🔴" if retard else "") if ech else ""
-            date_cls   = "late" if retard else ""
 
-            col.markdown(f"""
-            <div class="tcard {css}">
-              <div class="tcard-title">{row.get("Titre","")}</div>
-              {desc_h}
-              <div class="tcard-tags">
-                <span class="ttag" style="background:{pcfg['soft']};color:{pcfg['color']}">{prio}</span>
-              </div>
-              <div class="tcard-footer">
-                <span class="tav" style="background:{av_bg};color:{av_c}">{ini}</span>
-                <span class="tdate {date_cls}">{date_lbl}</span>
-              </div>
-            </div>""", unsafe_allow_html=True)
+            label = card_label(row, today)
 
-            lbl_btn = "✕ Fermer" if is_sel else "✏️ Modifier"
-            if col.button(lbl_btn, key=f"btn_{row['ID']}", use_container_width=True):
+            # Injecter les classes CSS sur le prochain bouton
+            col.markdown(
+                f'<style>div[data-testid="stButton"]:has(+ div[data-testid="stButton"]) {{ display:none }}</style>',
+                unsafe_allow_html=True
+            )
+            # Tag CSS appliqué via data attribute sur le wrapper
+            col.markdown(
+                f'<div class="{css_classes}" style="margin:0">',
+                unsafe_allow_html=True
+            )
+            clicked = col.button(label, key=f"card_{row['ID']}", use_container_width=True)
+            col.markdown("</div>", unsafe_allow_html=True)
+
+            if clicked:
                 st.session_state.edit_id = None if is_sel else str(row["ID"])
                 st.rerun()
 
@@ -348,20 +388,20 @@ with tab_kanban:
         row_excel= df.index.get_loc(df[mask].index[0]) + 1 if mask.any() else None
 
         if row_sel is not None:
-            st.markdown(f"**✏️ Modifier — {row_sel['Titre']}**")
+            st.markdown(f"#### ✏️ {row_sel['Titre']}")
             with st.form("edit_form"):
                 ec1, ec2 = st.columns(2)
-                titre       = ec1.text_input("Titre *",       value=row_sel["Titre"])
-                responsable = ec2.text_input("Responsable *", value=row_sel["Responsable"])
-                description = st.text_area("Description",     value=row_sel["Description"], height=80)
+                titre       = ec1.text_input("Titre *",       value=str(row_sel["Titre"]))
+                responsable = ec2.text_input("Responsable *", value=str(row_sel["Responsable"]))
+                description = st.text_area("Description",     value=str(row_sel["Description"]), height=80)
                 ec3, ec4, ec5 = st.columns(3)
-                statut   = ec3.selectbox("Statut",   STATUTS,
+                statut   = ec3.selectbox("Statut", STATUTS,
                     index=STATUTS.index(row_sel["Statut"]) if row_sel["Statut"] in STATUTS else 0)
                 priorite = ec4.selectbox("Priorité", PRIORITES,
                     index=PRIORITES.index(row_sel["Priorité"]) if row_sel["Priorité"] in PRIORITES else 1)
                 echeance = ec5.date_input("Échéance",
                     value=row_sel["Échéance"] if row_sel["Échéance"] else today)
-                commentaire = st.text_input("Commentaire", value=row_sel["Commentaire"])
+                commentaire = st.text_input("Commentaire", value=str(row_sel["Commentaire"]))
 
                 bs, bd, bx = st.columns([3, 1, 1])
                 save_btn   = bs.form_submit_button("💾 Enregistrer", type="primary", use_container_width=True)
@@ -432,7 +472,7 @@ with tab_liste:
     if df.empty:
         st.info("Aucune tâche enregistrée.")
     else:
-        resps  = sorted(df["Responsable"].dropna().unique().tolist())
+        resps = sorted(df["Responsable"].dropna().unique().tolist())
         lf1,lf2,lf3,lf4 = st.columns(4)
         lf_resp   = lf1.multiselect("Responsable", resps,     default=resps)
         lf_stat   = lf2.multiselect("Statut",      STATUTS,   default=STATUTS)
