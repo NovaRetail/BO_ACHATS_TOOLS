@@ -273,7 +273,7 @@ def detect_expected_date_column(df: pd.DataFrame):
 @st.cache_data(show_spinner=False)
 def load_erp(file_bytes: bytes, filename: str) -> pd.DataFrame:
     df = pd.read_csv(BytesIO(file_bytes), sep=";", low_memory=False)
-    df.columns = [str(c).replace("\ufeff", "").strip() for c in df.columns]
+    df.columns = [str(c).replace("\ufeff", "").strip().rstrip(",.") for c in df.columns]
     df = df.dropna(axis=1, how="all")
     df = df.drop(columns=[c for c in df.columns if c.startswith("Unnamed:")], errors="ignore")
     for col in df.select_dtypes(include="object").columns:
