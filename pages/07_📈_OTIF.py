@@ -309,7 +309,8 @@ def prepare_dataset(df: pd.DataFrame, exclude_technical: bool = True,
         return work[name] if name in work.columns else pd.Series("Inconnu", index=work.index)
 
     work["site_label"]    = _col("Libellé site").fillna("Inconnu").astype(str).str.strip()
-    work["supplier_name"] = _col("Nom fourn.").fillna("Inconnu").astype(str).str.strip()
+    supplier_col = next((c for c in work.columns if c.startswith("Nom fourn")), None)
+    work["supplier_name"] = (work[supplier_col] if supplier_col else pd.Series("Inconnu", index=work.index)).fillna("Inconnu").astype(str).str.strip()
     work["article_label"] = _col("Libellé article").fillna("Inconnu").astype(str).str.strip()
     work["dept_label"]    = _col("Libellé département").fillna("Inconnu").astype(str).str.strip()
     work["famille_label"] = _col("Libellé famille").fillna("Inconnu").astype(str).str.strip()
