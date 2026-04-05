@@ -1301,7 +1301,9 @@ def build_report(
     }
     os_ = {'IM': (C['blue_l'], C['blue']), 'LO': (C['green_l'], C['green'])}
     fs_ = {'🟢 Possible': (C['green_l'], C['green']), '🔴 Impossible': (C['red_l'], C['red'])}
-    def ts(v, r): return (C['green_l'], C['green']) if v >= 80 else (C['red_l'], C['red'])
+    _gl = C['green_l']; _g = C['green']; _rl = C['red_l']; _r = C['red']
+    def ts(v, r, _gl=_gl, _g=_g, _rl=_rl, _r=_r):
+        return (_gl, _g) if v >= 80 else (_rl, _r)
 
     # ── SHEET 1 : RÉSUMÉ EXÉCUTIF ─────────────────────────────────────────────
     ws1 = wb.create_sheet("📊 Résumé Exécutif")
@@ -1317,7 +1319,7 @@ def build_report(
         ws1.column_dimensions[get_column_letter(ci)].width = 20
         denom = mag_count * sku_count
         share = int(val / denom * 100) if denom > 0 else 0
-        for r_, v_, fs_, bg_, fc_ in [
+        for r_, v_, font_sz_, bg_, fc_ in [
             (4, lbl,                 8,  C['grey'], col),
             (5, val,                 32, bg,        col),
             (6, f"{share}% du total",9,  bg,        col),
@@ -1325,7 +1327,7 @@ def build_report(
             ws1.row_dimensions[r_].height = 14 if r_==4 else (40 if r_==5 else 18)
             cell = ws1.cell(r_, ci)
             cell.value = v_
-            cell.font  = Font(name='Arial', size=fs_, bold=True, color=fc_)
+            cell.font  = Font(name='Arial', size=font_sz_, bold=True, color=fc_)
             cell.fill  = fill(bg_); cell.alignment = ctr(); cell.border = brd()
 
     # Tableau magasins
@@ -1344,16 +1346,17 @@ def build_report(
     write_header(ws2, "ALERTES — AUCUN MOUVEMENT",
                  f"{today_str}  ·  {cal_n} article(s) · Stock PBI = 0")
     ws2.column_dimensions['A'].width = 2
+    _grey = C['grey']; _dark = C['dark']
     a_cols = [
         ("MAGASIN",    "Magasin",         22,'l',None),
         ("SKU",        "SKU",             12,'c',None),
         ("LIBELLÉ",    "Libellé article", 36,'l',None),
-        ("ORIGINE",    "Origine",         10,'c',lambda v,r: os_.get(v,(C['grey'],C['dark']))),
+        ("ORIGINE",    "Origine",         10,'c',lambda v,r,_o=os_,_g=_grey,_d=_dark: _o.get(v,(_g,_d))),
         ("MODE APPRO", "Mode Appro",      16,'l',None),
         ("SEM.",       "Sem. Réception",  10,'c',None),
         ("DATE LIV.",  "Date Livraison",  14,'c',None),
         ("STOCK",      "Stock",           10,'c',None),
-        ("STATUT",     "Statut",          24,'c',lambda v,r: ss.get(v,(C['grey'],C['dark']))),
+        ("STATUT",     "Statut",          24,'c',lambda v,r,_s=ss,_g=_grey,_d=_dark: _s.get(v,(_g,_d))),
     ]
     df_alerte_xl = det[det['Statut']=='Alerte Aucun Mouvement']
     write_table(ws2, df_alerte_xl, 4, a_cols, hcol=C['red'])
@@ -1384,7 +1387,7 @@ def build_report(
             ("CÉDANT SUGGÉRÉ",  "Cédant suggéré",   18,'c',None),
             ("STOCK CÉDANT",    "Stock cédant",     14,'c',None),
             ("QTÉ CESSIBLE",    "Qté cessible",     13,'c',None),
-            ("FAISABILITÉ",     "Faisabilité",      16,'c',lambda v,r: fs_.get(v,(C['grey'],C['dark']))),
+            ("FAISABILITÉ",     "Faisabilité",      16,'c',lambda v,r,_f=fs_,_g=_grey,_d=_dark: _f.get(v,(_g,_d))),
         ]
         write_table(ws5, ces, 4, c5, hcol=C['gold'])
 
