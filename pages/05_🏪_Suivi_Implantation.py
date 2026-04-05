@@ -1190,11 +1190,11 @@ elif active == TABS[4]:
                         unsafe_allow_html=True)
             st.dataframe(
                 df_view.style
-                .applymap(lambda v: 'background-color:#ecfdf5;color:#059669;font-weight:700'
-                          if v == '🟢 Possible' else
-                          ('background-color:#fef2f2;color:#dc2626;font-weight:700'
-                           if v == '🔴 Impossible' else ''),
-                          subset=['Faisabilité'])
+                .map(lambda v: 'background-color:#ecfdf5;color:#059669;font-weight:700'
+                     if v == '🟢 Possible' else
+                     ('background-color:#fef2f2;color:#dc2626;font-weight:700'
+                      if v == '🔴 Impossible' else ''),
+                     subset=['Faisabilité'])
                 .background_gradient(subset=['Qté cessible'], cmap='Greens'),
                 use_container_width=True, hide_index=True,
             )
