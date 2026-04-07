@@ -483,6 +483,17 @@ def generate_excel(arts, rayon_tots):
 # ─── RENDU ────────────────────────────────────────────────────────────────────
 st.markdown("## 📊 Performance commerciale hebdo")
 
+st.markdown("""
+Ce module génère le **rapport de performance commerciale hebdomadaire** à partir de votre extraction PBI.
+
+Il calcule automatiquement, pour l'ensemble du réseau et par rayon, les indicateurs clés de la semaine :
+**Top CA**, **Top masse de marge**, **Meilleures ventes en promotion**, **Flop marges négatives** et **Top casse**.
+
+Le bouton **Exporter Excel** produit un fichier structuré en 4 onglets — Synthèse réseau + un onglet par rayon (Épicerie, Boissons, DPH) — prêt à être partagé avec l'équipe d'acheteurs.
+""")
+
+st.divider()
+
 if not uploaded:
     st.info("⬆ Chargez votre extraction PBI dans la sidebar pour démarrer.")
     st.stop()
