@@ -475,11 +475,18 @@ with st.sidebar:
     st.markdown("---")
 
     st.markdown("<div style='font-size:11px;font-weight:600;color:#8E8E93;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px'>Navigation</div>", unsafe_allow_html=True)
-    st.page_link("app.py",                                    label="🏠  Accueil")
-    st.page_link("pages/01_📊_Analyse_Scoring_ABC.py",        label="📊  Scoring ABC")
-    st.page_link("pages/02_📈_Ventes_PBI.py",                 label="📈  Ventes PBI")
-    st.page_link("pages/09_📦_Tasks_Trackers.py",             label="📋  Task Tracker")
-    st.page_link("pages/10_📊_Perf_Hebdo.py",                 label="📊  Perf Hebdo")
+    nav_pages = [
+        ("app.py",                                  "🏠  Accueil"),
+        ("pages/01_📊_Analyse_Scoring_ABC.py",      "📊  Scoring ABC"),
+        ("pages/02_📈_Ventes_PBI.py",               "📈  Ventes PBI"),
+        ("pages/09_📦_Tasks_Trackers.py",           "📋  Task Tracker"),
+        ("pages/10_📊_Perf_Hebdo.py",               "📊  Perf Hebdo"),
+    ]
+    for path, label in nav_pages:
+        try:
+            st.page_link(path, label=label)
+        except Exception:
+            pass
     st.markdown("---")
 
     st.markdown("<div style='font-size:11px;font-weight:600;color:#8E8E93;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px'>Import fichier</div>", unsafe_allow_html=True)
