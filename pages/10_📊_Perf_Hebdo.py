@@ -193,23 +193,38 @@ def top_casse(arts, n=10):
 def show_df(df, rename_map, num_cols=(), pct_cols=(), neg_cols=(), green_cols=()):
     df = df.rename(columns=rename_map).copy()
     df.index = range(1, len(df)+1)
-    style = df.style
+
+    # Cast int pour supprimer les .000000
+    all_num = [rename_map.get(c, c) for c in num_cols]
+    for col in all_num + ["Qté vendue", "Casse qté"]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).round(0).astype("int64")
+
+    fmt = {}
     for c in num_cols:
-        c2 = rename_map.get(c,c)
+        c2 = rename_map.get(c, c)
         if c2 in df.columns:
-            style = style.format({c2: lambda v: f"{v:,.0f}".replace(","," ")})
+            fmt[c2] = lambda v, _c=c2: f"{int(v):,}".replace(",", " ")
     for c in pct_cols:
-        c2 = rename_map.get(c,c)
+        c2 = rename_map.get(c, c)
         if c2 in df.columns:
-            style = style.format({c2: "{:.1%}"})
+            fmt[c2] = "{:.1%}"
+
+    style = df.style
+    if fmt:
+        style = style.format(fmt, na_rep="—")
     for c in neg_cols:
-        c2 = rename_map.get(c,c)
+        c2 = rename_map.get(c, c)
         if c2 in df.columns:
-            style = style.map(lambda v: "color:#FF3B30;font-weight:600" if isinstance(v,(int,float)) and v<0 else "", subset=[c2])
+            style = style.map(
+                lambda v: "color:#FF3B30;font-weight:600" if isinstance(v, (int, float)) and v < 0 else "",
+                subset=[c2])
     for c in green_cols:
-        c2 = rename_map.get(c,c)
+        c2 = rename_map.get(c, c)
         if c2 in df.columns:
-            style = style.map(lambda v: "color:#34C759;font-weight:600" if isinstance(v,(int,float)) and v>0 else "", subset=[c2])
+            style = style.map(
+                lambda v: "color:#34C759;font-weight:600" if isinstance(v, (int, float)) and v > 0 else "",
+                subset=[c2])
     st.dataframe(style, use_container_width=True, height=400, hide_index=False)
 
 # ─── EXPORT EXCEL ────────────────────────────────────────────────────────────
