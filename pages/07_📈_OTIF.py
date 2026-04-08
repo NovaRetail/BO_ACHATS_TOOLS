@@ -1105,6 +1105,269 @@ def build_export_all_fiches(df: pd.DataFrame, by_supplier: pd.DataFrame,
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# EXPORT EXCEL — RÉCAP PRIORISATION FOURNISSEURS
+# ══════════════════════════════════════════════════════════════════════════════
+def build_recap_fournisseur_excel(df: pd.DataFrame, watchdict: dict = None) -> BytesIO:
+    """
+    Export récap fournisseur orienté priorisation d'actions.
+    1 ligne par fournisseur avec :
+      - Refs totales commandées / Refs effectivement livrées (qte_rec > 0) / Taux couverture
+      - Fill Rate / On Time / OTIF / Score / Niveau
+      - Sites impactés (avec livraison incomplète) / Sites total
+      - Vol. manquant / Impact CA proxy
+      - Nb refs GOLD / Nb refs SILVER en sous-service (fill rate < 97%)
+      - Rang criticité
+    Trié par score de criticité décroissant.
+    Filtre automatique + freeze + mise en forme conditionnelle couleur.
+    """
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Récap priorisation fournisseurs"
+    today_str = _date.today().strftime("%d/%m/%Y")
+
+    H_FILL    = PatternFill("solid", fgColor="1C3557")
+    H_FONT    = Font(bold=True, color="FFFFFF", size=10)
+    T_FONT    = Font(bold=True, size=13, color="1C3557")
+    GRN_FILL  = PatternFill("solid", fgColor="E8F8EE")
+    AMB_FILL  = PatternFill("solid", fgColor="FFF8E8")
+    RED_FILL  = PatternFill("solid", fgColor="FFF0F0")
+    GOLD_L    = PatternFill("solid", fgColor="FFFDE7")
+    CTR       = Alignment(horizontal="center", vertical="center")
+    LFT       = Alignment(horizontal="left",   vertical="center")
+    THIN_SIDE = Side(style="thin", color="E5E5EA")
+    THIN      = Border(left=THIN_SIDE, right=THIN_SIDE, top=THIN_SIDE, bottom=THIN_SIDE)
+
+    # ── Titre + sous-titre
+    ws.cell(1, 1, "RÉCAP PRIORISATION FOURNISSEURS — OTIF").font = T_FONT
+    ws.cell(2, 1,
+        f"Généré le {today_str}  ·  "
+        "Trié par criticité décroissante  ·  "
+        "Réfs livrées = au moins 1 unité reçue sur la période"
+        + ("  ·  Cols GOLD/SILVER = nb réfs en sous-service (FR < 97%)" if watchdict else "")
+    ).font = Font(size=9, italic=True, color="8E8E93")
+    total_cols = 19 if watchdict else 17
+    ws.merge_cells(f"A1:{get_column_letter(total_cols)}1")
+    ws.merge_cells(f"A2:{get_column_letter(total_cols)}2")
+    ws.append([])
+
+    # ── Construction des colonnes selon présence watchdict
+    HEADERS = [
+        "Rang",
+        "Fournisseur", "Code Fou.",
+        "Réfs commandées", "Réfs livrées", "Taux couverture réfs",
+        "Fill Rate", "On Time", "OTIF", "Score", "Niveau",
+        "Sites impactés", "Sites total",
+        "Vol. manquant", "Impact CA proxy (FCFA)",
+        "Nb commandes", "Nb lignes",
+    ]
+    if watchdict:
+        HEADERS += ["Réfs GOLD sous-service", "Réfs SILVER sous-service"]
+
+    ws.append(HEADERS)
+    hdr_row = 4
+    for i, h in enumerate(HEADERS, 1):
+        c = ws.cell(hdr_row, i)
+        c.value = h; c.fill = H_FILL; c.font = H_FONT
+        c.alignment = CTR; c.border = THIN
+    ws.row_dimensions[hdr_row].height = 30
+
+    # ── Agrégation par fournisseur
+    # Refs totales = nb de codes distincts commandés
+    # Refs livrées = nb de codes distincts avec au moins 1 unité reçue
+    # Sites impactés = sites où fill rate < 100% (au moins une ligne incomplète)
+    grp = df.groupby(["Fou", "supplier_name"], as_index=False)
+
+    agg = grp.agg(
+        refs_total    =("Code",              "nunique"),
+        qte_cde_sum   =("qte_cde",           "sum"),
+        qte_rec_sum   =("qte_rec_retained",  "sum"),
+        qty_missing   =("qty_missing",        "sum"),
+        impact_value  =("service_gap_value",  "sum"),
+        on_time_mean  =("on_time",            "mean"),
+        otif_mean     =("otif",               "mean"),
+        nb_orders     =("N° Cde",             "nunique"),
+        nb_lines      =("Code",               "count"),
+        sites_total   =("site_label",         "nunique"),
+    )
+
+    # Refs livrées : codes avec qte_rec > 0 (au moins 1 unité)
+    refs_livrees = (
+        df[df["qte_rec_retained"] > 0]
+        .groupby(["Fou", "supplier_name"], as_index=False)["Code"]
+        .nunique()
+        .rename(columns={"Code": "refs_livrees"})
+    )
+    agg = agg.merge(refs_livrees, on=["Fou", "supplier_name"], how="left")
+    agg["refs_livrees"] = agg["refs_livrees"].fillna(0).astype(int)
+
+    # Sites impactés = sites avec au moins une ligne fill rate < 100%
+    sites_impactes = (
+        df[df["line_fill_rate"] < 1.0]
+        .groupby(["Fou", "supplier_name"], as_index=False)["site_label"]
+        .nunique()
+        .rename(columns={"site_label": "sites_impactes"})
+    )
+    agg = agg.merge(sites_impactes, on=["Fou", "supplier_name"], how="left")
+    agg["sites_impactes"] = agg["sites_impactes"].fillna(0).astype(int)
+
+    # KPIs calculés
+    agg["fill_rate"]       = np.where(agg["qte_cde_sum"] > 0, agg["qte_rec_sum"] / agg["qte_cde_sum"] * 100, 0.0)
+    agg["on_time_pct"]     = agg["on_time_mean"] * 100
+    agg["otif_pct"]        = agg["otif_mean"]    * 100
+    agg["score"]           = 0.5 * agg["fill_rate"] + 0.3 * agg["on_time_pct"] + 0.2 * agg["otif_pct"]
+    agg["taux_couverture"] = np.where(agg["refs_total"] > 0, agg["refs_livrees"] / agg["refs_total"] * 100, 0.0)
+    agg["criticality"]     = agg["impact_value"] * (1 - agg["fill_rate"] / 100)
+    agg                    = agg.sort_values("criticality", ascending=False).reset_index(drop=True)
+    agg["rang"]            = agg.index + 1
+
+    # Refs 20/80 en sous-service par fournisseur
+    if watchdict:
+        df_w = df.copy()
+        df_w["watch_c"] = df_w["Code"].apply(normalise_code).map(watchdict).fillna("")
+        # Agrégation fill rate par (fournisseur, code)
+        art_fr = (
+            df_w.groupby(["Fou", "supplier_name", "Code", "watch_c"], as_index=False)
+            .agg(qte_c=("qte_cde","sum"), qte_r=("qte_rec_retained","sum"))
+        )
+        art_fr["fr"] = np.where(art_fr["qte_c"] > 0, art_fr["qte_r"] / art_fr["qte_c"] * 100, 0.0)
+        art_under = art_fr[art_fr["fr"] < 97]
+
+        gold_under = (
+            art_under[art_under["watch_c"] == "GOLD"]
+            .groupby(["Fou", "supplier_name"])["Code"].nunique()
+            .reset_index().rename(columns={"Code": "refs_gold_under"})
+        )
+        silver_under = (
+            art_under[art_under["watch_c"] == "SILVER"]
+            .groupby(["Fou", "supplier_name"])["Code"].nunique()
+            .reset_index().rename(columns={"Code": "refs_silver_under"})
+        )
+        agg = agg.merge(gold_under,   on=["Fou", "supplier_name"], how="left")
+        agg = agg.merge(silver_under, on=["Fou", "supplier_name"], how="left")
+        agg["refs_gold_under"]   = agg["refs_gold_under"].fillna(0).astype(int)
+        agg["refs_silver_under"] = agg["refs_silver_under"].fillna(0).astype(int)
+
+    # ── Écriture des lignes
+    def _niveau(score):
+        if score >= SEUIL_EXCELLENT:  return "Excellent"
+        if score >= SEUIL_SURVEILLER: return "À surveiller"
+        return "Critique"
+
+    def _score_fill(score):
+        if score >= SEUIL_EXCELLENT:  return GRN_FILL
+        if score >= SEUIL_SURVEILLER: return AMB_FILL
+        return RED_FILL
+
+    for _, row in agg.iterrows():
+        score    = row["score"]
+        fr       = row["fill_rate"]
+        ot       = row["on_time_pct"]
+        otif     = row["otif_pct"]
+        taux_cov = row["taux_couverture"]
+
+        data = [
+            int(row["rang"]),
+            row["supplier_name"],
+            int(row["Fou"]) if pd.notna(row["Fou"]) else "",
+            int(row["refs_total"]),
+            int(row["refs_livrees"]),
+            f"{taux_cov:.1f}%",
+            f"{fr:.1f}%",
+            f"{ot:.1f}%",
+            f"{otif:.1f}%",
+            f"{score:.1f}%",
+            _niveau(score),
+            int(row["sites_impactes"]),
+            int(row["sites_total"]),
+            int(row["qty_missing"]),
+            round(row["impact_value"], 0),
+            int(row["nb_orders"]),
+            int(row["nb_lines"]),
+        ]
+        if watchdict:
+            data += [int(row["refs_gold_under"]), int(row["refs_silver_under"])]
+
+        n = ws.max_row + 1
+        ws.append(data)
+
+        for col_i in range(1, len(HEADERS) + 1):
+            cell = ws.cell(n, col_i)
+            cell.border = THIN
+            cell.alignment = LFT if col_i == 2 else CTR
+
+        # Coloration Fill Rate (col 7)
+        ws.cell(n, 7).fill  = _score_fill(fr)
+        # Coloration OTIF (col 9)
+        ws.cell(n, 9).fill  = _score_fill(otif)
+        # Coloration Score (col 10)
+        ws.cell(n, 10).fill = _score_fill(score)
+        # Coloration Niveau (col 11)
+        ws.cell(n, 11).fill = _score_fill(score)
+        # Taux couverture (col 6)
+        ws.cell(n, 6).fill  = _score_fill(taux_cov)
+
+        # GOLD/SILVER : fond doré/gris si > 0
+        if watchdict:
+            if int(row["refs_gold_under"]) > 0:
+                ws.cell(n, 18).fill = PatternFill("solid", fgColor=WATCH_GOLD_HEX)
+                ws.cell(n, 18).font = Font(bold=True, color="1C1C1E", size=10)
+            if int(row["refs_silver_under"]) > 0:
+                ws.cell(n, 19).fill = PatternFill("solid", fgColor="E8E8E8")
+
+    # ── Mise en forme finale
+    col_widths = [6, 30, 10, 16, 14, 20, 12, 12, 10, 10, 16, 14, 12, 16, 22, 14, 12]
+    if watchdict:
+        col_widths += [18, 20]
+    for i, w in enumerate(col_widths, 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+
+    ws.freeze_panes = "A5"
+    ws.auto_filter.ref = f"A{hdr_row}:{get_column_letter(len(HEADERS))}{ws.max_row}"
+    ws.row_dimensions[1].height = 22
+    ws.row_dimensions[2].height = 14
+
+    # ── Onglet légende
+    ws_leg = wb.create_sheet("Légende")
+    ws_leg.cell(1, 1, "LÉGENDE — Récap priorisation fournisseurs").font = Font(bold=True, size=12, color="1C3557")
+    leg_data = [
+        ("Réfs commandées",         "Nombre de codes articles distincts présents dans au moins 1 commande sur la période"),
+        ("Réfs livrées",            "Nombre de codes articles avec au moins 1 unité reçue (qte_rec > 0)"),
+        ("Taux couverture réfs",    "Réfs livrées / Réfs commandées × 100 — mesure la largeur de l'assortiment effectivement approvisionné"),
+        ("Fill Rate",               "Qté reçue retenue / Qté commandée × 100 — mesure la profondeur du service"),
+        ("On Time",                 "% de lignes livrées à la date prévue ou avant"),
+        ("OTIF",                    "% de lignes complètes ET à l'heure"),
+        ("Score",                   "50% × Fill Rate + 30% × On Time + 20% × OTIF"),
+        ("Niveau",                  "Excellent ≥ 97% · À surveiller 90–97% · Critique < 90%"),
+        ("Sites impactés",          "Nb de magasins avec au moins une ligne Fill Rate < 100%"),
+        ("Vol. manquant",           "Somme (Qté commandée − Qté reçue retenue) pour toutes les lignes"),
+        ("Impact CA proxy",         "Vol. manquant × Prix de vente HT — estimation du CA non réalisé"),
+        ("Réfs GOLD sous-service",  "Nb de réfs GOLD (watchlist) avec Fill Rate < 97% chez ce fournisseur"),
+        ("Réfs SILVER sous-service","Nb de réfs SILVER (watchlist) avec Fill Rate < 97% chez ce fournisseur"),
+    ]
+    ws_leg.append([])
+    ws_leg.append(["Indicateur", "Définition"])
+    for i in range(1, 3):
+        ws_leg.cell(3, i).fill = H_FILL
+        ws_leg.cell(3, i).font = H_FONT
+        ws_leg.cell(3, i).alignment = CTR
+        ws_leg.cell(3, i).border = THIN
+    for label, defn in leg_data:
+        ws_leg.append([label, defn])
+        n = ws_leg.max_row
+        ws_leg.cell(n, 1).font = Font(bold=True, size=10)
+        ws_leg.cell(n, 1).border = THIN
+        ws_leg.cell(n, 2).alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+        ws_leg.cell(n, 2).border = THIN
+        ws_leg.row_dimensions[n].height = 22
+    ws_leg.column_dimensions["A"].width = 26
+    ws_leg.column_dimensions["B"].width = 72
+    ws_leg.freeze_panes = "A4"
+
+    buf = BytesIO(); wb.save(buf); buf.seek(0)
+    return buf
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # SIDEBAR
 # ══════════════════════════════════════════════════════════════════════════════
 with st.sidebar:
@@ -1544,9 +1807,31 @@ with tab7:
 # ══════════════════════════════════════════════════════════════════════════════
 st.markdown("---")
 st.markdown("<div class='section-label'>Exports Excel</div>", unsafe_allow_html=True)
-col_exp1, col_exp2 = st.columns(2)
+col_exp1, col_exp2, col_exp3 = st.columns(3)
 
 with col_exp1:
+    _recap_mention = "<br>⭐ Colonnes GOLD/SILVER incluses" if watchdict else ""
+    st.markdown(f"""
+<div style='background:#FFFFFF;border:0.5px solid #E5E5EA;border-radius:12px;padding:16px 18px;margin-bottom:8px'>
+  <div style='font-size:13px;font-weight:700;color:#1C1C1E;margin-bottom:4px'>🎯 Récap priorisation fournisseurs</div>
+  <div style='font-size:12px;color:#8E8E93;line-height:1.5'>
+    1 ligne par fournisseur · Réfs commandées / livrées / taux couverture<br>
+    Fill Rate · OTIF · Sites impactés · Impact CA proxy<br>
+    Trié par criticité · Filtre automatique · Légende incluse{_recap_mention}
+  </div>
+</div>""", unsafe_allow_html=True)
+    if st.button("Générer le Récap fournisseurs", type="primary", key="btn_recap"):
+        with st.spinner("Génération…"):
+            buf_recap = build_recap_fournisseur_excel(view, watchdict=watchdict)
+        st.download_button(
+            "⬇️ Télécharger — Récap fournisseurs",
+            data=buf_recap,
+            file_name="SmartBuyer_OTIF_Recap_Fournisseurs.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="dl_recap",
+        )
+
+with col_exp2:
     watch_mention = f"<br>⭐ Onglet dédié {watch_label} · colonne Classe incluse" if watchdict else ""
     st.markdown(f"<div style='background:#FFFFFF;border:0.5px solid #E5E5EA;border-radius:12px;padding:16px 18px;margin-bottom:8px'><div style='font-size:13px;font-weight:700;color:#1C1C1E;margin-bottom:4px'>📋 Toutes les fiches fournisseurs</div><div style='font-size:12px;color:#8E8E93;line-height:1.5'>1 onglet · toutes livraisons incomplètes · tous fournisseurs<br>Filtre automatique · trié par criticité{watch_mention}</div></div>", unsafe_allow_html=True)
     if st.button("Générer l'export Fiches", type="primary", key="btn_all_fiches"):
@@ -1554,7 +1839,7 @@ with col_exp1:
             buf_all = build_export_all_fiches(view, by_supplier, seuil_fill, watchdict=watchdict)
         st.download_button("⬇️ Télécharger — Toutes les fiches", data=buf_all, file_name="SmartBuyer_OTIF_Fiches_Fournisseurs.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_all_fiches")
 
-with col_exp2:
+with col_exp3:
     st.markdown(f"<div style='background:#FFFFFF;border:0.5px solid #E5E5EA;border-radius:12px;padding:16px 18px;margin-bottom:8px'><div style='font-size:13px;font-weight:700;color:#1C1C1E;margin-bottom:4px'>📊 Synthèse analytique globale</div><div style='font-size:12px;color:#8E8E93;line-height:1.5'>Multi-onglets · Par fournisseur · Par magasin · Par article<br>Lignes critiques · Qualité des données{'<br>⭐ Onglet Articles surveillés + colonne Classe' if watchdict else ''}</div></div>", unsafe_allow_html=True)
     if st.button("Générer l'export Synthèse", type="primary", key="btn_global"):
         with st.spinner("Génération…"):
