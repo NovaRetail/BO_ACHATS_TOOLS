@@ -1,12 +1,10 @@
 """
-SmartBuyer · On Time In Full — v5
+SmartBuyer · On Time In Full — v6
 ──────────────────────────────────
-Nouveauté v5 : liste de surveillance articles (20/80, stratégiques, etc.)
-  - Upload CSV/Excel dans la sidebar
-  - Flag ⭐ dans tous les tableaux et graphiques
-  - Onglet dédié "Articles surveillés"
-  - Onglet Excel dédié dans les deux exports
-  - Mise en forme distincte (fond doré) dans la fiche fournisseur
+Nouveauté v6 : la liste de surveillance affiche la CLASSE de l'article
+  - load_watchlist retourne un dict {code: classe} (ex: {"10001801": "GOLD"})
+  - La colonne "Surveillance" affiche la classe (GOLD, SILVER, A, B…) au lieu de ⭐
+  - Partout : fond doré Excel + filtre conservés, label = classe
 """
 
 import streamlit as st
@@ -132,8 +130,6 @@ code { background: #F2F2F7; padding: 2px 6px; border-radius: 4px; font-size: 12p
     background: #FFFFFF; border: 0.5px solid #E5E5EA;
     border-radius: 14px; padding: 22px 26px; margin-bottom: 16px;
 }
-
-/* Badge surveillance */
 .badge-watch {
     display: inline-block;
     background: #FFF9C4; border: 1px solid #FFD60A;
@@ -162,20 +158,22 @@ DATE_EXPECTED_CANDIDATES = ["H Date", "Date livraison", "Date prévue", "Date"]
 SEUIL_EXCELLENT  = 97
 SEUIL_SURVEILLER = 90
 
-WATCH_GOLD_HEX  = "FFD60A"   # Excel fill doré
-WATCH_LIGHT_HEX = "FFFDE7"   # Excel fill doré pâle
+WATCH_GOLD_HEX  = "FFD60A"
+WATCH_LIGHT_HEX = "FFFDE7"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# CHARGEMENT LISTE SURVEILLANCE
+# CHARGEMENT LISTE SURVEILLANCE — retourne dict {code_str: classe}
 # ══════════════════════════════════════════════════════════════════════════════
 @st.cache_data(show_spinner=False)
-def load_watchlist(file_bytes: bytes, filename: str) -> set:
+def load_watchlist(file_bytes: bytes, filename: str) -> dict:
     """
     Charge la liste de surveillance depuis un CSV ou Excel.
-    Cherche une colonne contenant 'code' ou 'article' (insensible casse).
-    Si non trouvée, utilise la première colonne.
-    Retourne un set de codes (str, strippés).
+    Cherche :
+      - une colonne 'code/article/ref/ean' → codes articles
+      - une colonne 'classe/class/segment/categ' → libellé de classe (GOLD, A, B…)
+    Retourne un dict {code_normalisé: classe_str}.
+    Si pas de colonne classe trouvée, la classe = "⭐" par défaut.
     """
     try:
         if filename.lower().endswith((".xlsx", ".xls")):
@@ -184,6 +182,7 @@ def load_watchlist(file_bytes: bytes, filename: str) -> set:
             wdf = pd.read_csv(BytesIO(file_bytes), sep=None, engine="python")
 
         wdf.columns = [str(c).strip() for c in wdf.columns]
+
         # Détection colonne code
         code_col = None
         for col in wdf.columns:
@@ -193,26 +192,50 @@ def load_watchlist(file_bytes: bytes, filename: str) -> set:
         if code_col is None:
             code_col = wdf.columns[0]
 
-        codes = (
-            wdf[code_col]
-            .dropna()
-            .astype(str)
-            .str.strip()
-            .str.replace(r"\.0$", "", regex=True)   # enlève le .0 des float
-            .unique()
-            .tolist()
-        )
-        return set(codes)
+        # Détection colonne classe
+        classe_col = None
+        for col in wdf.columns:
+            if col == code_col:
+                continue
+            if any(kw in col.lower() for kw in ["class", "segment", "categ", "tier", "niveau", "groupe"]):
+                classe_col = col
+                break
+        # Si toujours pas trouvé et qu'il y a une 2e colonne, on la prend
+        if classe_col is None and len(wdf.columns) >= 2:
+            classe_col = [c for c in wdf.columns if c != code_col][0]
+
+        def norm(v):
+            return str(v).strip().replace(".0", "")
+
+        result = {}
+        for _, row in wdf.dropna(subset=[code_col]).iterrows():
+            code = norm(row[code_col])
+            if not code or code == "nan":
+                continue
+            classe = str(row[classe_col]).strip() if classe_col and pd.notna(row[classe_col]) else "⭐"
+            result[code] = classe
+
+        return result
+
     except Exception as e:
         st.sidebar.error(f"Erreur lecture liste surveillance : {e}")
-        return set()
+        return {}
 
 
 def normalise_code(v) -> str:
-    """Normalise un code article pour comparaison."""
     if pd.isna(v):
         return ""
     return str(v).strip().replace(".0", "")
+
+
+def watchdict_codes(watchdict: dict) -> set:
+    """Retourne l'ensemble des codes de la watchlist."""
+    return set(watchdict.keys())
+
+
+def get_classe(code, watchdict: dict) -> str:
+    """Retourne la classe de l'article ou '' s'il n'est pas dans la watchlist."""
+    return watchdict.get(normalise_code(code), "")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -298,7 +321,7 @@ def load_erp(file_bytes: bytes, filename: str) -> pd.DataFrame:
 
 
 def prepare_dataset(df: pd.DataFrame, exclude_technical: bool = True,
-                    cap_sur_receipt: bool = True, watchlist: set = None):
+                    cap_sur_receipt: bool = True, watchdict: dict = None):
     if df.empty:
         return df.copy(), {}
 
@@ -350,12 +373,14 @@ def prepare_dataset(df: pd.DataFrame, exclude_technical: bool = True,
     work["otif"]    = ((work["qte_rec_retained"] >= work["qte_cde"]) & work["on_time"]).astype(int)
     work["criticality_score"] = work["service_gap_value"] * (1 - work["line_fill_rate"])
 
-    # ── FLAG SURVEILLANCE
-    if watchlist and "Code" in work.columns:
-        work["code_str"]   = work["Code"].apply(normalise_code)
-        work["is_watched"] = work["code_str"].isin(watchlist)
+    # ── FLAG SURVEILLANCE : colonne "watch_classe" = classe ou "" 
+    if watchdict and "Code" in work.columns:
+        work["code_str"]    = work["Code"].apply(normalise_code)
+        work["watch_classe"] = work["code_str"].map(watchdict).fillna("")
+        work["is_watched"]   = work["watch_classe"] != ""
     else:
-        work["is_watched"] = False
+        work["watch_classe"] = ""
+        work["is_watched"]   = False
 
     quality = {
         "raw_rows":              raw_len,
@@ -441,7 +466,7 @@ def agg_site(df: pd.DataFrame) -> pd.DataFrame:
     return _enrich(g).sort_values("criticality_score", ascending=False).reset_index(drop=True)
 
 
-def agg_article(df: pd.DataFrame, watchlist: set = None) -> pd.DataFrame:
+def agg_article(df: pd.DataFrame, watchdict: dict = None) -> pd.DataFrame:
     gcols = [c for c in ["Code", "article_label", "supplier_name"] if c in df.columns]
     g = df.groupby(gcols, as_index=False).agg(
         qte_cde      =("qte_cde",          "sum"),
@@ -455,12 +480,12 @@ def agg_article(df: pd.DataFrame, watchlist: set = None) -> pd.DataFrame:
     )
     g = _enrich(g).sort_values("criticality_score", ascending=False).reset_index(drop=True)
 
-    # Flag surveillance
-    if watchlist and "Code" in g.columns:
-        g["code_str"]   = g["Code"].apply(normalise_code)
-        g["Surveillance"] = g["code_str"].isin(watchlist).apply(lambda x: "⭐" if x else "")
+    # Colonne Classe (vide si hors watchlist)
+    if watchdict and "Code" in g.columns:
+        g["code_str"]  = g["Code"].apply(normalise_code)
+        g["Classe"]    = g["code_str"].map(watchdict).fillna("")
     else:
-        g["Surveillance"] = ""
+        g["Classe"] = ""
     return g
 
 
@@ -478,25 +503,25 @@ _PLOTLY_BASE = dict(
 
 def bar_h(data: pd.DataFrame, x_col: str, y_col: str, color: str,
           x_title: str, height: int = 500, fmt_fn=None,
-          watched_col: str = None) -> go.Figure:
+          classe_col: str = None) -> go.Figure:
     top = data.head(15).sort_values(x_col)
     texts = [fmt_fn(v) if fmt_fn else f"{v:,.0f}" for v in top[x_col]]
 
-    # Couleur barre : dorée si article surveillé, sinon couleur par défaut
-    if watched_col and watched_col in top.columns:
+    # Couleur barre : dorée si article surveillé
+    if classe_col and classe_col in top.columns:
         bar_colors = [
-            "#FFD60A" if w == "⭐" else color
-            for w in top[watched_col]
+            "#FFD60A" if str(c).strip() != "" else color
+            for c in top[classe_col]
         ]
     else:
         bar_colors = color
 
-    # Label Y : ajouter ⭐ si surveillé
+    # Label Y : préfixe avec la classe si surveillé
     y_labels = top[y_col].astype(str).tolist()
-    if watched_col and watched_col in top.columns:
+    if classe_col and classe_col in top.columns:
         y_labels = [
-            f"⭐ {lbl}" if w == "⭐" else lbl
-            for lbl, w in zip(y_labels, top[watched_col])
+            f"[{c}] {lbl}" if str(c).strip() != "" else lbl
+            for lbl, c in zip(y_labels, top[classe_col])
         ]
 
     fig = go.Figure(go.Bar(
@@ -541,16 +566,30 @@ def render_kpi_row(kpi: dict, watch_kpi: dict = None):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# EXPORT EXCEL — SYNTHÈSE GLOBALE
+# EXPORT EXCEL — helpers couleur classe
 # ══════════════════════════════════════════════════════════════════════════════
 GOLD_FILL  = PatternFill("solid", fgColor=WATCH_GOLD_HEX)
 GOLDL_FILL = PatternFill("solid", fgColor=WATCH_LIGHT_HEX)
+SILVER_FILL = PatternFill("solid", fgColor="E8E8E8")
+SILVERL_FILL = PatternFill("solid", fgColor="F5F5F5")
+
+
+def _classe_fills(classe: str):
+    """Retourne (fill_ligne, fill_badge) selon la classe."""
+    c = str(classe).strip().upper()
+    if c == "GOLD":
+        return GOLDL_FILL, GOLD_FILL
+    elif c == "SILVER":
+        return SILVERL_FILL, SILVER_FILL
+    elif c in ("A", ""):
+        return GOLDL_FILL, GOLD_FILL
+    else:
+        return SILVERL_FILL, SILVER_FILL
 
 
 def _xl_write_sheet(ws, title: str, df: pd.DataFrame,
                     hdr_fill=None, hdr_font=None, ctr=None,
-                    watch_col_idx: int = None):
-    """Écrit titre + entêtes + données. Si watch_col_idx fourni, colorie les lignes surveillées."""
+                    classe_col_idx: int = None):
     ws.append([title])
     ws.cell(1, 1).font = Font(bold=True, size=13, color="1C3557")
     ws.append([])
@@ -563,13 +602,13 @@ def _xl_write_sheet(ws, title: str, df: pd.DataFrame,
         if ctr:      c.alignment = ctr
     for row in df.itertuples(index=False):
         ws.append(list(row))
-        # Coloration ligne si article surveillé
-        if watch_col_idx is not None:
-            val = list(row)[watch_col_idx - 1]
-            if str(val).strip() == "⭐":
+        if classe_col_idx is not None:
+            val = str(list(row)[classe_col_idx - 1]).strip()
+            if val != "":
+                fill_l, _ = _classe_fills(val)
                 n = ws.max_row
                 for col_i in range(1, len(headers) + 1):
-                    ws.cell(n, col_i).fill = GOLDL_FILL
+                    ws.cell(n, col_i).fill = fill_l
     for col_cells in ws.iter_cols(min_row=3, max_row=3):
         letter = get_column_letter(col_cells[0].column)
         val = str(col_cells[0].value or "")
@@ -577,7 +616,7 @@ def _xl_write_sheet(ws, title: str, df: pd.DataFrame,
 
 
 def build_export_excel(df, by_supplier, by_site, by_article, quality,
-                       watchlist: set = None) -> BytesIO:
+                       watchdict: dict = None) -> BytesIO:
     wb = Workbook()
     H_FILL = PatternFill("solid", fgColor="1C3557")
     H_FONT = Font(bold=True, color="FFFFFF", size=11)
@@ -600,26 +639,21 @@ def build_export_excel(df, by_supplier, by_site, by_article, quality,
     ], columns=["Indicateur", "Valeur"])
     _xl_write_sheet(ws1, "Synthèse qualité de données", synthese, H_FILL, H_FONT, CTR)
 
-    # Trouver l'index de la colonne Surveillance dans by_article
     art_cols = list(by_article.columns)
-    watch_idx = (art_cols.index("Surveillance") + 1) if "Surveillance" in art_cols else None
+    classe_idx = (art_cols.index("Classe") + 1) if "Classe" in art_cols else None
 
     _xl_write_sheet(wb.create_sheet("Par fournisseur"), "Analyse fournisseur", by_supplier, H_FILL, H_FONT, CTR)
     _xl_write_sheet(wb.create_sheet("Par magasin"),     "Analyse magasin",     by_site,     H_FILL, H_FONT, CTR)
     _xl_write_sheet(wb.create_sheet("Par article"),     "Analyse article",     by_article,  H_FILL, H_FONT, CTR,
-                    watch_col_idx=watch_idx)
+                    classe_col_idx=classe_idx)
 
     # Onglet Articles Surveillés
-    if watchlist and "is_watched" in df.columns:
-        watched_art = by_article[by_article["Surveillance"] == "⭐"].copy() if "Surveillance" in by_article.columns else pd.DataFrame()
+    if watchdict and "is_watched" in df.columns:
+        watched_art = by_article[by_article["Classe"] != ""].copy() if "Classe" in by_article.columns else pd.DataFrame()
         if not watched_art.empty:
-            _xl_write_sheet(
-                wb.create_sheet("⭐ Articles surveillés"),
-                "Articles de la liste surveillance",
-                watched_art, H_FILL, H_FONT, CTR,
-            )
-            # Coloration dorée entêtes
-            ws_w = wb["⭐ Articles surveillés"]
+            ws_w = wb.create_sheet("⭐ Articles surveillés")
+            _xl_write_sheet(ws_w, "Articles de la liste surveillance", watched_art, H_FILL, H_FONT, CTR,
+                            classe_col_idx=classe_idx)
             for i in range(1, len(watched_art.columns) + 1):
                 c = ws_w.cell(3, i)
                 c.fill = PatternFill("solid", fgColor=WATCH_GOLD_HEX)
@@ -629,20 +663,17 @@ def build_export_excel(df, by_supplier, by_site, by_article, quality,
     detail_cols = [c for c in [
         "date_received", "date_expected", "site_label", "supplier_name",
         "Code", "article_label", "N° Cde", "qte_cde", "qte_rec_retained",
-        "qty_missing", "service_gap_value", "on_time", "otif", "delay_days", "is_watched",
+        "qty_missing", "service_gap_value", "on_time", "otif", "delay_days", "watch_classe",
     ] if c in df.columns]
     crit = (df[df["otif"] == 0][detail_cols]
             .sort_values(["is_watched", "qty_missing", "service_gap_value"],
                          ascending=[False, False, False])
             .head(500))
-    # Renommer is_watched → Surveillance pour affichage
-    if "is_watched" in crit.columns:
-        crit = crit.copy()
-        crit["is_watched"] = crit["is_watched"].apply(lambda x: "⭐" if x else "")
-        crit = crit.rename(columns={"is_watched": "Surveillance"})
-    crit_watch_idx = (list(crit.columns).index("Surveillance") + 1) if "Surveillance" in crit.columns else None
+    if "watch_classe" in crit.columns:
+        crit = crit.copy().rename(columns={"watch_classe": "Classe"})
+    crit_classe_idx = (list(crit.columns).index("Classe") + 1) if "Classe" in crit.columns else None
     _xl_write_sheet(wb.create_sheet("Lignes critiques"), "Lignes non OTIF", crit, H_FILL, H_FONT, CTR,
-                    watch_col_idx=crit_watch_idx)
+                    classe_col_idx=crit_classe_idx)
 
     buf = BytesIO(); wb.save(buf); buf.seek(0)
     return buf
@@ -653,7 +684,7 @@ def build_export_excel(df, by_supplier, by_site, by_article, quality,
 # ══════════════════════════════════════════════════════════════════════════════
 def build_fiche_excel(fournisseur: str, df_all: pd.DataFrame, df_bad: pd.DataFrame,
                       site_recap: pd.DataFrame, art_recap: pd.DataFrame,
-                      kpis: dict, seuil: int, watchlist: set = None) -> BytesIO:
+                      kpis: dict, seuil: int, watchdict: dict = None) -> BytesIO:
     wb = Workbook()
     today_str = _date.today().strftime("%d/%m/%Y")
 
@@ -690,13 +721,15 @@ def build_fiche_excel(fournisseur: str, df_all: pd.DataFrame, df_bad: pd.DataFra
 
     def kpi_fill(val_str: str):
         try:
-            v = float(val_str.replace("%", ""))
+            v = float(str(val_str).replace("%", ""))
             return GRN_FILL if v >= SEUIL_EXCELLENT else (AMB_FILL if v >= SEUIL_SURVEILLER else RED_FILL)
         except Exception:
             return None
 
-    def is_watched_row(code) -> bool:
-        return bool(watchlist) and normalise_code(code) in watchlist
+    def get_code_classe(code) -> str:
+        if not watchdict:
+            return ""
+        return watchdict.get(normalise_code(code), "")
 
     # ── Onglet 1 : Synthèse KPI
     ws1 = wb.active
@@ -704,7 +737,7 @@ def build_fiche_excel(fournisseur: str, df_all: pd.DataFrame, df_bad: pd.DataFra
     ws1.row_dimensions[1].height = 30
     ws1.row_dimensions[2].height = 18
     ws1.cell(1, 1, f"BILAN DE PERFORMANCE — {fournisseur.upper()}").font = Font(bold=True, size=14, color="1C1C1E")
-    ws1.cell(2, 1, f"Généré le {today_str}  ·  Période : export ERP  ·  Seuil de détection : Fill Rate < {seuil}%").font = Font(size=10, italic=True, color="8E8E93")
+    ws1.cell(2, 1, f"Généré le {today_str}  ·  Période : export ERP  ·  Seuil : Fill Rate < {seuil}%").font = Font(size=10, italic=True, color="8E8E93")
     ws1.merge_cells("A1:D1"); ws1.merge_cells("A2:D2")
     ws1.append([])
     kpi_data = [
@@ -747,18 +780,18 @@ def build_fiche_excel(fournisseur: str, df_all: pd.DataFrame, df_bad: pd.DataFra
         if f: ws2.cell(n, 2).fill = f
     auto_width(ws2)
 
-    # ── Onglet 3 : Par article (avec flag et coloration dorée)
+    # ── Onglet 3 : Par article (avec colonne Classe)
     ws3 = wb.create_sheet("Par article")
     ws3.cell(1, 1, f"Livraisons incomplètes par article — seuil Fill Rate < {seuil}%").font = T_FONT
     ws3.append([])
-    headers3 = ["⭐", "Code article", "Désignation", "Fill Rate", "Vol. manquant",
+    headers3 = ["Classe", "Code article", "Désignation", "Fill Rate", "Vol. manquant",
                 "Impact CA proxy (FCFA)", "Magasins", "Cmdes"]
     write_header_row(ws3, 3, headers3)
     for _, r in art_recap.iterrows():
-        code = r.get("Code", "")
-        watched = is_watched_row(code)
+        code   = r.get("Code", "")
+        classe = get_code_classe(code)
         row_data = [
-            "⭐" if watched else "",
+            classe,
             code, r.get("article_label",""),
             r.get("Fill Rate",""), r.get("Vol. manquant",""),
             r.get("Impact CA proxy",""), r.get("nb_sites",""), r.get("nb_cdes",""),
@@ -768,20 +801,22 @@ def build_fiche_excel(fournisseur: str, df_all: pd.DataFrame, df_bad: pd.DataFra
         for col_i in range(1, 9):
             ws3.cell(n, col_i).border = THIN
             ws3.cell(n, col_i).alignment = LFT if col_i in (2, 3) else CTR
-        if watched:
+        if classe:
+            fill_l, fill_b = _classe_fills(classe)
             for col_i in range(1, 9):
-                ws3.cell(n, col_i).fill = GOLDL_FILL
+                ws3.cell(n, col_i).fill = fill_l
+            ws3.cell(n, 1).fill = fill_b   # badge classe plus sombre
         else:
             f = kpi_fill(str(r.get("Fill Rate", ""))) if r.get("Fill Rate") else None
             if f: ws3.cell(n, 4).fill = f
     auto_width(ws3)
 
-    # ── Onglet 4 : Détail lignes (avec flag surveillance)
+    # ── Onglet 4 : Détail lignes
     ws4 = wb.create_sheet("Détail lignes")
     ws4.cell(1, 1, f"Détail des livraisons incomplètes — {fournisseur}  (Fill Rate < {seuil}%)").font = T_FONT
     ws4.append([])
     headers4 = [
-        "⭐", "N° Commande", "Date réception", "Date prévue", "Magasin",
+        "Classe", "N° Commande", "Date réception", "Date prévue", "Magasin",
         "Code article", "Désignation article",
         "Qté commandée", "Qté reçue", "Qté manquante",
         "Fill Rate ligne", "Impact CA proxy (FCFA)",
@@ -796,13 +831,13 @@ def build_fiche_excel(fournisseur: str, df_all: pd.DataFrame, df_bad: pd.DataFra
     ] if c in df_bad.columns]
 
     for _, row in df_bad[src_cols].iterrows():
-        fr      = row.get("line_fill_rate", 0)
-        ot      = row.get("on_time", True)
-        code    = row.get("Code", "")
-        watched = is_watched_row(code)
-        n       = ws4.max_row + 1
+        fr     = row.get("line_fill_rate", 0)
+        ot     = row.get("on_time", True)
+        code   = row.get("Code", "")
+        classe = get_code_classe(code)
+        n      = ws4.max_row + 1
         ws4.append([
-            "⭐" if watched else "",
+            classe,
             row.get("N° Cde", ""),
             row.get("date_received", pd.NaT),
             row.get("date_expected", pd.NaT),
@@ -817,27 +852,26 @@ def build_fiche_excel(fournisseur: str, df_all: pd.DataFrame, df_bad: pd.DataFra
             "OUI" if ot else "NON",
             int(row.get("delay_days", 0)) if pd.notna(row.get("delay_days")) else "—",
         ])
-        if watched:
+        for col_i in range(1, len(headers4) + 1):
+            cell = ws4.cell(n, col_i)
+            cell.border = THIN
+            cell.alignment = LFT if col_i in (5, 7) else CTR
+        if classe:
+            fill_l, fill_b = _classe_fills(classe)
             for col_i in range(1, len(headers4) + 1):
-                cell = ws4.cell(n, col_i)
-                cell.border = THIN
-                cell.alignment = LFT if col_i in (5, 7) else CTR
-                cell.fill = GOLDL_FILL
-            ws4.cell(n, 1).fill = GOLD_FILL
+                ws4.cell(n, col_i).fill = fill_l
+            ws4.cell(n, 1).fill = fill_b
         else:
             row_fill = RED_FILL if pd.notna(fr) and fr < 0.90 else None
-            for col_i in range(1, len(headers4) + 1):
-                cell = ws4.cell(n, col_i)
-                cell.border = THIN
-                cell.alignment = LFT if col_i in (5, 7) else CTR
-                if row_fill and col_i in (10, 11, 12):
-                    cell.fill = row_fill
+            if row_fill:
+                for col_i in (10, 11, 12):
+                    ws4.cell(n, col_i).fill = row_fill
             fr_fill = kpi_fill(f"{fr*100:.1f}%") if pd.notna(fr) else None
             if fr_fill:
                 ws4.cell(n, 11).fill = fr_fill
 
-    # ── Onglet 5 : Articles surveillés uniquement (si watchlist active)
-    if watchlist:
+    # ── Onglet 5 : Articles surveillés uniquement
+    if watchdict:
         df_bad_watched = df_bad[df_bad["is_watched"]] if "is_watched" in df_bad.columns else df_bad.iloc[0:0]
         if not df_bad_watched.empty:
             ws5 = wb.create_sheet("⭐ Articles surveillés")
@@ -846,16 +880,18 @@ def build_fiche_excel(fournisseur: str, df_all: pd.DataFrame, df_bad: pd.DataFra
             ws5.append([])
             write_header_row(ws5, 4, headers4, gold=True)
             for _, row in df_bad_watched[src_cols].iterrows():
-                fr   = row.get("line_fill_rate", 0)
-                ot   = row.get("on_time", True)
-                n    = ws5.max_row + 1
+                fr     = row.get("line_fill_rate", 0)
+                ot     = row.get("on_time", True)
+                code   = row.get("Code", "")
+                classe = get_code_classe(code)
+                n      = ws5.max_row + 1
                 ws5.append([
-                    "⭐",
+                    classe,
                     row.get("N° Cde", ""),
                     row.get("date_received", pd.NaT),
                     row.get("date_expected", pd.NaT),
                     row.get("site_label", ""),
-                    row.get("Code", ""),
+                    code,
                     row.get("article_label", ""),
                     int(row.get("qte_cde", 0)),
                     int(row.get("qte_rec_retained", 0)),
@@ -869,7 +905,10 @@ def build_fiche_excel(fournisseur: str, df_all: pd.DataFrame, df_bad: pd.DataFra
                     cell = ws5.cell(n, col_i)
                     cell.border = THIN
                     cell.alignment = LFT if col_i in (5, 7) else CTR
-                    cell.fill = GOLDL_FILL
+                fill_l, fill_b = _classe_fills(classe)
+                for col_i in range(1, len(headers4) + 1):
+                    ws5.cell(n, col_i).fill = fill_l
+                ws5.cell(n, 1).fill = fill_b
                 fr_fill = kpi_fill(f"{fr*100:.1f}%") if pd.notna(fr) else None
                 if fr_fill:
                     ws5.cell(n, 11).fill = fr_fill
@@ -884,10 +923,10 @@ def build_fiche_excel(fournisseur: str, df_all: pd.DataFrame, df_bad: pd.DataFra
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# EXPORT EXCEL — TOUTES LES FICHES (build_export_all_fiches)
+# EXPORT EXCEL — TOUTES LES FICHES
 # ══════════════════════════════════════════════════════════════════════════════
 def build_export_all_fiches(df: pd.DataFrame, by_supplier: pd.DataFrame,
-                             seuil: int, watchlist: set = None) -> BytesIO:
+                             seuil: int, watchdict: dict = None) -> BytesIO:
     wb = Workbook()
     ws = wb.active
     ws.title = "Toutes livraisons incomplètes"
@@ -909,13 +948,13 @@ def build_export_all_fiches(df: pd.DataFrame, by_supplier: pd.DataFrame,
         f"Généré le {today_str}  ·  "
         f"Seuil : Fill Rate < {seuil}% ou OTIF = 0  ·  "
         f"Trié par criticité fournisseur"
-        + ("  ·  ⭐ = Article surveillance" if watchlist else "")
+        + ("  ·  Classe = segment 20/80" if watchdict else "")
     )).font = Font(size=9, italic=True, color="8E8E93")
-    ws.merge_cells("A1:Q1"); ws.merge_cells("A2:Q2")
+    ws.merge_cells("A1:R1"); ws.merge_cells("A2:R2")
     ws.append([])
 
     HEADERS = [
-        "⭐", "Fournisseur", "Code Fou.", "Score four.", "Niveau",
+        "Classe", "Fournisseur", "Code Fou.", "Score four.", "Niveau",
         "N° Commande", "Date réception", "Date prévue",
         "Magasin", "Code article", "Désignation article",
         "Qté commandée", "Qté reçue", "Qté manquante",
@@ -943,13 +982,13 @@ def build_export_all_fiches(df: pd.DataFrame, by_supplier: pd.DataFrame,
     )
 
     for _, row in export_df.iterrows():
-        fr       = row.get("line_fill_rate", np.nan)
-        ot       = row.get("otif", 0)
-        dly      = row.get("delay_days", np.nan)
-        watched  = bool(row.get("is_watched", False))
+        fr      = row.get("line_fill_rate", np.nan)
+        ot      = row.get("otif", 0)
+        dly     = row.get("delay_days", np.nan)
+        classe  = str(row.get("watch_classe", "")).strip()
 
         row_data = [
-            "⭐" if watched else "",
+            classe,
             row.get("supplier_name", ""),
             int(row.get("fou_code", 0)) if pd.notna(row.get("fou_code")) else "",
             f"{row.get('score', 0):.1f}%",
@@ -976,10 +1015,11 @@ def build_export_all_fiches(df: pd.DataFrame, by_supplier: pd.DataFrame,
             cell.border = THIN
             cell.alignment = LFT if col_i in (2, 5, 9, 11) else CTR
 
-        if watched:
+        if classe:
+            fill_l, fill_b = _classe_fills(classe)
             for col_i in range(1, len(HEADERS) + 1):
-                ws.cell(n, col_i).fill = GOLDL_FILL
-            ws.cell(n, 1).fill = GOLD_FILL
+                ws.cell(n, col_i).fill = fill_l
+            ws.cell(n, 1).fill = fill_b
         else:
             if pd.notna(fr):
                 fr_pct = fr * 100
@@ -992,10 +1032,10 @@ def build_export_all_fiches(df: pd.DataFrame, by_supplier: pd.DataFrame,
             ws.cell(n, 17).fill = GRN_FILL if ot == 1 else RED_FILL
 
     # Onglet surveillance uniquement
-    if watchlist:
+    if watchdict:
         ws_w = wb.create_sheet("⭐ Articles surveillés")
         ws_w.cell(1, 1, "ARTICLES SURVEILLANCE — TOUS FOURNISSEURS").font = T_FONT
-        ws_w.merge_cells("A1:Q1")
+        ws_w.merge_cells("A1:R1")
         ws_w.append([])
         ws_w.append(HEADERS)
         watch_hdr_row = 3
@@ -1008,11 +1048,12 @@ def build_export_all_fiches(df: pd.DataFrame, by_supplier: pd.DataFrame,
 
         watched_rows = export_df[export_df["is_watched"] == True]
         for _, row in watched_rows.iterrows():
-            fr  = row.get("line_fill_rate", np.nan)
-            ot  = row.get("otif", 0)
-            dly = row.get("delay_days", np.nan)
+            fr     = row.get("line_fill_rate", np.nan)
+            ot     = row.get("otif", 0)
+            dly    = row.get("delay_days", np.nan)
+            classe = str(row.get("watch_classe", "")).strip()
             ws_w.append([
-                "⭐",
+                classe,
                 row.get("supplier_name", ""),
                 int(row.get("fou_code", 0)) if pd.notna(row.get("fou_code")) else "",
                 f"{row.get('score', 0):.1f}%",
@@ -1036,19 +1077,21 @@ def build_export_all_fiches(df: pd.DataFrame, by_supplier: pd.DataFrame,
                 cell = ws_w.cell(n, col_i)
                 cell.border = THIN
                 cell.alignment = LFT if col_i in (2, 5, 9, 11) else CTR
-                cell.fill = GOLDL_FILL
-            ws_w.cell(n, 1).fill = GOLD_FILL
+            fill_l, fill_b = _classe_fills(classe)
+            for col_i in range(1, len(HEADERS) + 1):
+                ws_w.cell(n, col_i).fill = fill_l
+            ws_w.cell(n, 1).fill = fill_b
             if pd.notna(fr):
                 fr_pct = fr * 100
                 fill_fr = GRN_FILL if fr_pct >= 97 else (AMB_FILL if fr_pct >= 90 else RED_FILL)
                 ws_w.cell(n, 15).fill = fill_fr
 
         ws_w.freeze_panes = "A4"
-        col_widths = [5, 28, 10, 11, 14, 14, 16, 14, 22, 13, 32, 13, 11, 14, 14, 22, 8, 11]
+        col_widths = [10, 28, 10, 11, 14, 14, 16, 14, 22, 13, 32, 13, 11, 14, 14, 22, 8, 11]
         for i, w in enumerate(col_widths, 1):
             ws_w.column_dimensions[get_column_letter(i)].width = w
 
-    col_widths = [5, 28, 10, 11, 14, 14, 16, 14, 22, 13, 32, 13, 11, 14, 14, 22, 8, 11]
+    col_widths = [10, 28, 10, 11, 14, 14, 16, 14, 22, 13, 32, 13, 11, 14, 14, 22, 8, 11]
     for i, w in enumerate(col_widths, 1):
         ws.column_dimensions[get_column_letter(i)].width = w
     ws.freeze_panes = "A5"
@@ -1079,21 +1122,23 @@ with st.sidebar:
 
     # ── LISTE SURVEILLANCE
     st.markdown("<div style='font-size:11px;font-weight:600;color:#8E8E93;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px'>⭐ Liste de surveillance</div>", unsafe_allow_html=True)
-    st.caption("CSV ou Excel — 1 colonne de codes articles (20/80, stratégiques…)")
-    watch_file   = st.file_uploader("Liste articles à surveiller", type=["csv", "xlsx", "xls"], key="watchlist")
-    watch_label  = st.text_input("Nom de la liste", value="20/80", placeholder="ex : 20/80, Stratégiques…")
+    st.caption("CSV ou Excel — colonnes : Code article + Classe (GOLD, SILVER, A, B…)")
+    watch_file  = st.file_uploader("Liste articles à surveiller", type=["csv", "xlsx", "xls"], key="watchlist")
+    watch_label = st.text_input("Nom de la liste", value="20/80", placeholder="ex : 20/80, Stratégiques…")
 
-    watchlist: set = set()
+    watchdict: dict = {}
     if watch_file is not None:
         watch_bytes = watch_file.read()
-        watchlist   = load_watchlist(watch_bytes, watch_file.name)
-        if watchlist:
-            st.success(f"✅ {len(watchlist)} codes chargés")
+        watchdict   = load_watchlist(watch_bytes, watch_file.name)
+        if watchdict:
+            classes = sorted(set(watchdict.values()))
+            st.success(f"✅ {len(watchdict)} codes · Classes : {', '.join(classes)}")
         else:
             st.warning("Aucun code détecté — vérifiez le format du fichier")
 
-    st.markdown("---")
+    watchlist = watchdict_codes(watchdict)   # set de codes pour compatibilité
 
+    st.markdown("---")
     st.markdown("<div style='font-size:11px;font-weight:600;color:#8E8E93;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px'>Règles métier</div>", unsafe_allow_html=True)
     exclude_technical = st.checkbox("Exclure fournisseurs techniques", value=True)
     cap_sur_receipt   = st.checkbox("Caper Qté reçue ≤ Qté commandée", value=True)
@@ -1112,61 +1157,29 @@ st.markdown("<div class='page-caption'>Pilotage OTIF fournisseur · Magasin · A
 if uploaded is None:
     st.markdown("---")
     st.markdown("<div class='section-label'>Méthodologie de calcul</div>", unsafe_allow_html=True)
-
     docs = [
         ("① Fill Rate — Taux de service quantitatif",
-         """Mesure la part de la quantité commandée effectivement reçue.<br>
-<code>Fill Rate = Qté reçue retenue / Qté commandée × 100</code><br><br>
-<strong>Règle cap :</strong> si la quantité reçue dépasse la quantité commandée,
-elle est ramenée à la quantité commandée pour éviter un taux &gt; 100%.<br>
-<code>Qté reçue retenue = min(Qté reçue, Qté commandée)</code><br>
+         """<code>Fill Rate = Qté reçue retenue / Qté commandée × 100</code><br>
+<strong>Règle cap :</strong> <code>Qté reçue retenue = min(Qté reçue, Qté commandée)</code><br>
 <span style='color:#34C759;font-weight:600'>✓ Objectif cible : ≥ 97%</span>"""),
-
         ("② On Time — Taux de respect du délai",
-         """Mesure la proportion de lignes livrées à la date prévue ou avant.<br>
-<code>On Time = 1 si Date réception ≤ Date prévue, sinon 0</code><br><br>
-<strong>Colonne date prévue (ordre de priorité) :</strong>
-<code>H Date</code> → <code>Date livraison</code> → <code>Date prévue</code> → <code>Date</code><br><br>
-<strong>⚠️ Règle temporaire ERP :</strong> si la date prévue est absente,
-la ligne est considérée <em>On Time</em> par défaut.<br>
+         """<code>On Time = 1 si Date réception ≤ Date prévue, sinon 0</code><br>
+Priorité colonnes : <code>H Date</code> → <code>Date livraison</code> → <code>Date prévue</code><br>
 <span style='color:#34C759;font-weight:600'>✓ Objectif cible : ≥ 95%</span>"""),
-
         ("③ OTIF — On Time In Full",
-         """Indicateur synthétique : une livraison est OTIF uniquement si elle est
-<strong>à la fois complète ET à l'heure</strong>.<br>
-<code>OTIF = 1 si (Qté reçue retenue ≥ Qté commandée) ET (On Time = 1), sinon 0</code><br><br>
+         """<code>OTIF = 1 si Fill Rate ≥ 100% ET On Time = 1</code><br>
 <span style='color:#34C759;font-weight:600'>✓ Objectif cible : ≥ 95%</span>"""),
-
-        ("④ Score global — Synthèse pondérée",
-         """<code>Score = 50% × Fill Rate + 30% × On Time + 20% × OTIF</code><br><br>
-🟢 <strong>Excellent</strong> ≥ 97% &nbsp;|&nbsp; 🟠 <strong>À surveiller</strong> 90–97% &nbsp;|&nbsp; 🔴 <strong>Critique</strong> &lt; 90%"""),
-
-        ("⑤ Score de criticité — Priorisation opérationnelle",
-         """<code>Criticité = Impact CA proxy × (1 − Fill Rate)</code><br>
-<code>Impact CA proxy = Qté manquante × Prix de vente HT</code>"""),
-
-        ("⑥ ⭐ Liste de surveillance — Articles 20/80 et stratégiques",
-         """Chargez un fichier CSV ou Excel contenant vos codes articles à surveiller
-(20/80, top de gamme, références stratégiques…).<br><br>
-Le module détecte automatiquement la colonne code et <strong>flague toutes les lignes</strong>
-de ces articles dans chaque vue : tableaux, graphiques, exports Excel.<br><br>
-Dans les exports : fond doré <span style='background:#FFFDE7;border:1px solid #FFD60A;padding:1px 6px;border-radius:3px;font-size:11px'>⭐</span>
-sur chaque ligne · onglet dédié <em>Articles surveillés</em> · KPI spécifique en haut de page.<br><br>
-<strong>Format attendu :</strong> 1 colonne nommée <code>Code</code>, <code>Article</code>,
-<code>Ref</code> ou similaire. Les entêtes sont optionnelles — la première colonne est utilisée par défaut."""),
+        ("④ Score global", "<code>Score = 50% × Fill Rate + 30% × On Time + 20% × OTIF</code><br>🟢 ≥ 97% · 🟠 90–97% · 🔴 &lt; 90%"),
+        ("⑤ Score de criticité", "<code>Criticité = Impact CA proxy × (1 − Fill Rate)</code>"),
+        ("⑥ ⭐ Liste de surveillance — Classe par article",
+         """Chargez un fichier CSV/Excel avec <strong>2 colonnes</strong> :<br>
+<code>Code article</code> + <code>Classe</code> (ex: GOLD, SILVER, A, B…)<br><br>
+La classe apparaît dans <strong>toutes les vues</strong> (tableaux, graphiques, exports Excel).<br>
+Dans Excel : fond doré (GOLD) ou argent (SILVER) sur chaque ligne, colonne <em>Classe</em> en première position."""),
     ]
     for title, body in docs:
-        st.markdown(f"""
-<div class='doc-card'>
-  <div class='doc-card-title'>{title}</div>
-  <div class='doc-card-body'>{body}</div>
-</div>""", unsafe_allow_html=True)
-
-    st.markdown("""
-<div class='alert-card alert-amber'>
-  <strong>⚠️ Règle temporaire ERP active sur toutes les analyses</strong><br>
-  Si la date prévue est absente ou nulle, la ligne est considérée <strong>On Time</strong> par défaut.
-</div>""", unsafe_allow_html=True)
+        st.markdown(f"<div class='doc-card'><div class='doc-card-title'>{title}</div><div class='doc-card-body'>{body}</div></div>", unsafe_allow_html=True)
+    st.markdown("""<div class='alert-card alert-amber'><strong>⚠️ Règle temporaire ERP</strong> : date prévue absente → ligne considérée On Time par défaut.</div>""", unsafe_allow_html=True)
     st.stop()
 
 
@@ -1180,7 +1193,7 @@ with st.spinner("Lecture et préparation des données…"):
         raw,
         exclude_technical=exclude_technical,
         cap_sur_receipt=cap_sur_receipt,
-        watchlist=watchlist,
+        watchdict=watchdict,
     )
 
 if df.empty:
@@ -1195,27 +1208,20 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("<div style='font-size:11px;font-weight:600;color:#8E8E93;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px'>Filtres globaux</div>", unsafe_allow_html=True)
 
-    all_sites   = sorted([x for x in df["site_label"].dropna().unique()   if x not in ("", "Inconnu")])
-    all_sup     = sorted([x for x in df["supplier_name"].dropna().unique() if x not in ("", "Inconnu")])
-    all_depts   = sorted([x for x in df["dept_label"].dropna().unique()    if x not in ("", "Inconnu")])
+    all_sites = sorted([x for x in df["site_label"].dropna().unique()    if x not in ("", "Inconnu")])
+    all_sup   = sorted([x for x in df["supplier_name"].dropna().unique()  if x not in ("", "Inconnu")])
+    all_depts = sorted([x for x in df["dept_label"].dropna().unique()     if x not in ("", "Inconnu")])
 
-    sel_sites   = st.multiselect("Magasin",     all_sites, default=all_sites)
-    sel_sup     = st.multiselect("Fournisseur", all_sup,   default=[])
-    sel_depts   = st.multiselect("Département", all_depts, default=all_depts)
-    only_crit   = st.checkbox("Uniquement OTIF = 0", value=False)
-    only_watch  = st.checkbox(f"Uniquement articles ⭐ {watch_label}", value=False, disabled=(not watchlist))
+    sel_sites = st.multiselect("Magasin",     all_sites, default=all_sites)
+    sel_sup   = st.multiselect("Fournisseur", all_sup,   default=[])
+    sel_depts = st.multiselect("Département", all_depts, default=all_depts)
+    only_crit  = st.checkbox("Uniquement OTIF = 0", value=False)
+    only_watch = st.checkbox(f"Uniquement articles ⭐ {watch_label}", value=False, disabled=(not watchdict))
 
     st.markdown("---")
     st.markdown("<div style='font-size:11px;font-weight:600;color:#8E8E93;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px'>📋 Fiche Fournisseur</div>", unsafe_allow_html=True)
-    fiche_supplier = st.selectbox(
-        "Fournisseur à analyser",
-        options=["— Choisir —"] + all_sup,
-        key="fiche_sel",
-    )
-    seuil_fill = st.slider(
-        "Seuil Fill Rate (lignes 'mauvaises')",
-        min_value=50, max_value=100, value=100, step=5, format="%d%%",
-    )
+    fiche_supplier = st.selectbox("Fournisseur à analyser", options=["— Choisir —"] + all_sup, key="fiche_sel")
+    seuil_fill = st.slider("Seuil Fill Rate (lignes 'mauvaises')", min_value=50, max_value=100, value=100, step=5, format="%d%%")
     st.caption(f"Lignes retenues dans la fiche : Fill Rate ligne < {seuil_fill}%")
 
 if not sel_sites: sel_sites = all_sites
@@ -1226,37 +1232,33 @@ if sel_sup:
     view = view[view["supplier_name"].isin(sel_sup)].copy()
 if only_crit:
     view = view[view["otif"] == 0].copy()
-if only_watch and watchlist:
+if only_watch and watchdict:
     view = view[view["is_watched"]].copy()
 
 if view.empty:
     st.warning("Aucune donnée après filtrage — ajustez les filtres dans la sidebar.")
     st.stop()
 
-# ── Calculs agrégés
 kpi         = compute_global_kpis(view)
 by_supplier = agg_supplier(view)
 by_site     = agg_site(view)
-by_article  = agg_article(view, watchlist=watchlist)
-
-# KPI surveillance
-watch_kpi = compute_global_kpis(view[view["is_watched"]]) if watchlist else None
+by_article  = agg_article(view, watchdict=watchdict)
+watch_kpi   = compute_global_kpis(view[view["is_watched"]]) if watchdict else None
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # BANDEAU SURVEILLANCE
 # ══════════════════════════════════════════════════════════════════════════════
-if watchlist:
+if watchdict:
     n_watched_lines = int(view["is_watched"].sum())
     n_watched_arts  = view[view["is_watched"]]["Code"].nunique() if "Code" in view.columns else 0
-    n_matched       = quality.get("watched_in_data", 0)
-    pct_matched     = round(safe_div(n_watched_arts, len(watchlist)) * 100, 1)
-
+    pct_matched     = round(safe_div(n_watched_arts, len(watchdict)) * 100, 1)
+    classes         = sorted(set(watchdict.values()))
     st.markdown(f"""
 <div class='watch-banner'>
   <strong>⭐ Liste de surveillance active — {watch_label}</strong> &nbsp;·&nbsp;
-  {len(watchlist)} codes chargés &nbsp;·&nbsp;
-  <strong>{n_watched_arts}</strong> article(s) matchés dans les données ({pct_matched}%) &nbsp;·&nbsp;
+  {len(watchdict)} codes · Classes : <strong>{', '.join(classes)}</strong> &nbsp;·&nbsp;
+  <strong>{n_watched_arts}</strong> articles matchés ({pct_matched}%) &nbsp;·&nbsp;
   <strong>{n_watched_lines:,}</strong> ligne(s) concernée(s)
 </div>""", unsafe_allow_html=True)
 
@@ -1264,11 +1266,7 @@ if watchlist:
 # ══════════════════════════════════════════════════════════════════════════════
 # KPI GLOBAUX
 # ══════════════════════════════════════════════════════════════════════════════
-st.markdown(
-    f"<div class='section-label'>{kpi['sites']} magasin(s) · "
-    f"{kpi['suppliers']} fournisseur(s) · {kpi['orders']} commande(s)</div>",
-    unsafe_allow_html=True,
-)
+st.markdown(f"<div class='section-label'>{kpi['sites']} magasin(s) · {kpi['suppliers']} fournisseur(s) · {kpi['orders']} commande(s)</div>", unsafe_allow_html=True)
 render_kpi_row(kpi, watch_kpi=watch_kpi)
 
 
@@ -1279,69 +1277,35 @@ st.markdown("---")
 st.markdown("<div class='section-label'>Alertes &amp; points d'attention</div>", unsafe_allow_html=True)
 
 if quality.get("all_dates_missing"):
-    st.markdown("""
-<div class='alert-card alert-red'>
-  <strong>🔴 On Time non significatif — aucune date prévue dans ce fichier</strong><br>
-  On Time = 100% artificiel. Demandez un export avec <code>H Date</code> ou <code>Date livraison</code>.
-</div>""", unsafe_allow_html=True)
+    st.markdown("<div class='alert-card alert-red'><strong>🔴 On Time non significatif</strong> — aucune date prévue dans ce fichier. On Time = 100% artificiel.</div>", unsafe_allow_html=True)
 elif quality.get("missing_expected_date", 0) > 0:
     pct = round(quality["missing_expected_date"] / quality["clean_rows"] * 100, 1)
-    st.markdown(f"""
-<div class='alert-card alert-amber'>
-  <strong>⚠️ Dates prévues partiellement manquantes</strong><br>
-  {quality['missing_expected_date']:,} lignes sans date prévue ({pct}%) → considérées On Time par défaut.
-</div>""", unsafe_allow_html=True)
+    st.markdown(f"<div class='alert-card alert-amber'><strong>⚠️ Dates prévues partiellement manquantes</strong><br>{quality['missing_expected_date']:,} lignes sans date prévue ({pct}%) → considérées On Time par défaut.</div>", unsafe_allow_html=True)
 
 if not by_supplier.empty:
     top3_sup = by_supplier.head(3)
-    st.markdown(f"""
-<div class='alert-card alert-red'>
-  <strong>🔴 Fournisseurs les plus critiques</strong><br>
-  {" · ".join(f"<strong>{r.supplier_name}</strong> (score {r.score:.1f}%)" for r in top3_sup.itertuples())}
-</div>""", unsafe_allow_html=True)
+    st.markdown(f"<div class='alert-card alert-red'><strong>🔴 Fournisseurs les plus critiques</strong><br>{' · '.join(f'<strong>{r.supplier_name}</strong> (score {r.score:.1f}%)' for r in top3_sup.itertuples())}</div>", unsafe_allow_html=True)
 
 if not by_site.empty:
     top3_site = by_site.head(3)
-    st.markdown(f"""
-<div class='alert-card alert-amber'>
-  <strong>⚠️ Magasins les plus impactés</strong><br>
-  {" · ".join(f"<strong>{r.site_label}</strong> ({int(r.qty_missing):,} unités manquantes)" for r in top3_site.itertuples())}
-</div>""", unsafe_allow_html=True)
+    st.markdown(f"<div class='alert-card alert-amber'><strong>⚠️ Magasins les plus impactés</strong><br>{' · '.join(f'<strong>{r.site_label}</strong> ({int(r.qty_missing):,} unités manquantes)' for r in top3_site.itertuples())}</div>", unsafe_allow_html=True)
 
-# Alerte articles surveillés en rupture
-if watchlist and watch_kpi and watch_kpi.get("fill_rate", 100) < SEUIL_SURVEILLER:
-    st.markdown(f"""
-<div class='alert-card alert-gold'>
-  <strong>⭐ Articles surveillance ({watch_label}) — Fill Rate dégradé</strong><br>
-  Fill Rate = <strong>{fmt_pct(watch_kpi['fill_rate'])}</strong> ·
-  Volume manquant : <strong>{fmt(watch_kpi['missing_qty'])}</strong> unités ·
-  Impact CA proxy : <strong>{fmt(watch_kpi['impact_value'])}</strong> FCFA
-</div>""", unsafe_allow_html=True)
+if watchdict and watch_kpi and watch_kpi.get("fill_rate", 100) < SEUIL_SURVEILLER:
+    st.markdown(f"<div class='alert-card alert-gold'><strong>⭐ Articles surveillance ({watch_label}) — Fill Rate dégradé</strong><br>FR = <strong>{fmt_pct(watch_kpi['fill_rate'])}</strong> · Vol. manquant : <strong>{fmt(watch_kpi['missing_qty'])}</strong> unités · Impact : <strong>{fmt(watch_kpi['impact_value'])}</strong> FCFA</div>", unsafe_allow_html=True)
 
 if quality.get("pv_zero_rows", 0) > 0:
-    st.markdown(f"""
-<div class='alert-card alert-amber'>
-  <strong>⚠️ Impact CA proxy sous-estimé</strong><br>
-  {quality['pv_zero_rows']:,} ligne(s) avec Prix de vente HT = 0 → impact CA proxy = 0 FCFA.
-</div>""", unsafe_allow_html=True)
+    st.markdown(f"<div class='alert-card alert-amber'><strong>⚠️ Impact CA proxy sous-estimé</strong><br>{quality['pv_zero_rows']:,} ligne(s) avec PV HT = 0.</div>", unsafe_allow_html=True)
 
-st.markdown(f"""
-<div class='alert-card alert-blue'>
-  <strong>ℹ️ Qualité de données</strong> &nbsp;·&nbsp;
-  Date prévue : <strong>{quality['expected_col']}</strong> &nbsp;·&nbsp;
-  Dates manquantes : <strong>{quality['missing_expected_date']:,}</strong> &nbsp;·&nbsp;
-  Sur-réceptions capées : <strong>{quality['sur_receipt_rows']:,}</strong> &nbsp;·&nbsp;
-  Taux exploitable : <strong>{quality['usable_rate']:.1f}%</strong>
-  {f" &nbsp;·&nbsp; ⭐ Articles matchés : <strong>{quality.get('watched_in_data', 0):,}</strong> lignes" if watchlist else ""}
-</div>""", unsafe_allow_html=True)
+_watch_info = f" · ⭐ Lignes matchées : <strong>{quality.get('watched_in_data', 0):,}</strong>" if watchdict else ""
+st.markdown(f"<div class='alert-card alert-blue'><strong>ℹ️ Qualité de données</strong> · Date prévue : <strong>{quality['expected_col']}</strong> · Dates manquantes : <strong>{quality['missing_expected_date']:,}</strong> · Sur-réceptions capées : <strong>{quality['sur_receipt_rows']:,}</strong> · Taux exploitable : <strong>{quality['usable_rate']:.1f}%</strong>{_watch_info}</div>", unsafe_allow_html=True)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TABS
 # ══════════════════════════════════════════════════════════════════════════════
 st.markdown("---")
-n_watched_arts_tab = int((by_article["Surveillance"] == "⭐").sum()) if "Surveillance" in by_article.columns else 0
-watch_tab_label = f"⭐ {watch_label} ({n_watched_arts_tab})" if watchlist else "⭐ Surveillance"
+n_watched_arts_tab = int((by_article["Classe"] != "").sum()) if "Classe" in by_article.columns else 0
+watch_tab_label = f"⭐ {watch_label} ({n_watched_arts_tab})" if watchdict else "⭐ Surveillance"
 
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     f"🚛 Fournisseurs ({len(by_supplier)})",
@@ -1354,14 +1318,10 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
 ])
 
 
-# ── Tab 1 : Fournisseurs ──────────────────────────────────────────────────────
+# ── Tab 1 : Fournisseurs
 with tab1:
     st.caption("Trié par criticité décroissante = Impact CA proxy × (1 − Fill Rate)")
-    st.plotly_chart(
-        bar_h(by_supplier, "criticality_score", "supplier_name", "#FF3B30",
-              "Score de criticité (FCFA-équivalent)"),
-        use_container_width=True,
-    )
+    st.plotly_chart(bar_h(by_supplier, "criticality_score", "supplier_name", "#FF3B30", "Score de criticité (FCFA-équivalent)"), use_container_width=True)
     d = by_supplier.copy()
     d["Fill Rate"]       = d["fill_rate"].apply(fmt_pct)
     d["On Time"]         = d["on_time"].apply(fmt_pct)
@@ -1369,42 +1329,27 @@ with tab1:
     d["Score"]           = d["score"].apply(fmt_pct)
     d["Vol. manquant"]   = d["qty_missing"].apply(fmt)
     d["Impact CA proxy"] = d["impact_value"].apply(fmt)
-    st.dataframe(
-        d[["supplier_name", "Fill Rate", "On Time", "OTIF", "Score",
-           "Vol. manquant", "Impact CA proxy", "orders", "articles", "sites", "Niveau"]]
-        .rename(columns={"supplier_name": "Fournisseur", "orders": "Cmdes",
-                         "articles": "Articles", "sites": "Magasins"}),
-        use_container_width=True, hide_index=True,
-    )
+    st.dataframe(d[["supplier_name","Fill Rate","On Time","OTIF","Score","Vol. manquant","Impact CA proxy","orders","articles","sites","Niveau"]].rename(columns={"supplier_name":"Fournisseur","orders":"Cmdes","articles":"Articles","sites":"Magasins"}), use_container_width=True, hide_index=True)
 
 
-# ── Tab 2 : Magasins ─────────────────────────────────────────────────────────
+# ── Tab 2 : Magasins
 with tab2:
-    st.plotly_chart(
-        bar_h(by_site, "qty_missing", "site_label", "#FF9500",
-              "Volume manquant (unités)", fmt_fn=lambda v: f"{int(v):,}"),
-        use_container_width=True,
-    )
+    st.plotly_chart(bar_h(by_site, "qty_missing", "site_label", "#FF9500", "Volume manquant (unités)", fmt_fn=lambda v: f"{int(v):,}"), use_container_width=True)
     d = by_site.copy()
     for src, dst in [("fill_rate","Fill Rate"),("on_time","On Time"),("otif","OTIF"),("score","Score")]:
         d[dst] = d[src].apply(fmt_pct)
     d["Vol. manquant"]   = d["qty_missing"].apply(fmt)
     d["Impact CA proxy"] = d["impact_value"].apply(fmt)
-    st.dataframe(
-        d[["site_label","Fill Rate","On Time","OTIF","Score",
-           "Vol. manquant","Impact CA proxy","suppliers","articles","Niveau"]]
-        .rename(columns={"site_label":"Magasin","suppliers":"Fournisseurs","articles":"Articles"}),
-        use_container_width=True, hide_index=True,
-    )
+    st.dataframe(d[["site_label","Fill Rate","On Time","OTIF","Score","Vol. manquant","Impact CA proxy","suppliers","articles","Niveau"]].rename(columns={"site_label":"Magasin","suppliers":"Fournisseurs","articles":"Articles"}), use_container_width=True, hide_index=True)
 
 
-# ── Tab 3 : Articles ─────────────────────────────────────────────────────────
+# ── Tab 3 : Articles
 with tab3:
     st.markdown("<div class='section-label'>Top 20 articles critiques</div>", unsafe_allow_html=True)
     st.plotly_chart(
         bar_h(by_article.head(20), "qty_missing", "article_label", "#007AFF",
               "Volume manquant (unités)", height=620, fmt_fn=lambda v: f"{int(v):,}",
-              watched_col="Surveillance"),
+              classe_col="Classe"),
         use_container_width=True,
     )
     d = by_article.copy()
@@ -1412,166 +1357,121 @@ with tab3:
         d[dst] = d[src].apply(fmt_pct)
     d["Vol. manquant"]   = d["qty_missing"].apply(fmt)
     d["Impact CA proxy"] = d["impact_value"].apply(fmt)
-    show_cols = [c for c in ["Surveillance","Code","article_label","supplier_name","Fill Rate","On Time",
-                              "OTIF","Score","Vol. manquant","Impact CA proxy","sites","orders"]
-                 if c in d.columns]
-    st.dataframe(
-        d[show_cols].rename(columns={"article_label":"Article","supplier_name":"Fournisseur",
-                                      "sites":"Magasins","orders":"Cmdes"}),
-        use_container_width=True, hide_index=True,
-    )
+    show_cols = [c for c in ["Classe","Code","article_label","supplier_name","Fill Rate","On Time","OTIF","Score","Vol. manquant","Impact CA proxy","sites","orders"] if c in d.columns]
+    st.dataframe(d[show_cols].rename(columns={"article_label":"Article","supplier_name":"Fournisseur","sites":"Magasins","orders":"Cmdes"}), use_container_width=True, hide_index=True)
 
 
-# ── Tab 4 : Articles Surveillés ───────────────────────────────────────────────
+# ── Tab 4 : Articles Surveillés
 with tab4:
-    if not watchlist:
-        st.markdown("""
-<div class='alert-card alert-blue'>
-  <strong>ℹ️ Aucune liste de surveillance chargée</strong><br>
-  Uploadez un fichier CSV ou Excel dans la sidebar (section ⭐ Liste de surveillance)
-  contenant vos codes articles 20/80, stratégiques, ou toute autre segmentation prioritaire.
-</div>""", unsafe_allow_html=True)
+    if not watchdict:
+        st.markdown("<div class='alert-card alert-blue'><strong>ℹ️ Aucune liste de surveillance chargée</strong><br>Uploadez un CSV/Excel avec colonnes <code>Code article</code> + <code>Classe</code>.</div>", unsafe_allow_html=True)
     else:
-        watched_arts = by_article[by_article["Surveillance"] == "⭐"].copy() if "Surveillance" in by_article.columns else pd.DataFrame()
-
+        watched_arts = by_article[by_article["Classe"] != ""].copy() if "Classe" in by_article.columns else pd.DataFrame()
         if watched_arts.empty:
             st.warning(f"Aucun article de la liste {watch_label} trouvé dans les données filtrées.")
         else:
-            # KPIs dédiés
             w_lines = view[view["is_watched"]]
             wk = compute_global_kpis(w_lines)
 
-            st.markdown(f"<div class='section-label'>KPIs — Articles {watch_label} ({len(watched_arts)} références)</div>", unsafe_allow_html=True)
+            # KPIs par classe
+            classes_present = sorted(watched_arts["Classe"].unique())
+            if len(classes_present) > 1:
+                st.markdown(f"<div class='section-label'>KPIs par classe ({', '.join(classes_present)})</div>", unsafe_allow_html=True)
+                cls_cols = st.columns(len(classes_present))
+                for i, cls in enumerate(classes_present):
+                    cls_arts = watched_arts[watched_arts["Classe"] == cls]
+                    cls_codes = set(cls_arts["code_str"].tolist()) if "code_str" in cls_arts.columns else set()
+                    cls_lines = view[view["code_str"].isin(cls_codes)] if "code_str" in view.columns else view.iloc[0:0]
+                    cls_kpi = compute_global_kpis(cls_lines)
+                    with cls_cols[i]:
+                        st.markdown(f"""
+<div class='kpi-watch'>
+  <div class='kpi-watch-label'>⭐ {cls} ({len(cls_arts)} réf.)</div>
+  <div class='kpi-watch-value'>{fmt_pct(cls_kpi['fill_rate'])}</div>
+  <div class='kpi-watch-sub'>FR · OTIF {fmt_pct(cls_kpi['otif'])} · Vol. manquant {fmt(cls_kpi['missing_qty'])}</div>
+</div>""", unsafe_allow_html=True)
+
+            st.markdown("---")
+            st.markdown(f"<div class='section-label'>KPIs globaux — Articles {watch_label} ({len(watched_arts)} références)</div>", unsafe_allow_html=True)
             wc1, wc2, wc3, wc4 = st.columns(4)
             wc1.metric("Fill Rate ⭐",    fmt_pct(wk["fill_rate"]))
             wc2.metric("On Time ⭐",      fmt_pct(wk["on_time"]))
             wc3.metric("OTIF ⭐",         fmt_pct(wk["otif"]))
             wc4.metric("Score global ⭐", fmt_pct(wk["score"]))
             wc5, wc6 = st.columns(2)
-            wc5.metric("Vol. manquant ⭐",    fmt(wk["missing_qty"]))
-            wc6.metric("Impact CA proxy ⭐",  f"{fmt(wk['impact_value'])} FCFA")
+            wc5.metric("Vol. manquant ⭐",   fmt(wk["missing_qty"]))
+            wc6.metric("Impact CA proxy ⭐", f"{fmt(wk['impact_value'])} FCFA")
 
             st.markdown("---")
-            st.markdown(f"<div class='section-label'>Graphique — Top 20 articles {watch_label}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='section-label'>Top 20 — Articles {watch_label}</div>", unsafe_allow_html=True)
             st.plotly_chart(
-                bar_h(watched_arts.head(20), "qty_missing", "article_label",
-                      "#FFD60A", "Volume manquant (unités)",
+                bar_h(watched_arts.head(20), "qty_missing", "article_label", "#FFD60A",
+                      "Volume manquant (unités)",
                       height=max(400, min(700, len(watched_arts.head(20)) * 32)),
-                      fmt_fn=lambda v: f"{int(v):,}"),
+                      fmt_fn=lambda v: f"{int(v):,}", classe_col="Classe"),
                 use_container_width=True,
             )
 
             st.markdown("---")
-            st.markdown(f"<div class='section-label'>Détail articles {watch_label}</div>", unsafe_allow_html=True)
             dw = watched_arts.copy()
             for src, dst in [("fill_rate","Fill Rate"),("on_time","On Time"),("otif","OTIF"),("score","Score")]:
                 dw[dst] = dw[src].apply(fmt_pct)
             dw["Vol. manquant"]   = dw["qty_missing"].apply(fmt)
             dw["Impact CA proxy"] = dw["impact_value"].apply(fmt)
-            show_w = [c for c in ["Code","article_label","supplier_name","Fill Rate","On Time",
-                                   "OTIF","Score","Vol. manquant","Impact CA proxy","sites","orders"]
-                      if c in dw.columns]
-            st.dataframe(
-                dw[show_w].rename(columns={"article_label":"Article","supplier_name":"Fournisseur",
-                                            "sites":"Magasins","orders":"Cmdes"}),
-                use_container_width=True, hide_index=True,
-            )
+            show_w = [c for c in ["Classe","Code","article_label","supplier_name","Fill Rate","On Time","OTIF","Score","Vol. manquant","Impact CA proxy","sites","orders"] if c in dw.columns]
+            st.dataframe(dw[show_w].rename(columns={"article_label":"Article","supplier_name":"Fournisseur","sites":"Magasins","orders":"Cmdes"}), use_container_width=True, hide_index=True)
 
-            # Articles de la liste non trouvés dans les données
             matched_codes = set(watched_arts["code_str"].tolist()) if "code_str" in watched_arts.columns else set()
             not_found = watchlist - matched_codes
             if not_found:
                 with st.expander(f"🔍 {len(not_found)} code(s) de la liste non trouvés dans les données"):
-                    st.dataframe(
-                        pd.DataFrame(sorted(not_found), columns=["Code non trouvé"]),
-                        use_container_width=True, hide_index=True,
-                    )
+                    st.dataframe(pd.DataFrame(sorted(not_found), columns=["Code non trouvé"]), use_container_width=True, hide_index=True)
 
 
-# ── Tab 5 : Lignes critiques ──────────────────────────────────────────────────
+# ── Tab 5 : Lignes critiques
 with tab5:
-    crit_lines = view[view["otif"] == 0].sort_values(
-        ["is_watched", "qty_missing", "service_gap_value"],
-        ascending=[False, False, False]
-    )
+    crit_lines = view[view["otif"] == 0].sort_values(["is_watched","qty_missing","service_gap_value"], ascending=[False,False,False])
     pct_non_otif = len(crit_lines) / len(view) * 100
-    st.caption(f"{len(crit_lines):,} lignes non OTIF sur {len(view):,} ({pct_non_otif:.1f}%) — ⭐ articles surveillance remontés en tête")
-
-    dcols = [c for c in [
-        "is_watched", "date_received", "date_expected", "site_label", "supplier_name",
-        "Code", "article_label", "N° Cde", "qte_cde", "qte_rec_retained",
-        "qty_missing", "service_gap_value", "delay_days",
-    ] if c in crit_lines.columns]
+    st.caption(f"{len(crit_lines):,} lignes non OTIF sur {len(view):,} ({pct_non_otif:.1f}%) — articles surveillés remontés en tête avec leur classe")
+    dcols = [c for c in ["watch_classe","date_received","date_expected","site_label","supplier_name","Code","article_label","N° Cde","qte_cde","qte_rec_retained","qty_missing","service_gap_value","delay_days"] if c in crit_lines.columns]
     dl = crit_lines[dcols].copy()
-    if "is_watched" in dl.columns:
-        dl["is_watched"] = dl["is_watched"].apply(lambda x: "⭐" if x else "")
     if "service_gap_value" in dl.columns:
         dl["service_gap_value"] = dl["service_gap_value"].apply(fmt)
     st.dataframe(
-        dl.rename(columns={
-            "is_watched":       "⭐",
-            "date_received":    "Date réception",
-            "date_expected":    "Date prévue",
-            "site_label":       "Magasin",
-            "supplier_name":    "Fournisseur",
-            "article_label":    "Article",
-            "N° Cde":           "N° Commande",
-            "qte_cde":          "Qté cde",
-            "qte_rec_retained": "Qté reçue",
-            "qty_missing":      "Qté manquante",
-            "service_gap_value":"Impact CA proxy",
-            "delay_days":       "Retard (j)",
-        }),
+        dl.rename(columns={"watch_classe":"Classe","date_received":"Date réception","date_expected":"Date prévue","site_label":"Magasin","supplier_name":"Fournisseur","article_label":"Article","N° Cde":"N° Commande","qte_cde":"Qté cde","qte_rec_retained":"Qté reçue","qty_missing":"Qté manquante","service_gap_value":"Impact CA proxy","delay_days":"Retard (j)"}),
         use_container_width=True, hide_index=True,
     )
 
 
-# ── Tab 6 : Qualité des données ───────────────────────────────────────────────
+# ── Tab 6 : Qualité données
 with tab6:
     q1, q2, q3, q4 = st.columns(4)
     q1.metric("Lignes brutes",       f"{quality['raw_rows']:,}")
     q2.metric("Lignes exploitables", f"{quality['clean_rows']:,}")
     q3.metric("Taux exploitable",    fmt_pct(quality['usable_rate']))
     q4.metric("Date prévue utilisée",quality["expected_col"])
-
     q5, q6, q7, q8 = st.columns(4)
-    q5.metric("Qté cde ≤ 0 exclues",       f"{quality['excluded_zero_qty']:,}")
-    q6.metric("Fournisseurs tech. exclus",  f"{quality['excluded_technical']:,}")
-    q7.metric("Dates prévues manquantes",   f"{quality['missing_expected_date']:,}")
-    q8.metric("Sur-réceptions capées",      f"{quality['sur_receipt_rows']:,}")
-
-    if watchlist:
+    q5.metric("Qté cde ≤ 0 exclues",      f"{quality['excluded_zero_qty']:,}")
+    q6.metric("Fournisseurs tech. exclus", f"{quality['excluded_technical']:,}")
+    q7.metric("Dates prévues manquantes",  f"{quality['missing_expected_date']:,}")
+    q8.metric("Sur-réceptions capées",     f"{quality['sur_receipt_rows']:,}")
+    if watchdict:
         st.metric(f"⭐ Lignes articles {watch_label} matchées", f"{quality.get('watched_in_data', 0):,}")
-
     if quality.get("all_dates_missing"):
-        st.error("🔴 Aucune date prévue dans ce fichier — On Time = 100% artificiel.")
+        st.error("🔴 Aucune date prévue — On Time = 100% artificiel.")
     else:
         st.warning("Règle temporaire : date prévue absente → ligne considérée On Time.")
     if quality.get("pv_zero_rows", 0) > 0:
-        st.warning(f"⚠️ {quality['pv_zero_rows']:,} ligne(s) avec PV HT = 0 → impact CA proxy nul.")
+        st.warning(f"⚠️ {quality['pv_zero_rows']:,} ligne(s) avec PV HT = 0.")
 
 
-# ── Tab 7 : Fiche Fournisseur ─────────────────────────────────────────────────
+# ── Tab 7 : Fiche Fournisseur
 with tab7:
-
     if fiche_supplier == "— Choisir —":
-        st.markdown("""
-<div class='alert-card alert-blue'>
-  <strong>ℹ️ Comment utiliser la Fiche Fournisseur ?</strong><br><br>
-  1. Sélectionnez un fournisseur dans le menu <strong>📋 Fiche Fournisseur</strong> de la sidebar<br>
-  2. Ajustez le <strong>seuil Fill Rate</strong> pour cibler les livraisons incomplètes à remonter<br>
-  3. Consultez la synthèse KPI, le détail par magasin, par article, et ligne par ligne<br>
-  4. Cliquez sur <strong>Générer la fiche Excel</strong> pour télécharger un fichier propre à envoyer au fournisseur<br><br>
-  <em>Si une liste de surveillance est chargée, les articles ⭐ apparaissent avec un fond doré dans la fiche Excel
-  et un onglet dédié est généré automatiquement.</em>
-</div>""", unsafe_allow_html=True)
-
+        st.markdown("<div class='alert-card alert-blue'><strong>ℹ️ Comment utiliser la Fiche Fournisseur ?</strong><br><br>1. Sélectionnez un fournisseur dans la sidebar<br>2. Ajustez le seuil Fill Rate<br>3. Téléchargez la fiche Excel (colonne Classe incluse si liste chargée)</div>", unsafe_allow_html=True)
     else:
         fiche_df  = view[view["supplier_name"] == fiche_supplier].copy()
-        fiche_bad = fiche_df[fiche_df["line_fill_rate"] < seuil_fill / 100].sort_values(
-            ["is_watched", "qty_missing", "service_gap_value"],
-            ascending=[False, False, False]
-        )
+        fiche_bad = fiche_df[fiche_df["line_fill_rate"] < seuil_fill / 100].sort_values(["is_watched","qty_missing","service_gap_value"], ascending=[False,False,False])
         fkpi      = compute_global_kpis(fiche_df)
         col_txt   = score_color(fkpi["score"])
 
@@ -1579,25 +1479,20 @@ with tab7:
         if "Fou" in fiche_df.columns and not fiche_df["Fou"].isna().all():
             fou_code = str(int(fiche_df["Fou"].dropna().iloc[0]))
 
-        # Badge surveillance dans le header
         n_fiche_watched = int(fiche_df["is_watched"].sum()) if "is_watched" in fiche_df.columns else 0
-        watch_badge = f"&nbsp;·&nbsp; <span class='badge-watch'>⭐ {n_fiche_watched} lignes {watch_label}</span>" if watchlist and n_fiche_watched > 0 else ""
+        watch_badge = f"&nbsp;·&nbsp; <span class='badge-watch'>⭐ {n_fiche_watched} lignes {watch_label}</span>" if watchdict and n_fiche_watched > 0 else ""
 
         st.markdown(f"""
 <div class='fiche-header'>
   <div style='display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px'>
     <div>
-      <div style='font-size:20px;font-weight:700;color:#1C1C1E;letter-spacing:-0.02em'>{fiche_supplier}</div>
+      <div style='font-size:20px;font-weight:700;color:#1C1C1E'>{fiche_supplier}</div>
       <div style='font-size:12px;color:#8E8E93;margin-top:4px'>
-        Code fournisseur : <strong>{fou_code}</strong> &nbsp;·&nbsp;
-        {fkpi['orders']} commande(s) &nbsp;·&nbsp;
-        {fkpi['articles']} article(s) &nbsp;·&nbsp;
-        {fkpi['sites']} magasin(s){watch_badge}
+        Code : <strong>{fou_code}</strong> · {fkpi['orders']} commande(s) · {fkpi['articles']} article(s) · {fkpi['sites']} magasin(s){watch_badge}
       </div>
     </div>
-    <div style='background:{col_txt}1A;border:1.5px solid {col_txt};border-radius:8px;
-                padding:8px 16px;font-size:13px;font-weight:700;color:{col_txt};white-space:nowrap'>
-      {score_band(fkpi["score"])} &nbsp;·&nbsp; Score {fkpi["score"]:.1f}%
+    <div style='background:{col_txt}1A;border:1.5px solid {col_txt};border-radius:8px;padding:8px 16px;font-size:13px;font-weight:700;color:{col_txt}'>
+      {score_band(fkpi["score"])} · Score {fkpi["score"]:.1f}%
     </div>
   </div>
 </div>""", unsafe_allow_html=True)
@@ -1605,117 +1500,43 @@ with tab7:
         render_kpi_row(fkpi)
         st.markdown("---")
 
-        # Récap par magasin
         st.markdown("<div class='section-label'>Livraisons incomplètes par magasin</div>", unsafe_allow_html=True)
-        site_recap = (
-            fiche_bad.groupby("site_label", as_index=False).agg(
-                nb_cdes     =("N° Cde",           "nunique"),
-                nb_articles =("Code",             "nunique"),
-                qte_cde     =("qte_cde",          "sum"),
-                qte_rec     =("qte_rec_retained",  "sum"),
-                qty_missing =("qty_missing",       "sum"),
-                impact_value=("service_gap_value", "sum"),
-            ).sort_values("qty_missing", ascending=False)
-        )
+        site_recap = fiche_bad.groupby("site_label", as_index=False).agg(nb_cdes=("N° Cde","nunique"), nb_articles=("Code","nunique"), qte_cde=("qte_cde","sum"), qte_rec=("qte_rec_retained","sum"), qty_missing=("qty_missing","sum"), impact_value=("service_gap_value","sum")).sort_values("qty_missing", ascending=False)
         site_recap["Fill Rate"]       = (site_recap["qte_rec"] / site_recap["qte_cde"] * 100).apply(fmt_pct)
         site_recap["Vol. manquant"]   = site_recap["qty_missing"].apply(fmt)
         site_recap["Impact CA proxy"] = site_recap["impact_value"].apply(fmt)
-        st.dataframe(
-            site_recap[["site_label","Fill Rate","Vol. manquant","Impact CA proxy","nb_cdes","nb_articles"]]
-            .rename(columns={"site_label":"Magasin","nb_cdes":"Cmdes","nb_articles":"Articles"}),
-            use_container_width=True, hide_index=True,
-        )
+        st.dataframe(site_recap[["site_label","Fill Rate","Vol. manquant","Impact CA proxy","nb_cdes","nb_articles"]].rename(columns={"site_label":"Magasin","nb_cdes":"Cmdes","nb_articles":"Articles"}), use_container_width=True, hide_index=True)
 
-        # Récap par article (avec flag surveillance)
         st.markdown("<div class='section-label' style='margin-top:18px'>Livraisons incomplètes par article</div>", unsafe_allow_html=True)
-        art_recap = (
-            fiche_bad.groupby(["Code","article_label"], as_index=False).agg(
-                nb_sites    =("site_label",        "nunique"),
-                nb_cdes     =("N° Cde",            "nunique"),
-                qte_cde     =("qte_cde",           "sum"),
-                qte_rec     =("qte_rec_retained",   "sum"),
-                qty_missing =("qty_missing",        "sum"),
-                impact_value=("service_gap_value",  "sum"),
-            ).sort_values(["qty_missing"], ascending=False)
-        )
+        art_recap = fiche_bad.groupby(["Code","article_label"], as_index=False).agg(nb_sites=("site_label","nunique"), nb_cdes=("N° Cde","nunique"), qte_cde=("qte_cde","sum"), qte_rec=("qte_rec_retained","sum"), qty_missing=("qty_missing","sum"), impact_value=("service_gap_value","sum")).sort_values("qty_missing", ascending=False)
         art_recap["Fill Rate"]       = (art_recap["qte_rec"] / art_recap["qte_cde"] * 100).apply(fmt_pct)
         art_recap["Vol. manquant"]   = art_recap["qty_missing"].apply(fmt)
         art_recap["Impact CA proxy"] = art_recap["impact_value"].apply(fmt)
-        # Flag surveillance
-        if watchlist:
-            art_recap["⭐"] = art_recap["Code"].apply(
-                lambda c: "⭐" if normalise_code(c) in watchlist else ""
-            )
-            cols_art = ["⭐","Code","article_label","Fill Rate","Vol. manquant","Impact CA proxy","nb_sites","nb_cdes"]
+        if watchdict:
+            art_recap["Classe"] = art_recap["Code"].apply(lambda c: get_classe(c, watchdict))
+            cols_art = ["Classe","Code","article_label","Fill Rate","Vol. manquant","Impact CA proxy","nb_sites","nb_cdes"]
         else:
             cols_art = ["Code","article_label","Fill Rate","Vol. manquant","Impact CA proxy","nb_sites","nb_cdes"]
-        st.dataframe(
-            art_recap[cols_art].rename(columns={"article_label":"Article","nb_sites":"Magasins","nb_cdes":"Cmdes"}),
-            use_container_width=True, hide_index=True,
-        )
+        st.dataframe(art_recap[cols_art].rename(columns={"article_label":"Article","nb_sites":"Magasins","nb_cdes":"Cmdes"}), use_container_width=True, hide_index=True)
 
-        # Détail ligne
         st.markdown("<div class='section-label' style='margin-top:18px'>Détail des livraisons incomplètes</div>", unsafe_allow_html=True)
-        st.caption(
-            f"{len(fiche_bad):,} ligne(s) avec Fill Rate < {seuil_fill}% "
-            f"sur {len(fiche_df):,} total"
-            + (f" · ⭐ articles {watch_label} remontés en tête" if watchlist else "")
-        )
-        dcols_f = [c for c in [
-            "is_watched", "N° Cde", "date_received", "date_expected", "site_label",
-            "Code", "article_label", "qte_cde", "qte_rec_retained",
-            "qty_missing", "line_fill_rate", "service_gap_value", "on_time", "delay_days",
-        ] if c in fiche_bad.columns]
+        st.caption(f"{len(fiche_bad):,} ligne(s) avec Fill Rate < {seuil_fill}% sur {len(fiche_df):,} total" + (f" · articles {watch_label} remontés en tête" if watchdict else ""))
+        dcols_f = [c for c in ["watch_classe","N° Cde","date_received","date_expected","site_label","Code","article_label","qte_cde","qte_rec_retained","qty_missing","line_fill_rate","service_gap_value","on_time","delay_days"] if c in fiche_bad.columns]
         df_disp = fiche_bad[dcols_f].copy()
-        if "is_watched" in df_disp.columns:
-            df_disp["is_watched"] = df_disp["is_watched"].apply(lambda x: "⭐" if x else "")
         if "line_fill_rate" in df_disp.columns:
             df_disp["line_fill_rate"] = df_disp["line_fill_rate"].apply(lambda v: fmt_pct(v * 100))
         if "service_gap_value" in df_disp.columns:
             df_disp["service_gap_value"] = df_disp["service_gap_value"].apply(fmt)
         if "on_time" in df_disp.columns:
             df_disp["on_time"] = df_disp["on_time"].map({True:"✅",False:"❌",1:"✅",0:"❌"}).fillna("—")
-        st.dataframe(
-            df_disp.rename(columns={
-                "is_watched":       "⭐",
-                "N° Cde":           "N° Commande",
-                "date_received":    "Date réception",
-                "date_expected":    "Date prévue",
-                "site_label":       "Magasin",
-                "article_label":    "Article",
-                "qte_cde":          "Qté cde",
-                "qte_rec_retained": "Qté reçue",
-                "qty_missing":      "Qté manquante",
-                "line_fill_rate":   "Fill Rate ligne",
-                "service_gap_value":"Impact CA proxy",
-                "on_time":          "À l'heure",
-                "delay_days":       "Retard (j)",
-            }),
-            use_container_width=True, hide_index=True,
-        )
+        st.dataframe(df_disp.rename(columns={"watch_classe":"Classe","N° Cde":"N° Commande","date_received":"Date réception","date_expected":"Date prévue","site_label":"Magasin","article_label":"Article","qte_cde":"Qté cde","qte_rec_retained":"Qté reçue","qty_missing":"Qté manquante","line_fill_rate":"Fill Rate ligne","service_gap_value":"Impact CA proxy","on_time":"À l'heure","delay_days":"Retard (j)"}), use_container_width=True, hide_index=True)
 
-        # Export fiche Excel
         st.markdown("---")
         if st.button("📥 Générer la fiche Excel fournisseur", type="primary", key="btn_fiche"):
             with st.spinner("Génération de la fiche…"):
-                buf_fiche = build_fiche_excel(
-                    fournisseur=fiche_supplier,
-                    df_all=fiche_df,
-                    df_bad=fiche_bad,
-                    site_recap=site_recap,
-                    art_recap=art_recap,
-                    kpis=fkpi,
-                    seuil=seuil_fill,
-                    watchlist=watchlist,
-                )
-            safe_name = fiche_supplier.strip().replace(" ", "_").replace("/", "-")[:40]
-            st.download_button(
-                label=f"⬇️ Télécharger la fiche — {fiche_supplier}",
-                data=buf_fiche,
-                file_name=f"SmartBuyer_OTIF_{safe_name}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="dl_fiche",
-            )
+                buf_fiche = build_fiche_excel(fournisseur=fiche_supplier, df_all=fiche_df, df_bad=fiche_bad, site_recap=site_recap, art_recap=art_recap, kpis=fkpi, seuil=seuil_fill, watchdict=watchdict)
+            safe_name = fiche_supplier.strip().replace(" ","_").replace("/","-")[:40]
+            st.download_button(label=f"⬇️ Télécharger la fiche — {fiche_supplier}", data=buf_fiche, file_name=f"SmartBuyer_OTIF_{safe_name}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_fiche")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1723,48 +1544,19 @@ with tab7:
 # ══════════════════════════════════════════════════════════════════════════════
 st.markdown("---")
 st.markdown("<div class='section-label'>Exports Excel</div>", unsafe_allow_html=True)
-
 col_exp1, col_exp2 = st.columns(2)
 
 with col_exp1:
-    watch_mention = f"<br>⭐ Onglet dédié {watch_label} inclus" if watchlist else ""
-    st.markdown(f"""
-<div style='background:#FFFFFF;border:0.5px solid #E5E5EA;border-radius:12px;padding:16px 18px;margin-bottom:8px'>
-  <div style='font-size:13px;font-weight:700;color:#1C1C1E;margin-bottom:4px'>📋 Toutes les fiches fournisseurs</div>
-  <div style='font-size:12px;color:#8E8E93;line-height:1.5'>
-    1 onglet · toutes les livraisons incomplètes · tous fournisseurs<br>
-    Filtre automatique Excel · trié par criticité fournisseur{watch_mention}
-  </div>
-</div>""", unsafe_allow_html=True)
+    watch_mention = f"<br>⭐ Onglet dédié {watch_label} · colonne Classe incluse" if watchdict else ""
+    st.markdown(f"<div style='background:#FFFFFF;border:0.5px solid #E5E5EA;border-radius:12px;padding:16px 18px;margin-bottom:8px'><div style='font-size:13px;font-weight:700;color:#1C1C1E;margin-bottom:4px'>📋 Toutes les fiches fournisseurs</div><div style='font-size:12px;color:#8E8E93;line-height:1.5'>1 onglet · toutes livraisons incomplètes · tous fournisseurs<br>Filtre automatique · trié par criticité{watch_mention}</div></div>", unsafe_allow_html=True)
     if st.button("Générer l'export Fiches", type="primary", key="btn_all_fiches"):
         with st.spinner("Génération…"):
-            buf_all = build_export_all_fiches(view, by_supplier, seuil_fill, watchlist=watchlist)
-        st.download_button(
-            "⬇️ Télécharger — Toutes les fiches",
-            data=buf_all,
-            file_name="SmartBuyer_OTIF_Fiches_Fournisseurs.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key="dl_all_fiches",
-        )
+            buf_all = build_export_all_fiches(view, by_supplier, seuil_fill, watchdict=watchdict)
+        st.download_button("⬇️ Télécharger — Toutes les fiches", data=buf_all, file_name="SmartBuyer_OTIF_Fiches_Fournisseurs.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_all_fiches")
 
 with col_exp2:
-    st.markdown(f"""
-<div style='background:#FFFFFF;border:0.5px solid #E5E5EA;border-radius:12px;padding:16px 18px;margin-bottom:8px'>
-  <div style='font-size:13px;font-weight:700;color:#1C1C1E;margin-bottom:4px'>📊 Synthèse analytique globale</div>
-  <div style='font-size:12px;color:#8E8E93;line-height:1.5'>
-    Multi-onglets · Par fournisseur · Par magasin · Par article<br>
-    Lignes critiques · Qualité des données
-    {"<br>⭐ Onglet Articles surveillés inclus" if watchlist else ""}
-  </div>
-</div>""", unsafe_allow_html=True)
+    st.markdown(f"<div style='background:#FFFFFF;border:0.5px solid #E5E5EA;border-radius:12px;padding:16px 18px;margin-bottom:8px'><div style='font-size:13px;font-weight:700;color:#1C1C1E;margin-bottom:4px'>📊 Synthèse analytique globale</div><div style='font-size:12px;color:#8E8E93;line-height:1.5'>Multi-onglets · Par fournisseur · Par magasin · Par article<br>Lignes critiques · Qualité des données{'<br>⭐ Onglet Articles surveillés + colonne Classe' if watchdict else ''}</div></div>", unsafe_allow_html=True)
     if st.button("Générer l'export Synthèse", type="primary", key="btn_global"):
         with st.spinner("Génération…"):
-            buf_global = build_export_excel(view, by_supplier, by_site, by_article, quality,
-                                            watchlist=watchlist)
-        st.download_button(
-            "⬇️ Télécharger — Synthèse globale",
-            data=buf_global,
-            file_name="SmartBuyer_OTIF_Synthese.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key="dl_global",
-        )
+            buf_global = build_export_excel(view, by_supplier, by_site, by_article, quality, watchdict=watchdict)
+        st.download_button("⬇️ Télécharger — Synthèse globale", data=buf_global, file_name="SmartBuyer_OTIF_Synthese.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_global")
