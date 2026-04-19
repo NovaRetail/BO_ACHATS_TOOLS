@@ -513,8 +513,30 @@ elif active == TABS[1]:
     if df_alerte.empty:
         st.success("✅ Aucune alerte")
     else:
-        ACOLS = ["Magasin","SKU","Libellé article","Origine","Mode Appro","Sem. Réception","Stock"]
-        st.dataframe(df_alerte[[c for c in ACOLS if c in df_alerte.columns]].sort_values(['Magasin']).reset_index(drop=True),
+        # Déterminer "Rupture Commune" = SKU à 0 sur TOUS les magasins actifs
+        rupture_commune_skus = []
+        for sku in df_alerte['SKU'].unique():
+            sku_data = detail_df[detail_df['SKU'] == sku]
+            stock_par_mag = sku_data.groupby('Magasin')['Stock'].first()
+            if len(stock_par_mag) == len(mag_actifs) and (stock_par_mag == 0).all():
+                rupture_commune_skus.append(sku)
+        
+        # Afficher KPI ruptures communes
+        n_rupture_commune = len(rupture_commune_skus)
+        kc1, kc2, kc3 = st.columns([1, 1, 2])
+        with kc1:
+            st.metric("🔴 Ruptures Communes", n_rupture_commune)
+        with kc2:
+            st.metric("Articles Impactés", len(df_alerte['SKU'].unique()))
+        with kc3:
+            if n_rupture_commune > 0:
+                st.warning(f"⚠️ {n_rupture_commune} article(s) en rupture sur TOUS les magasins — escalade critique")
+        
+        df_alerte_display = df_alerte.copy()
+        df_alerte_display['Rupture Commune'] = df_alerte_display['SKU'].isin(rupture_commune_skus).map({True: '🔴 OUI', False: '—'})
+        
+        ACOLS = ["Magasin","SKU","Libellé article","Origine","Mode Appro","Sem. Réception","Stock","Rupture Commune"]
+        st.dataframe(df_alerte_display[[c for c in ACOLS if c in df_alerte_display.columns]].sort_values(['Rupture Commune', 'Magasin'], ascending=[False, True]).reset_index(drop=True),
                     use_container_width=True, hide_index=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
