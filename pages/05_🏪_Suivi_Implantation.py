@@ -362,10 +362,11 @@ with st.sidebar:
     st.markdown("### 🔍 Filtres")
     mag_sel = st.multiselect("Magasins", magasins_list, default=magasins_list)
     origine_sel = st.multiselect("Origine", ['IM', 'LO'], default=['IM', 'LO'])
-    sem_dispo = sorted([s for s in t1_raw['SEMAINE RECEPTION'].unique() if s and s not in ('nan', '')], key=sem_sort)
+    sem_dispo = sorted([s for s in t1_raw['SEMAINE RECEPTION'].unique() if pd.notna(s) and str(s).strip() and str(s).strip() not in ('nan', '')], key=sem_sort)
     sem_sel = st.multiselect("Semaine", sem_dispo, default=sem_dispo)
-    mode_sel = st.multiselect("Mode", sorted([m for m in t1_raw['MODE APPRO'].unique() if m and m not in ('nan', '')]),
-                             default=sorted([m for m in t1_raw['MODE APPRO'].unique() if m and m not in ('nan', '')]))
+    mode_list = [m for m in t1_raw['MODE APPRO'].unique() if pd.notna(m) and str(m).strip() and str(m).strip() not in ('nan', '')]
+    mode_list = sorted(mode_list)
+    mode_sel = st.multiselect("Mode", mode_list, default=mode_list)
     st.divider()
     st.markdown("### 🔄 Cessions")
     magasins_detresse = st.multiselect("Magasins détresse", options=tous_magasins, default=[])
