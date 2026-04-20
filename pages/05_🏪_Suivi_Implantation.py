@@ -19,6 +19,25 @@ TODAY = date.today()
 TODAY_STR = TODAY.strftime("%d %b %Y")
 TODAY_FILE = TODAY.strftime("%Y%m%d")
 
+# ══════════════════════════════════════════════════════════════════════════════
+# HELPER FUNCTIONS — Sorted Safe
+# ══════════════════════════════════════════════════════════════════════════════
+def safe_sorted_list(values):
+    """Convertir et trier une liste de valeurs mixtes (NaN, str, etc)"""
+    try:
+        clean = [str(x).strip() for x in values if pd.notna(x) and str(x).strip()]
+        return sorted(set(clean))  # Dedup aussi
+    except Exception:
+        return list(set([str(x) for x in values if pd.notna(x)]))
+
+def safe_sorted_unique(series):
+    """Sorted unique() robuste pour Series"""
+    try:
+        return safe_sorted_list(series.unique())
+    except Exception:
+        return []
+
+
 st.set_page_config(page_title="Rapport Implantation · Carrefour", layout="wide", initial_sidebar_state="expanded")
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -353,8 +372,8 @@ with st.spinner("Parsing PBI…"):
         st.stop()
     df_stock_t1, _ = load_pbi_stock(pbi_bytes, pbi_file.name, sku_scope=SKU_TUPLE)
 
-magasins_list = sorted(df_stock_t1['Libellé site'].dropna().unique())
-tous_magasins = sorted(df_stock_all['Libellé site'].dropna().unique()) if df_stock_all is not None else magasins_list
+magasins_list = safe_sorted_unique(df_stock_t1['Libellé site'])
+tous_magasins = safe_sorted_unique(df_stock_all['Libellé site']) if df_stock_all is not None else magasins_list
 
 # FILTRES
 with st.sidebar:
