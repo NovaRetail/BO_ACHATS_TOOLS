@@ -1,6 +1,7 @@
 """
-10_📊_Perf_Hebdo.py — SmartBuyer Hub
+10_📊_Perf_Hebdo.py — SmartBuyer Hub [FIXED]
 Performance commerciale hebdomadaire · Charte SmartBuyer v2
+🔧 Correction : Gestion robuste des colonnes optionnelles (Promo, Casse)
 """
 
 import streamlit as st
@@ -154,12 +155,18 @@ def parse_file(file_bytes, filename):
         if col in arts.columns:
             arts[col] = pd.to_numeric(arts[col], errors="coerce").fillna(0)
 
+    # 🔧 Assurer que les colonnes optionnelles existent (même si vides)
+    optional_cols = ["CA HT Promo", "Marge Promo", "%CA Poids Promo", "Casse (Valeur)", "Casse (Qté)"]
+    for col in optional_cols:
+        if col not in arts.columns:
+            arts[col] = 0
+
     rayon_tots = df[df["Famille"] == "Total"].copy()
     rayon_tots["rayon_label"] = rayon_tots["Rayon"].apply(
         lambda x: RAYON_MAP.get(str(x).strip(), clean_label(x))
     )
     rayon_tots = rayon_tots.groupby("rayon_label", as_index=False).agg(
-        CA=("CA","sum"), Marge=("Marge","sum"), Casse=("Casse (Valeur)","sum")
+        CA=("CA","sum"), Marge=("Marge","sum"), Casse=("Casse (Valeur)","sum") if "Casse (Valeur)" in rayon_tots.columns else ("CA","sum")
     )
     rayon_tots["%Marge"] = rayon_tots["Marge"] / rayon_tots["CA"]
     return arts, rayon_tots
@@ -168,24 +175,34 @@ def parse_file(file_bytes, filename):
 def compute_kpis(arts):
     ca    = arts["CA"].sum()
     marge = arts["Marge"].sum()
-    casse = arts["Casse (Valeur)"].sum()
+    casse = arts["Casse (Valeur)"].sum() if "Casse (Valeur)" in arts.columns else 0
     nb_neg  = int((arts["Marge"] < 0).sum())
-    nb_casse= int((arts["Casse (Valeur)"] < 0).sum())
+    nb_casse= int((arts["Casse (Valeur)"] < 0).sum()) if "Casse (Valeur)" in arts.columns else 0
     return ca, marge, marge/ca if ca else 0, casse, nb_neg, nb_casse
 
 def top_ca(arts, n=10):
     return arts.nlargest(n,"CA")[["art_label","rayon_label","CA","Marge","%Marge","Qté Vente"]].reset_index(drop=True)
+
 def top_marge(arts, n=10):
     return arts.nlargest(n,"Marge")[["art_label","rayon_label","CA","Marge","%Marge"]].reset_index(drop=True)
+
 def top_promo(arts, n=10):
+    # 🔧 Vérifier que la colonne existe avant de l'utiliser
+    if "CA HT Promo" not in arts.columns or arts["CA HT Promo"].max() <= 0:
+        return pd.DataFrame()
     return (arts[arts["CA HT Promo"]>0]
             .nlargest(n,"CA HT Promo")[["art_label","rayon_label","CA HT Promo","Marge Promo","%CA Poids Promo"]]
             .reset_index(drop=True))
+
 def flop_marge(arts, n=15):
     return (arts[arts["Marge"]<0]
             .nsmallest(n,"Marge")[["art_label","rayon_label","CA","Marge","%Marge"]]
             .reset_index(drop=True))
+
 def top_casse(arts, n=10):
+    # 🔧 Vérifier que la colonne existe avant de l'utiliser
+    if "Casse (Valeur)" not in arts.columns:
+        return pd.DataFrame()
     return (arts[arts["Casse (Valeur)"].notna() & (arts["Casse (Valeur)"]<0)]
             .nsmallest(n,"Casse (Valeur)")[["art_label","rayon_label","Casse (Valeur)","Casse (Qté)"]]
             .reset_index(drop=True))
@@ -204,7 +221,7 @@ def show_df(df, rename_map, num_cols=(), pct_cols=(), neg_cols=(), green_cols=()
     for c in num_cols:
         c2 = rename_map.get(c, c)
         if c2 in df.columns:
-            fmt[c2] = lambda v, _c=c2: f"{int(v):,}".replace(",", " ")
+            fmt[c2] = lambda v, _c=c2: f"{int(v):,}".replace(",", " ")
     for c in pct_cols:
         c2 = rename_map.get(c, c)
         if c2 in df.columns:
@@ -399,9 +416,10 @@ def generate_excel(arts, rayon_tots):
         [40,RCOL_W,16,16,10],"#34C759", num_cols=[2,3],pct_cols=[4],green_cols=[3],rayon_col=1)
     cur = sp(ws0, cur, 14)
     xl_hdr(ws0, cur, 1, "TOP 10 VENTES PROMO — TOUS RAYONS CONFONDUS", "#FF9500", 7); cur+=1
-    cur = xl_table(ws0, cur, 1, ["ARTICLE","RAYON","CA PROMO (FCFA)","MARGE PROMO (FCFA)","POIDS PROMO"],
-        rc_rows(tpr,"art_label","rayon_label","CA HT Promo","Marge Promo","%CA Poids Promo"),
-        [40,RCOL_W,18,18,12],"#FF9500", num_cols=[2,3],pct_cols=[4],green_cols=[3],rayon_col=1)
+    if not tpr.empty:
+        cur = xl_table(ws0, cur, 1, ["ARTICLE","RAYON","CA PROMO (FCFA)","MARGE PROMO (FCFA)","POIDS PROMO"],
+            rc_rows(tpr,"art_label","rayon_label","CA HT Promo","Marge Promo","%CA Poids Promo"),
+            [40,RCOL_W,18,18,12],"#FF9500", num_cols=[2,3],pct_cols=[4],green_cols=[3],rayon_col=1)
     cur = sp(ws0, cur, 14)
     xl_hdr(ws0, cur, 1, "FLOP 15 MARGES NÉGATIVES — TOUS RAYONS CONFONDUS", "#FF3B30", 7); cur+=1
     cur = xl_table(ws0, cur, 1, ["ARTICLE","RAYON","CA (FCFA)","MARGE (FCFA)","% MARGE"],
@@ -409,9 +427,10 @@ def generate_excel(arts, rayon_tots):
         [40,RCOL_W,14,14,12],"#FF3B30", num_cols=[2,3],pct_cols=[4],neg_cols=[3,4],rayon_col=1)
     cur = sp(ws0, cur, 14)
     xl_hdr(ws0, cur, 1, "TOP 10 CASSE — TOUS RAYONS CONFONDUS", "#555555", 6); cur+=1
-    xl_table(ws0, cur, 1, ["ARTICLE","RAYON","CASSE VALEUR (FCFA)","CASSE QTÉ"],
-        rc_rows(tcs,"art_label","rayon_label","Casse (Valeur)","Casse (Qté)"),
-        [40,RCOL_W,20,12],"#555555", num_cols=[2,3],neg_cols=[2,3],rayon_col=1)
+    if not tcs.empty:
+        cur = xl_table(ws0, cur, 1, ["ARTICLE","RAYON","CASSE VALEUR (FCFA)","CASSE QTÉ"],
+            rc_rows(tcs,"art_label","rayon_label","Casse (Valeur)","Casse (Qté)"),
+            [40,RCOL_W,20,12],"#555555", num_cols=[2,3],neg_cols=[2,3],rayon_col=1)
     ws0.freeze_panes = "A4"
 
     # ── ONGLETS PAR RAYON ────────────────────────────────────────────────────
@@ -420,8 +439,8 @@ def generate_excel(arts, rayon_tots):
         if arts_r.empty: continue
         ca_r  = arts_r["CA"].sum(); mg_r = arts_r["Marge"].sum()
         pct_r = mg_r/ca_r if ca_r else 0
-        cs_r  = arts_r["Casse (Valeur)"].sum()
-        neg_r = int((arts_r["Marge"]<0).sum()); cas_r = int((arts_r["Casse (Valeur)"]<0).sum())
+        cs_r  = arts_r["Casse (Valeur)"].sum() if "Casse (Valeur)" in arts_r.columns else 0
+        neg_r = int((arts_r["Marge"]<0).sum()); cas_r = int((arts_r["Casse (Valeur)"]<0).sum()) if "Casse (Valeur)" in arts_r.columns else 0
         tca_r=top_ca(arts_r); tmg_r=top_marge(arts_r)
         tpr_r=top_promo(arts_r); tfl_r=flop_marge(arts_r); tcs_r=top_casse(arts_r)
 
