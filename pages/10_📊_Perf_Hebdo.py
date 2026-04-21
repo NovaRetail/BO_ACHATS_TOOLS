@@ -1,7 +1,9 @@
 """
-10_📊_Perf_Hebdo.py — SmartBuyer Hub [FIXED]
+10_📊_Perf_Hebdo.py — SmartBuyer Hub [v2.1 FIXED]
 Performance commerciale hebdomadaire · Charte SmartBuyer v2
-🔧 Correction : Gestion robuste des colonnes optionnelles (Promo, Casse)
+🔧 Correction : Adaptation aux vrais noms de colonnes PBI
+   - "CA Promo" au lieu de "CA HT Promo"
+   - Colonnes optionnelles sécurisées
 """
 
 import streamlit as st
@@ -111,7 +113,7 @@ REQUIRED_COLS = {
     "CA":               ("Chiffre d'affaires HT (FCFA)",        "ex: 17 405 450"),
     "Marge":            ("Marge brute HT (FCFA)",               "ex: 1 098 943"),
     "%Marge":           ("Taux de marge (%)",                   "ex: 0.0631"),
-    "CA HT Promo":      ("CA réalisé sous promotion (FCFA)",    "ex: 9 756 175"),
+    "CA Promo":         ("CA réalisé sous promotion (FCFA)",    "ex: 9 756 175"),
     "Marge Promo":      ("Marge sur ventes en promotion",       "ex: 80 769"),
     "Qté Vente":        ("Quantité vendue sur la période",      "ex: 6 263"),
     "Casse (Valeur)":   ("Valeur de la casse (FCFA)",           "ex: -183 976"),
@@ -144,6 +146,13 @@ def parse_file(file_bytes, filename):
     else:
         df = pd.read_excel(BytesIO(file_bytes), engine="openpyxl")
     df.columns = df.columns.str.strip()
+
+    # 🔧 Normaliser les noms de colonnes pour compatibilité avec le code
+    col_mapping = {
+        "CA Promo": "CA HT Promo",              # Nouveau PBI utilise "CA Promo"
+        "%CA Poids Promo": "%CA Poids Promo",   # Garder tel quel
+    }
+    df = df.rename(columns=col_mapping)
 
     arts = df[df["Article"].notna() & (df["Article"] != "Total")].copy()
     arts["art_label"]   = arts["Article"].apply(clean_label)
@@ -553,7 +562,7 @@ if not uploaded:
 
     c1, c2 = st.columns(2)
     icons = {"Rayon":"🏷️","Famille":"🏷️","Article":"🏷️","CA":"🔢","Marge":"🔢",
-             "%Marge":"🔢","CA HT Promo":"🔢","Marge Promo":"🔢","Qté Vente":"🔢","Casse (Valeur)":"🔢"}
+             "%Marge":"🔢","CA Promo":"🔢","Marge Promo":"🔢","Qté Vente":"🔢","Casse (Valeur)":"🔢"}
     for i,(col_name,(desc,example)) in enumerate(REQUIRED_COLS.items()):
         with (c1 if i < 5 else c2):
             st.markdown(f"""
