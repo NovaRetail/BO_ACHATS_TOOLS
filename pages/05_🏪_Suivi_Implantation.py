@@ -46,6 +46,10 @@ def get_magasins_from_pbi(df_stock):
     Format LONG (attendu) : colonne 'Libellé site' existe directement
     Format PIVOTÉ (Power BI) : noms magasins sont en colonnes
     """
+    # Sécurité : vérifier que df_stock n'est pas None
+    if df_stock is None or df_stock.empty:
+        return []
+    
     # Format long (attendu) ✅
     if 'Libellé site' in df_stock.columns:
         return safe_sorted_unique(df_stock['Libellé site'])
@@ -256,16 +260,28 @@ def load_pbi_stock(file_bytes, filename, sku_scope):
     except Exception as e:
         return None, f"Lecture PBI : {e}"
 
-    if len(df_raw) < 2:
+    if len(df_raw) < 3:
         return None, "Fichier PBI trop court"
 
+    # 🔧 Structure PBI corrigée
+    # Ligne 0 : headers (Site nom court | NaN | NaN | site1 | site2 | ...)
+    # Ligne 1 : types (Rayon | NaN | NaN | Stock | Stock | ...)
+    # Ligne 2+ : données
+    
+    # Les noms de sites commencent à la colonne 3
     sites_raw = df_raw.iloc[0, 3:].tolist()
     data_block = df_raw.iloc[2:].copy()
     results = []
 
     for _, row in data_block.iterrows():
-        article_raw = str(row.iloc[2]).strip() if pd.notna(row.iloc[2]) else ""
-        if not article_raw or article_raw.upper() == "TOTAL":
+        # Colonne 0 = Rayon (ex: '00010 - BOISSONS')
+        rayon = str(row.iloc[0]).strip() if pd.notna(row.iloc[0]) else ""
+        
+        # Colonne 1 = Article (ex: '10000119 - 4X25CL BOIS,EN,RED BULL MM')
+        article_raw = str(row.iloc[1]).strip() if pd.notna(row.iloc[1]) else ""
+        
+        # Skip les totaux et les lignes vides
+        if not article_raw or article_raw.upper() == "TOTAL" or article_raw.upper() == "RAYON":
             continue
 
         def parse_article(s):
@@ -282,6 +298,7 @@ def load_pbi_stock(file_bytes, filename, sku_scope):
         if sku_scope and sku not in sku_scope:
             continue
 
+        # Parcourir les sites (colonnes 3+)
         for site_idx, site_raw in enumerate(sites_raw, start=3):
             if pd.isna(site_raw):
                 continue
@@ -399,10 +416,19 @@ with st.spinner("Parsing PBI…"):
         st.error(f"❌ PBI : {pbi_err}")
         st.stop()
     df_stock_t1, _ = load_pbi_stock(pbi_bytes, pbi_file.name, sku_scope=SKU_TUPLE)
+    
+    # Vérifier que df_stock_t1 n'est pas None
+    if df_stock_t1 is None:
+        st.error("❌ Impossible de parser le fichier PBI — vérifiez le format")
+        st.stop()
 
 # 🔧 FIX LIGNE 375 : Utiliser get_magasins_from_pbi() au lieu d'accéder directement à la colonne
 magasins_list = get_magasins_from_pbi(df_stock_t1)
 tous_magasins = get_magasins_from_pbi(df_stock_all) if df_stock_all is not None else magasins_list
+
+if not magasins_list:
+    st.error("❌ Aucun magasin détecté dans le fichier PBI — vérifiez le format")
+    st.stop()
 
 # FILTRES
 with st.sidebar:
