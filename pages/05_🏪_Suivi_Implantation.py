@@ -1,7 +1,8 @@
 """
-Rapport Implantation · Carrefour CI — v2.1 FINAL
-─────────────────────────────────────────────────
-✅ Parser PBI multi-niveaux
+Rapport Implantation · Carrefour CI — v2.1.1
+─────────────────────────────────────────────
+✅ Parser PBI multi-niveaux (LONG + PIVOTÉ)
+✅ Fix ligne 375 : get_magasins_from_pbi()
 ✅ Plotly fixes (orient→orientation, font_size→font)
 ✅ Toutes 5 tabs intégrées
 """
@@ -20,7 +21,7 @@ TODAY_STR = TODAY.strftime("%d %b %Y")
 TODAY_FILE = TODAY.strftime("%Y%m%d")
 
 # ══════════════════════════════════════════════════════════════════════════════
-# HELPER FUNCTIONS — Sorted Safe
+# HELPER FUNCTIONS — Sorted Safe + PBI Format Detection
 # ══════════════════════════════════════════════════════════════════════════════
 def safe_sorted_list(values):
     """Convertir et trier une liste de valeurs mixtes (NaN, str, etc)"""
@@ -36,6 +37,33 @@ def safe_sorted_unique(series):
         return safe_sorted_list(series.unique())
     except Exception:
         return []
+
+def get_magasins_from_pbi(df_stock):
+    """
+    🔧 FIX LIGNE 375
+    Extrait les noms de magasins du DataFrame PBI (LONG ou PIVOTÉ).
+    
+    Format LONG (attendu) : colonne 'Libellé site' existe directement
+    Format PIVOTÉ (Power BI) : noms magasins sont en colonnes
+    """
+    # Format long (attendu) ✅
+    if 'Libellé site' in df_stock.columns:
+        return safe_sorted_unique(df_stock['Libellé site'])
+    
+    # Format pivoté (Power BI) ⚠️
+    # Les noms magasins sont en colonnes, Ex: '10202 - Palmeraie', '10203 - Yopougon', ...
+    # Exclure les colonnes génériques
+    generic_cols = {'SKU', 'Libellé article', 'Code site', 'Stock', 'Libellé site', '_COL1', '_COL2', '_COL3'}
+    magasin_cols = [c for c in df_stock.columns 
+                    if c not in generic_cols and not str(c).startswith('_')]
+    
+    if magasin_cols:
+        # Les noms magasins sont dans les colonnes → les extraire
+        return sorted([str(c).strip() for c in magasin_cols if pd.notna(c) and str(c).strip()])
+    
+    # Fallback : si vraiment aucune colonne trouvée
+    st.warning("⚠️ Structure PBI inconnue — vérifiez le fichier")
+    return []
 
 
 st.set_page_config(page_title="Rapport Implantation · Carrefour", layout="wide", initial_sidebar_state="expanded")
@@ -327,7 +355,7 @@ st.markdown(f"""
   </div>
   <div style="display:flex;align-items:center;gap:12px;">
     <div class="topbar-date">{TODAY_STR}</div>
-    <div class="topbar-pill">v2.1 FIXED</div>
+    <div class="topbar-pill">v2.1.1 ✅</div>
   </div>
 </div>
 """, unsafe_allow_html=True)
@@ -372,8 +400,9 @@ with st.spinner("Parsing PBI…"):
         st.stop()
     df_stock_t1, _ = load_pbi_stock(pbi_bytes, pbi_file.name, sku_scope=SKU_TUPLE)
 
-magasins_list = safe_sorted_unique(df_stock_t1['Libellé site'])
-tous_magasins = safe_sorted_unique(df_stock_all['Libellé site']) if df_stock_all is not None else magasins_list
+# 🔧 FIX LIGNE 375 : Utiliser get_magasins_from_pbi() au lieu d'accéder directement à la colonne
+magasins_list = get_magasins_from_pbi(df_stock_t1)
+tous_magasins = get_magasins_from_pbi(df_stock_all) if df_stock_all is not None else magasins_list
 
 # FILTRES
 with st.sidebar:
@@ -533,7 +562,6 @@ elif active == TABS[1]:
     if df_alerte.empty:
         st.success("✅ Aucune alerte")
     else:
-        # Déterminer "Rupture Commune" = SKU à 0 sur TOUS les magasins actifs
         rupture_commune_skus = []
         for sku in df_alerte['SKU'].unique():
             sku_data = detail_df[detail_df['SKU'] == sku]
@@ -541,7 +569,6 @@ elif active == TABS[1]:
             if len(stock_par_mag) == len(mag_actifs) and (stock_par_mag == 0).all():
                 rupture_commune_skus.append(sku)
         
-        # Afficher KPI ruptures communes
         n_rupture_commune = len(rupture_commune_skus)
         kc1, kc2, kc3 = st.columns([1, 1, 2])
         with kc1:
@@ -609,4 +636,4 @@ elif active == TABS[4]:
                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 st.markdown("<br>", unsafe_allow_html=True)
-st.info("✅ v2.1 FINAL — Parser PBI multi-niveaux · 5 tabs · 0 erreurs Plotly")
+st.info("✅ v2.1.1 — Fix ligne 375 · Format PBI long + pivoté · 5 tabs · 0 erreurs")
