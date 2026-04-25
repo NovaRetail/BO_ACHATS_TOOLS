@@ -1111,14 +1111,18 @@ elif active == TABS[3]:
         if not suggestions:
             st.success("✅ Aucune cession nécessaire selon les critères.")
         else:
-            df_cess = pd.DataFrame(suggestions).sort_values(
-                ["Faisabilité","Qté cessible"], ascending=[True, False]
+            df_all  = pd.DataFrame(suggestions)
+            n_poss  = int((df_all["Faisabilité"]=="🟢 Possible").sum())
+            n_imp   = int((df_all["Faisabilité"]=="🔴 Impossible").sum())
+
+            df_cess = df_all[df_all["Faisabilité"]=="🟢 Possible"].sort_values(
+                "Qté cessible", ascending=False
             ).reset_index(drop=True)
 
             k1, k2, k3 = st.columns(3)
-            k1.metric("🟢 Possible",   int((df_cess["Faisabilité"]=="🟢 Possible").sum()))
-            k2.metric("🔴 Impossible", int((df_cess["Faisabilité"]=="🔴 Impossible").sum()))
-            k3.metric("Articles",      df_cess["SKU"].nunique())
+            k1.metric("🟢 Cessions possibles", n_poss)
+            k2.metric("🔴 Impossible (masqué)", n_imp)
+            k3.metric("Articles cessibles",     df_cess["SKU"].nunique() if not df_cess.empty else 0)
 
             st.dataframe(df_cess, use_container_width=True, hide_index=True)
 
