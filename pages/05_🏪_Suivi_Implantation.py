@@ -552,10 +552,14 @@ with st.sidebar:
     orig_sel = st.multiselect("Flux", ["IM", "LO"], default=["IM", "LO"])
 
     # Semaine
+    def _sem_sort(s):
+        cleaned = re.sub(r"[Ss]", "", str(s).strip())
+        return int(cleaned) if cleaned.isdigit() else 99
+
     sem_dispo = sorted(
         [s for s in t1_df["SEMAINE RECEPTION"].unique()
-         if s and s not in ("nan", "", "99")],
-        key=lambda s: int(re.sub(r"[Ss]", "", s)) if re.match(r"^[Ss]?\d+$", s.strip()) else 99
+         if s and str(s).strip() not in ("nan", "", "99")],
+        key=_sem_sort
     )
     sem_sel = st.multiselect("Semaine réception", sem_dispo, default=sem_dispo)
 
