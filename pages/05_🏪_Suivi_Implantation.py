@@ -535,7 +535,9 @@ with st.sidebar:
     st.divider()
     st.markdown("## 🔄 Cessions")
     mag_detresse = st.multiselect("Magasins en détresse", mag_labels, default=[])
-    seuil_det    = st.number_input("Seuil stock (≤)", 0, 50, 0, 1)
+    seuil_det       = st.number_input("Seuil stock (≤)", 0, 50, 0, 1)
+    min_1pcb        = st.toggle("Qté min = 1 PCB", value=True,
+                                help="Si activé, ne propose que les cessions où la quantité cessible ≥ 1 PCB")
 
 if not mag_sel_codes:
     st.warning("⚠️ Sélectionne au moins un magasin.")
@@ -1115,9 +1117,14 @@ elif active == TABS[3]:
             n_poss  = int((df_all["Faisabilité"]=="🟢 Possible").sum())
             n_imp   = int((df_all["Faisabilité"]=="🔴 Impossible").sum())
 
-            df_cess = df_all[df_all["Faisabilité"]=="🟢 Possible"].sort_values(
-                "Qté cessible", ascending=False
-            ).reset_index(drop=True)
+            df_cess = df_all[df_all["Faisabilité"]=="🟢 Possible"].copy()
+
+            # Filtre minimum 1 PCB cessible
+            if min_1pcb and "Réserve (2 PCB)" in df_cess.columns:
+                # PCB = Réserve / 2
+                df_cess = df_cess[df_cess["Qté cessible"] >= (df_cess["Réserve (2 PCB)"] / 2).clip(lower=1)]
+
+            df_cess = df_cess.sort_values("Qté cessible", ascending=False).reset_index(drop=True)
 
             k1, k2, k3 = st.columns(3)
             k1.metric("🟢 Cessions possibles", n_poss)
