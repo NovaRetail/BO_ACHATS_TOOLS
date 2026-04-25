@@ -867,38 +867,32 @@ elif active == TABS[1]:
         st.plotly_chart(fig, use_container_width=True)
 
     with c2:
-        # Répartition réseau — barres horizontales lisibles
-        labels = [a for a in ALERTES if a in pivot_mag.columns]
-        vals   = [int(pivot_mag[a].sum()) for a in labels]
-        total  = sum(vals) or 1
-        pcts   = [round(v / total * 100, 1) for v in vals]
+        # Donut Plotly — 4 segments, lisible
+        labels_d = [a for a in ALERTES if a in pivot_mag.columns]
+        vals_d   = [int(pivot_mag[a].sum()) for a in labels_d]
+        colors_d = [ALERTES[a] for a in labels_d]
 
-        rows_html = ""
-        for lbl, val, pct_v in zip(labels, vals, pcts):
-            color = ALERTES[lbl]
-            bar_w = max(pct_v, 1)  # min 1% pour visibilité
-            rows_html += f"""
-            <div style="margin-bottom:10px;">
-              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-                <span style="font-size:12px;font-weight:600;color:{C['text']}">{lbl}</span>
-                <span style="font-size:12px;font-family:'JetBrains Mono';color:{C['muted']}">{fmt_n(val)} · {pct_v}%</span>
-              </div>
-              <div style="background:{C['border']};border-radius:4px;height:10px;">
-                <div style="background:{color};width:{bar_w}%;height:100%;border-radius:4px;"></div>
-              </div>
-            </div>"""
-
-        st.markdown(f"""
-        <div style="background:{C['surface']};border:1px solid {C['border']};border-radius:14px;
-                    padding:20px 22px;box-shadow:0 1px 3px rgba(0,0,0,.06);">
-          <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.10em;
-                      color:{C['muted']};margin-bottom:4px;">Répartition réseau</div>
-          <div style="font-size:36px;font-weight:800;color:{color_taux(taux_reseau)};
-                      letter-spacing:-.02em;margin-bottom:16px;">{taux_reseau}%
-            <span style="font-size:14px;font-weight:500;color:{C['muted']}"> implanté</span>
-          </div>
-          {rows_html}
-        </div>""", unsafe_allow_html=True)
+        fig_d = go.Figure(go.Pie(
+            labels=labels_d, values=vals_d, hole=0.65,
+            marker=dict(colors=colors_d, line=dict(color="#fff", width=3)),
+            textinfo="percent",
+            textfont=dict(size=12, family="Inter"),
+            hovertemplate="<b>%{label}</b><br>%{value:,} lignes<br>%{percent}<extra></extra>",
+        ))
+        fig_d.add_annotation(
+            text=f"<b>{taux_reseau}%</b><br>implanté",
+            x=0.5, y=0.5, showarrow=False,
+            font=dict(size=20, color=color_taux(taux_reseau), family="Inter")
+        )
+        fig_d.update_layout(
+            paper_bgcolor=C["surface"], height=400,
+            font=dict(family="Inter", color=C["muted"], size=12),
+            margin=dict(l=10, r=10, t=44, b=20),
+            legend=dict(orientation="v", x=1.0, y=0.5,
+                        font=dict(size=11), bgcolor="rgba(0,0,0,0)"),
+            title=dict(text="Répartition réseau", font=dict(size=13, color=C["muted"]))
+        )
+        st.plotly_chart(fig_d, use_container_width=True)
 
     # Matrice rayon
     if not rayon_pivot.empty:
