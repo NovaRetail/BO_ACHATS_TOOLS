@@ -536,7 +536,6 @@ with st.sidebar:
     st.markdown("## 🔄 Cessions")
     mag_detresse = st.multiselect("Magasins en détresse", mag_labels, default=[])
     seuil_det    = st.number_input("Seuil stock (≤)", 0, 50, 0, 1)
-    reserve      = st.number_input("Réserve cédant (≥)", 0, 50, 2, 1)
 
 if not mag_sel_codes:
     st.warning("⚠️ Sélectionne au moins un magasin.")
@@ -1039,11 +1038,15 @@ elif active == TABS[3]:
         for sku in sku_rupt_tot:
             sku_df = df_stock[df_stock["SKU"] == sku].copy()
             sku_df["Nouveau stock"] = pd.to_numeric(sku_df["Nouveau stock"], errors="coerce").fillna(0)
-            best = sku_df[sku_df["Nouveau stock"] > reserve].sort_values("Nouveau stock", ascending=False)
+            sku_df["Pcb"] = pd.to_numeric(sku_df.get("Pcb", 1), errors="coerce").fillna(1).clip(lower=1)
+            best = sku_df.copy()
+            best["Reserve_2pcb"] = (best["Pcb"] * 2).astype(int)
+            best = best[best["Nouveau stock"] > best["Reserve_2pcb"]].sort_values("Nouveau stock", ascending=False)
             lib  = sku_df["Libellé article"].iloc[0] if len(sku_df) else sku
             if not best.empty:
                 b   = best.iloc[0]
-                qty = int(b["Nouveau stock"]) - reserve
+                reserve_art = int(b["Reserve_2pcb"])
+                qty = int(b["Nouveau stock"]) - reserve_art
                 auto_sugg.append({
                     "SKU": sku, "Libellé": lib,
                     "Cédant": site_ref.get(b["Code site"], b["Code site"]),
@@ -1068,13 +1071,16 @@ elif active == TABS[3]:
             if sku_df.empty: continue
             lib = sku_df["Libellé article"].iloc[0] if "Libellé article" in sku_df.columns else sku
             sku_df["Nouveau stock"] = pd.to_numeric(sku_df["Nouveau stock"], errors="coerce").fillna(0)
+            sku_df["Pcb"] = pd.to_numeric(sku_df.get("Pcb", 1), errors="coerce").fillna(1).clip(lower=1)
 
             det_rows = sku_df[sku_df["Code site"].isin(mag_det_codes) &
                               (sku_df["Nouveau stock"] <= seuil_det)]
             if det_rows.empty: continue
 
-            ced_rows = sku_df[sku_df["Code site"].isin(mag_ced_codes) &
-                              (sku_df["Nouveau stock"] > reserve)].sort_values("Nouveau stock", ascending=False)
+            # Réserve cédant = 2 PCB par article
+            sku_df["Reserve_2pcb"] = (sku_df["Pcb"] * 2).astype(int)
+            ced_rows = sku_df[sku_df["Code site"].isin(mag_ced_codes)].copy()
+            ced_rows = ced_rows[ced_rows["Nouveau stock"] > ced_rows["Reserve_2pcb"]].sort_values("Nouveau stock", ascending=False)
 
             for _, dr in det_rows.iterrows():
                 if ced_rows.empty:
@@ -1084,17 +1090,20 @@ elif active == TABS[3]:
                         "Stock détresse": int(dr["Nouveau stock"]),
                         "Cédant suggéré": "⚠️ Aucun cédant",
                         "Stock cédant": 0, "Qté cessible": 0,
+                        "Réserve (2 PCB)": 0,
                         "Faisabilité": "🔴 Impossible"
                     })
                 else:
-                    best = ced_rows.iloc[0]
-                    qty  = int(best["Nouveau stock"]) - reserve
+                    best        = ced_rows.iloc[0]
+                    reserve_art = int(best["Reserve_2pcb"])
+                    qty         = int(best["Nouveau stock"]) - reserve_art
                     suggestions.append({
                         "SKU": sku, "Libellé article": lib,
                         "Magasin détresse": site_ref.get(dr["Code site"], dr["Code site"]),
                         "Stock détresse": int(dr["Nouveau stock"]),
                         "Cédant suggéré": site_ref.get(best["Code site"], best["Code site"]),
                         "Stock cédant": int(best["Nouveau stock"]),
+                        "Réserve (2 PCB)": reserve_art,
                         "Qté cessible": qty,
                         "Faisabilité": "🟢 Possible" if qty >= 1 else "🟠 Partielle"
                     })
