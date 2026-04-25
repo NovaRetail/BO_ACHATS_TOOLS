@@ -820,7 +820,7 @@ if active == TABS[0]:
             if val >= 80: return "background-color:#D1FAE5;color:#065F46;font-weight:700"
             if val >= 50: return "background-color:#FEF3C7;color:#92400E;font-weight:700"
             return "background-color:#FEE2E2;color:#991B1B;font-weight:700"
-        st.dataframe(rayon_pivot.style.applymap(color_cell).format("{}%"),
+        st.dataframe(rayon_pivot.style.map(color_cell).format("{}%"),
                      use_container_width=True)
 
     # Top priorités par criticité
@@ -907,7 +907,7 @@ elif active == TABS[1]:
             if val >= 80: return "background-color:#D1FAE5;color:#065F46;font-weight:700"
             if val >= 50: return "background-color:#FEF3C7;color:#92400E;font-weight:700"
             return "background-color:#FEE2E2;color:#991B1B;font-weight:700"
-        st.dataframe(rayon_pivot.style.applymap(color_cell).format("{}%"),
+        st.dataframe(rayon_pivot.style.map(color_cell).format("{}%"),
                      use_container_width=True)
 
     # Flux IM/LO
