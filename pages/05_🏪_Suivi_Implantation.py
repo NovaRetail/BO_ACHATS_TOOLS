@@ -26,7 +26,6 @@
 ║       Nom fourn.     → fournisseur ERP                                      ║
 ║       Libellé rayon  → rayon pour filtres                                   ║
 ║       Libellé famille                                                        ║
-║       Qté sortie     → ventes période (couverture en jours)                 ║
 ║       Pcb            → conditionnement                                       ║
 ║       Date dernière entrée → dernière réception physique                    ║
 ║                                                                              ║
@@ -58,10 +57,19 @@ TODAY_STR  = date.today().strftime("%d %b %Y")
 TODAY_FILE = date.today().strftime("%Y%m%d")
 
 STOCK_COLS = [
-    "Site", "Libellé site", "Code article", "Libellé article",
-    "Nouveau stock", "Ral", "Code etat", "Code marketing",
-    "Nom fourn.", "Libellé rayon", "Libellé famille",
-    "Qté sortie", "Pcb", "Date dernière entrée"
+    "Site",                  # 1  — code magasin
+    "Libellé site",          # 2  — nom magasin
+    "Libellé rayon",         # 4  — rayon (filtre + matrice)
+    "Libellé famille",       # 5  — famille (filtre optionnel)
+    "Nom fourn.",            # 8  — fournisseur
+    "Code article",          # 9  — clé jointure T1
+    "Libellé article",       # 10 — libellé affichage
+    "Code etat",             # 11 — actif / anomalie
+    "Nouveau stock",         # 12 — statut implantation
+    "Ral",                   # 13 — alerte appro en cours
+    "Pcb",                   # 14 — calcul réserve cessions (2 PCB)
+    "Code marketing",        # 15 — flux IM / LO
+    "Date dernière entrée",  # 16 — info dernière réception
 ]
 
 ETAT_ACTIF    = "2"
@@ -381,7 +389,6 @@ def parse_stock(file_bytes: bytes, filename: str, sku_scope: tuple):
     # Numériques
     df["Nouveau stock"] = pd.to_numeric(df["Nouveau stock"], errors="coerce")
     df["Ral"]           = pd.to_numeric(df["Ral"], errors="coerce").fillna(0).astype(int)
-    df["Qté sortie"]    = pd.to_numeric(df["Qté sortie"], errors="coerce").fillna(0)
 
     # Flux
     df["Origine"] = df["Code marketing"].apply(
@@ -436,7 +443,7 @@ with st.expander("📋 Structure des fichiers attendus", expanded=False):
         st.caption("Code article 8 chiffres · MODE APPRO contient 'IMPORT' pour IM")
     with c2:
         st.markdown("**② Stock light consolidé** (CSV latin1 · sep ';' · nommage : stock_DDMM_light.csv)")
-        st.code("Site · Libellé site · Code article · Libellé article\nNouveau stock · Ral · Code etat · Code marketing\nNom fourn. · Libellé rayon · Qté sortie", language="text")
+        st.code("Site · Libellé site · Code article · Libellé article\nNouveau stock · Ral · Code etat · Code marketing\nNom fourn. · Libellé rayon · Pcb", language="text")
         st.caption("Code etat : 2=Actif · P=Purge (exclu) · B/S/F=Anomalie · Code marketing : IM ou LO")
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -589,7 +596,7 @@ grid = pd.DataFrame(
 
 KEEP = ["Code site", "SKU", "Nouveau stock", "Ral", "Code etat",
         "Origine", "Libellé article", "Nom fourn.",
-        "Libellé rayon", "Libellé famille", "Qté sortie"]
+        "Libellé rayon", "Libellé famille"]
 merged = grid.merge(stk_filt[[c for c in KEEP if c in stk_filt.columns]],
                     on=["Code site", "SKU"], how="left")
 
