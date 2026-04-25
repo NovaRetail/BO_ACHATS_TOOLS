@@ -1,10 +1,13 @@
 """
-Rapport Implantation · Carrefour CI — v2.1.1
-─────────────────────────────────────────────
-✅ Parser PBI multi-niveaux (LONG + PIVOTÉ)
-✅ Fix ligne 375 : get_magasins_from_pbi()
-✅ Plotly fixes (orient→orientation, font_size→font)
-✅ Toutes 5 tabs intégrées
+╔══════════════════════════════════════════════════════════════════════════════╗
+║  03_📦_Implantation.py  ·  SmartBuyer · NovaRetail Solutions               ║
+║  Suivi Implantation Nouvelles Références — v3.0                             ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║  Parser natif export PBI pivoté (magasins en colonnes)                      ║
+║  Détection alertes : stock NaN / négatif / seuil                            ║
+║  Filtrage CI vs CM, par rayon, flux IM/LO                                   ║
+║  Export Excel enrichi · Cessions inter-magasins                             ║
+╚══════════════════════════════════════════════════════════════════════════════╝
 """
 
 import streamlit as st
@@ -13,653 +16,1115 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 import io
-from datetime import date
 import re
+from datetime import date
 
-TODAY = date.today()
-TODAY_STR = TODAY.strftime("%d %b %Y")
+# ─────────────────────────────────────────────────────────────────────────────
+# CONSTANTES MÉTIER
+# ─────────────────────────────────────────────────────────────────────────────
+TODAY      = date.today()
+TODAY_STR  = TODAY.strftime("%d %b %Y")
 TODAY_FILE = TODAY.strftime("%Y%m%d")
 
-# ══════════════════════════════════════════════════════════════════════════════
-# HELPER FUNCTIONS — Sorted Safe + PBI Format Detection
-# ══════════════════════════════════════════════════════════════════════════════
-def safe_sorted_list(values):
-    """Convertir et trier une liste de valeurs mixtes (NaN, str, etc)"""
-    try:
-        clean = [str(x).strip() for x in values if pd.notna(x) and str(x).strip()]
-        return sorted(set(clean))  # Dedup aussi
-    except Exception:
-        return list(set([str(x) for x in values if pd.notna(x)]))
+# Préfixes codes magasins par pays
+CI_PREFIX  = ("10",)          # Côte d'Ivoire
+CM_PREFIX  = ("20",)          # Cameroun
 
-def safe_sorted_unique(series):
-    """Sorted unique() robuste pour Series"""
-    try:
-        return safe_sorted_list(series.unique())
-    except Exception:
-        return []
+# Couleurs charte SmartBuyer (identique aux autres modules)
+C = {
+    "bg"        : "#F2F2F7",
+    "surface"   : "#FFFFFF",
+    "border"    : "#E5E5EA",
+    "text"      : "#1C1C1E",
+    "muted"     : "#6D6D72",
+    "blue"      : "#007AFF",
+    "green"     : "#34C759",
+    "red"       : "#FF3B30",
+    "orange"    : "#FF9500",
+    "purple"    : "#AF52DE",
+    "blue_l"    : "#EFF4FF",
+    "green_l"   : "#F0FFF4",
+    "red_l"     : "#FFF2F0",
+    "orange_l"  : "#FFFBEB",
+}
 
-def get_magasins_from_pbi(df_stock):
-    """
-    🔧 FIX LIGNE 375
-    Extrait les noms de magasins du DataFrame PBI (LONG ou PIVOTÉ).
-    
-    Format LONG (attendu) : colonne 'Libellé site' existe directement
-    Format PIVOTÉ (Power BI) : noms magasins sont en colonnes
-    """
-    # Sécurité : vérifier que df_stock n'est pas None
-    if df_stock is None or df_stock.empty:
-        return []
-    
-    # Format long (attendu) ✅
-    if 'Libellé site' in df_stock.columns:
-        return safe_sorted_unique(df_stock['Libellé site'])
-    
-    # Format pivoté (Power BI) ⚠️
-    # Les noms magasins sont en colonnes, Ex: '10202 - Palmeraie', '10203 - Yopougon', ...
-    # Exclure les colonnes génériques
-    generic_cols = {'SKU', 'Libellé article', 'Code site', 'Stock', 'Libellé site', '_COL1', '_COL2', '_COL3'}
-    magasin_cols = [c for c in df_stock.columns 
-                    if c not in generic_cols and not str(c).startswith('_')]
-    
-    if magasin_cols:
-        # Les noms magasins sont dans les colonnes → les extraire
-        return sorted([str(c).strip() for c in magasin_cols if pd.notna(c) and str(c).strip()])
-    
-    # Fallback : si vraiment aucune colonne trouvée
-    st.warning("⚠️ Structure PBI inconnue — vérifiez le fichier")
-    return []
+STATUT_COLORS = {
+    "✅ Implanté"          : C["green"],
+    "🔴 Stock négatif"     : C["red"],
+    "⚠️ Non implanté"      : C["orange"],
+}
 
+# ─────────────────────────────────────────────────────────────────────────────
+# PAGE CONFIG
+# ─────────────────────────────────────────────────────────────────────────────
+st.set_page_config(
+    page_title="Implantation · SmartBuyer",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
-st.set_page_config(page_title="Rapport Implantation · Carrefour", layout="wide", initial_sidebar_state="expanded")
-
-# ══════════════════════════════════════════════════════════════════════════════
-# DESIGN SYSTEM
-# ══════════════════════════════════════════════════════════════════════════════
-st.markdown("""
+# ─────────────────────────────────────────────────────────────────────────────
+# CHARTE GRAPHIQUE — identique aux modules OTIF / Perf Hebdo
+# ─────────────────────────────────────────────────────────────────────────────
+st.markdown(f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
-:root {
-  --bg:#f0f2f8; --surface:#fff; --border:#e2e8f4; --text:#0f1729; --muted:#64748b;
-  --accent:#2563eb; --accent-l:#eff4ff; --accent-bd:#bfdbfe;
-  --green:#059669;  --green-l:#ecfdf5;  --green-bd:#6ee7b7;
-  --blue:#0284c7;   --blue-l:#f0f9ff;   --blue-bd:#bae6fd;
-  --red:#dc2626;    --red-l:#fef2f2;    --red-bd:#fecaca;
-  --gold:#b45309;   --gold-l:#fffbeb;   --gold-bd:#fcd34d;
-  --radius:10px; --shadow:0 1px 3px rgba(15,23,42,.06),0 4px 16px rgba(15,23,42,.04);
-}
-html,body,[class*="css"]{font-family:'Inter',sans-serif!important;background:var(--bg)!important;color:var(--text)!important;}
-.main,section[data-testid="stMain"]{background:var(--bg)!important;}
-.block-container{padding:0 2rem 4rem!important;max-width:1520px;}
-header[data-testid="stHeader"],#MainMenu,footer{display:none!important;}
-.topbar{background:var(--text);margin:0 -2rem 24px;padding:14px 28px;display:flex;align-items:center;justify-content:space-between;}
-.topbar-left{display:flex;align-items:center;gap:14px;}
-.topbar-icon{width:38px;height:38px;border-radius:9px;background:linear-gradient(135deg,#3b82f6,#60a5fa);display:flex;align-items:center;justify-content:center;font-size:20px;}
-.topbar-title{font-size:17px;font-weight:700;color:#fff;letter-spacing:-.01em;}
-.topbar-sub{font-size:11px;color:#94a3b8;font-family:'JetBrains Mono';margin-top:1px;}
-.topbar-pill{background:rgba(255,255,255,.08);color:#94a3b8;border:1px solid rgba(255,255,255,.12);border-radius:6px;padding:4px 12px;font-size:11px;font-weight:500;}
-.topbar-date{color:#60a5fa;font-size:12px;font-family:'JetBrains Mono';}
-.alert-banner{background:#fff;border:1px solid var(--red-bd);border-left:4px solid var(--red);border-radius:var(--radius);padding:14px 20px;margin-bottom:20px;display:flex;align-items:center;gap:0;flex-wrap:wrap;}
-.ab-badge{background:var(--red);color:#fff;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:700;letter-spacing:.04em;margin-right:16px;white-space:nowrap;}
-.ab-item{display:flex;flex-direction:column;align-items:center;padding:0 20px;border-right:1px solid var(--border);}
-.ab-item:last-child{border-right:none;padding-right:0;}
-.ab-num{font-size:26px;font-weight:800;line-height:1;}
-.ab-lbl{font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:1px;}
-.rag-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px;margin-bottom:22px;}
-.rag-card{border-radius:var(--radius);padding:14px 16px;border:1px solid transparent;box-shadow:var(--shadow);position:relative;}
-.rag-card.g{background:var(--green-l);border-color:var(--green-bd);}
-.rag-card.r{background:var(--red-l);border-color:var(--red-bd);}
-.rag-name{font-size:11px;font-weight:600;color:var(--text);margin-bottom:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:90%;}
-.rag-pct{font-size:30px;font-weight:800;line-height:1;letter-spacing:-.02em;}
-.rag-detail{font-size:10px;color:var(--muted);font-family:'JetBrains Mono';margin-top:3px;}
-.strip{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:16px;}
-.strip-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;box-shadow:var(--shadow);}
-.strip-tag{display:inline-block;border-radius:4px;padding:2px 8px;font-size:10px;font-weight:700;margin-bottom:6px;}
-.tag-im{background:#eff4ff;color:#2563eb;border:1px solid #bfdbfe;}
-.tag-lo{background:#ecfdf5;color:#059669;border:1px solid #6ee7b7;}
-.strip-label{font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:4px;}
-.strip-val{font-size:26px;font-weight:800;line-height:1;letter-spacing:-.01em;}
-.strip-sub{font-size:10px;color:var(--muted);font-family:'JetBrains Mono';margin-top:2px;}
-.kpi-row{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:22px;}
-.kpi{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px 20px 16px;box-shadow:var(--shadow);position:relative;overflow:hidden;}
-.kpi::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;}
-.kpi.g::before{background:var(--green);}
-.kpi.b::before{background:var(--blue);}
-.kpi.r::before{background:var(--red);}
-.kpi.o::before{background:var(--gold);}
-.kpi-lbl{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);margin-bottom:10px;}
-.kpi-val{font-size:44px;font-weight:800;line-height:1;letter-spacing:-.02em;}
-.kpi.g .kpi-val{color:var(--green);}
-.kpi.b .kpi-val{color:var(--blue);}
-.kpi.r .kpi-val{color:var(--red);}
-.kpi.o .kpi-val{color:var(--gold);}
-.kpi-pct{font-size:12px;font-weight:600;color:var(--muted);margin-top:4px;font-family:'JetBrains Mono';}
-.kpi-bar{margin-top:12px;height:3px;border-radius:3px;background:var(--border);}
-.kpi-bar-fill{height:100%;border-radius:3px;}
-.sh{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);margin:22px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--border);}
-.nav-tab-active{background:var(--text)!important;color:#fff!important;border-radius:8px;padding:9px 0;text-align:center;font-size:13px;font-weight:700;box-shadow:0 4px 14px rgba(15,23,42,.25);margin-bottom:10px;cursor:default;}
-.ac{border-radius:var(--radius);padding:16px 18px;margin-bottom:10px;border:1px solid;display:flex;align-items:center;justify-content:space-between;}
-.ac.red{background:var(--red-l);border-color:var(--red-bd);}
-.ac-title{font-size:14px;font-weight:700;}
-.ac-sub{font-size:11px;color:var(--muted);margin-top:2px;}
-.ac-count{font-size:34px;font-weight:900;letter-spacing:-.02em;}
-.info-banner{background:var(--blue-l);border:1px solid var(--blue-bd);border-radius:var(--radius);padding:12px 16px;font-size:13px;color:var(--blue);margin-bottom:14px;}
-.gold-banner{background:var(--gold-l);border:1px solid var(--gold-bd);border-radius:var(--radius);padding:12px 16px;font-size:13px;color:var(--gold);margin-bottom:14px;}
-.cession-header{background:var(--gold-l);border:1.5px solid var(--gold-bd);border-radius:var(--radius);padding:14px 18px;margin-bottom:12px;}
-.cession-badge{border-radius:5px;padding:3px 10px;font-size:11px;font-weight:700;}
-.badge-detresse{background:var(--red-l);color:var(--red);border:1px solid var(--red-bd);}
-.badge-stock{background:var(--accent-l);color:var(--accent);border:1px solid var(--accent-bd);}
-.badge-qty{background:#f0f2f8;color:var(--text);border:1px solid var(--border);}
-section[data-testid="stSidebar"]{background:#fff!important;border-right:1px solid var(--border)!important;min-width:280px!important;max-width:280px!important;}
-section[data-testid="stSidebar"] .block-container{padding:.8rem .8rem 2rem!important;}
-.stDownloadButton>button{background:linear-gradient(135deg,#0f1729,#1e293b)!important;color:#fff!important;border:none!important;border-radius:var(--radius)!important;font-weight:700!important;font-size:14px!important;padding:12px!important;width:100%!important;letter-spacing:.01em!important;box-shadow:0 4px 14px rgba(15,23,42,.3)!important;}
+
+:root {{
+  --bg:{C['bg']}; --surface:{C['surface']}; --border:{C['border']};
+  --text:{C['text']}; --muted:{C['muted']};
+  --blue:{C['blue']}; --green:{C['green']}; --red:{C['red']};
+  --orange:{C['orange']}; --purple:{C['purple']};
+  --blue-l:{C['blue_l']}; --green-l:{C['green_l']};
+  --red-l:{C['red_l']}; --orange-l:{C['orange_l']};
+  --radius:14px;
+  --shadow:0 1px 3px rgba(0,0,0,.06), 0 4px 16px rgba(0,0,0,.04);
+}}
+
+html, body, [class*="css"] {{
+  font-family:'Inter',sans-serif!important;
+  background:var(--bg)!important;
+  color:var(--text)!important;
+}}
+.main, section[data-testid="stMain"] {{ background:var(--bg)!important; }}
+.block-container {{ padding:0 2rem 4rem!important; max-width:1480px; }}
+header[data-testid="stHeader"], #MainMenu, footer {{ display:none!important; }}
+
+/* TOPBAR */
+.topbar {{
+  background:{C['text']}; margin:0 -2rem 28px; padding:16px 28px;
+  display:flex; align-items:center; justify-content:space-between;
+}}
+.topbar-icon {{
+  width:40px; height:40px; border-radius:10px;
+  background:linear-gradient(135deg,{C['blue']},{C['purple']});
+  display:flex; align-items:center; justify-content:center; font-size:22px;
+}}
+.topbar-title {{ font-size:17px; font-weight:700; color:#fff; letter-spacing:-.01em; }}
+.topbar-sub {{ font-size:11px; color:#8E8E93; font-family:'JetBrains Mono'; margin-top:2px; }}
+.topbar-pill {{
+  background:rgba(255,255,255,.08); color:#8E8E93;
+  border:1px solid rgba(255,255,255,.12); border-radius:8px;
+  padding:4px 14px; font-size:11px; font-weight:600;
+}}
+.topbar-date {{ color:{C['blue']}; font-size:12px; font-family:'JetBrains Mono'; }}
+
+/* INTRO MODULE */
+.module-intro {{
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--radius); padding:20px 24px; margin-bottom:24px;
+  box-shadow:var(--shadow);
+}}
+.module-intro-title {{
+  font-size:15px; font-weight:700; color:var(--text); margin-bottom:6px;
+}}
+.module-intro-body {{
+  font-size:13px; color:var(--muted); line-height:1.6;
+}}
+.tag-badge {{
+  display:inline-flex; align-items:center; gap:5px;
+  background:var(--blue-l); color:var(--blue);
+  border:1px solid #BFDBFE; border-radius:6px;
+  padding:3px 10px; font-size:11px; font-weight:600; margin:2px;
+}}
+.tag-badge.green {{ background:var(--green-l); color:var(--green); border-color:#6EE7B7; }}
+.tag-badge.red   {{ background:var(--red-l);   color:var(--red);   border-color:#FECACA; }}
+.tag-badge.orange{{ background:var(--orange-l);color:var(--orange);border-color:#FCD34D; }}
+
+/* KPI CARDS */
+.kpi-grid {{ display:grid; grid-template-columns:repeat(5,1fr); gap:12px; margin-bottom:24px; }}
+.kpi-card {{
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--radius); padding:18px 20px 14px;
+  box-shadow:var(--shadow); position:relative; overflow:hidden;
+}}
+.kpi-card::before {{
+  content:''; position:absolute; top:0; left:0; right:0; height:3px;
+  border-radius:var(--radius) var(--radius) 0 0;
+}}
+.kpi-card.blue::before  {{ background:var(--blue);  }}
+.kpi-card.green::before {{ background:var(--green); }}
+.kpi-card.red::before   {{ background:var(--red);   }}
+.kpi-card.orange::before{{ background:var(--orange);}}
+.kpi-card.purple::before{{ background:var(--purple);}}
+.kpi-label {{
+  font-size:10px; font-weight:700; text-transform:uppercase;
+  letter-spacing:.10em; color:var(--muted); margin-bottom:10px;
+}}
+.kpi-value {{
+  font-size:38px; font-weight:800; line-height:1; letter-spacing:-.02em;
+}}
+.kpi-card.blue  .kpi-value {{ color:var(--blue);  }}
+.kpi-card.green .kpi-value {{ color:var(--green); }}
+.kpi-card.red   .kpi-value {{ color:var(--red);   }}
+.kpi-card.orange.kpi-value {{ color:var(--orange);}}
+.kpi-card.purple.kpi-value {{ color:var(--purple);}}
+.kpi-sub {{
+  font-size:11px; color:var(--muted); font-family:'JetBrains Mono'; margin-top:4px;
+}}
+.kpi-bar {{
+  margin-top:12px; height:3px; border-radius:3px; background:var(--border);
+}}
+.kpi-bar-fill {{ height:100%; border-radius:3px; }}
+
+/* SCORECARD MAGASINS */
+.scorecard-grid {{
+  display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr));
+  gap:10px; margin-bottom:24px;
+}}
+.scorecard-card {{
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--radius); padding:14px 16px;
+  box-shadow:var(--shadow); position:relative;
+}}
+.scorecard-card.ok  {{ border-color:#6EE7B7; background:var(--green-l); }}
+.scorecard-card.ko  {{ border-color:#FECACA; background:var(--red-l);   }}
+.scorecard-card.warn{{ border-color:#FCD34D; background:var(--orange-l);}}
+.scorecard-dot {{
+  width:8px; height:8px; border-radius:50%;
+  position:absolute; top:14px; right:14px;
+}}
+.scorecard-name {{
+  font-size:11px; font-weight:600; color:var(--text);
+  margin-bottom:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}}
+.scorecard-pct  {{ font-size:28px; font-weight:800; line-height:1; }}
+.scorecard-sub  {{ font-size:10px; color:var(--muted); font-family:'JetBrains Mono'; margin-top:2px; }}
+
+/* ALERT BANNER */
+.alert-banner {{
+  background:#FFF; border:1px solid #FECACA; border-left:4px solid var(--red);
+  border-radius:var(--radius); padding:16px 20px; margin-bottom:20px;
+  display:flex; align-items:center; gap:16px; flex-wrap:wrap;
+}}
+.alert-pill {{
+  background:var(--red); color:#fff; border-radius:6px;
+  padding:4px 12px; font-size:11px; font-weight:700;
+  letter-spacing:.05em; white-space:nowrap;
+}}
+.alert-item {{ display:flex; flex-direction:column; align-items:center; padding:0 16px; border-right:1px solid var(--border); }}
+.alert-item:last-child {{ border-right:none; }}
+.alert-num {{ font-size:28px; font-weight:800; line-height:1; }}
+.alert-lbl {{ font-size:10px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; margin-top:1px; }}
+
+/* SECTION HEADER */
+.sh {{
+  font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.12em;
+  color:var(--muted); margin:24px 0 14px; padding-bottom:8px;
+  border-bottom:1px solid var(--border);
+}}
+
+/* SIDEBAR */
+section[data-testid="stSidebar"] {{
+  background:#fff!important; border-right:1px solid var(--border)!important;
+  min-width:270px!important; max-width:270px!important;
+}}
+section[data-testid="stSidebar"] .block-container {{
+  padding:.6rem .8rem 2rem!important;
+}}
+
+/* DOWNLOAD BUTTON */
+.stDownloadButton>button {{
+  background:linear-gradient(135deg,{C['text']},{C['blue']})!important;
+  color:#fff!important; border:none!important;
+  border-radius:10px!important; font-weight:700!important;
+  font-size:13px!important; padding:12px!important; width:100%!important;
+  box-shadow:0 4px 12px rgba(0,122,255,.25)!important;
+}}
+
+/* INFO BANNERS */
+.info-box {{
+  border-radius:var(--radius); padding:14px 18px; margin-bottom:16px;
+  border:1px solid; font-size:13px; line-height:1.6;
+}}
+.info-box.blue   {{ background:var(--blue-l);   border-color:#BFDBFE; color:#1D4ED8; }}
+.info-box.green  {{ background:var(--green-l);  border-color:#6EE7B7; color:#065F46; }}
+.info-box.orange {{ background:var(--orange-l); border-color:#FCD34D; color:#92400E; }}
+
+/* TABS CUSTOM */
+.nav-active {{
+  background:var(--text)!important; color:#fff!important;
+  border-radius:10px; padding:10px 0; text-align:center;
+  font-size:13px; font-weight:700;
+  box-shadow:0 4px 14px rgba(28,28,30,.2); margin-bottom:10px;
+}}
 </style>
 """, unsafe_allow_html=True)
 
-def fix_encoding(df):
-    try:
-        if any('Ã' in str(c) for c in df.columns):
-            df.columns = [c.encode('latin1').decode('utf-8', errors='replace') for c in df.columns]
-    except:
-        pass
-    return df
 
+# ─────────────────────────────────────────────────────────────────────────────
+# HELPERS
+# ─────────────────────────────────────────────────────────────────────────────
+def fmt_n(n: int) -> str:
+    """Format entier avec séparateur espace insécable."""
+    return f"{n:,}".replace(",", "\u202f")
+
+def color_taux(t: float) -> str:
+    if t >= 80: return C["green"]
+    if t >= 50: return C["orange"]
+    return C["red"]
+
+def scorecard_cls(t: float) -> str:
+    if t >= 80: return "ok"
+    if t >= 50: return "warn"
+    return "ko"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PARSER PBI — Export pivoté natif SmartBuyer
+# ─────────────────────────────────────────────────────────────────────────────
 @st.cache_data(show_spinner=False)
-def read_csv_smart(file_bytes, filename):
+def parse_pbi_stock(file_bytes: bytes, filename: str) -> tuple[pd.DataFrame | None, str | None]:
+    """
+    Parse l'export PBI pivoté (format NovaRetail).
+
+    Structure attendue :
+        Ligne 0 : [en-tête label] | [Code - Nom magasin] × N | Total
+        Ligne 1 : [Article]       | [Stock] × N              | Stock
+        Ligne 2+ : données articles
+
+    Retourne un DataFrame long :
+        SKU | Libellé article | Code site | Libellé site | Stock
+    """
     buf = io.BytesIO(file_bytes)
-    for enc in ('latin1', 'utf-8-sig', 'cp1252'):
-        for sep in (';', ',', '\t'):
-            try:
-                buf.seek(0)
-                df = pd.read_csv(buf, sep=sep, encoding=enc, low_memory=False, on_bad_lines='skip')
-                if df.shape[1] >= 3:
-                    return fix_encoding(df)
-            except:
-                continue
-    buf.seek(0)
-    return fix_encoding(pd.read_csv(buf, sep=None, engine='python', encoding='latin1', on_bad_lines='skip'))
-
-@st.cache_data(show_spinner=False)
-def normalize_columns(df):
-    df.columns = (df.columns.astype(str).str.strip().str.replace('\ufeff', '', regex=False)
-                  .str.replace('\xa0', ' ', regex=False).str.upper())
-    return df
-
-def sem_sort(s):
     try:
-        return int(str(s).strip('Ss'))
-    except:
-        return 99
-
-def taux_implantation(df):
-    if len(df) == 0:
-        return 0
-    return int(df['Statut'].isin(['Implantation Terminée']).sum() / len(df) * 100)
-
-def color_taux(t):
-    return '059669' if t >= 80 else ('0284c7' if t >= 50 else 'dc2626')
-
-def load_t1(file_bytes, filename):
-    buf = io.BytesIO(file_bytes)
-    if filename.lower().endswith(('.xlsx', '.xls')):
-        df_peek = pd.read_excel(buf, header=None, nrows=1)
-    else:
-        buf.seek(0)
-        try:
-            df_peek = pd.read_csv(buf, header=None, nrows=1, sep=None, engine='python', encoding='latin1')
-        except:
-            df_peek = None
-
-    no_header = False
-    if df_peek is not None:
-        first_val = str(df_peek.iloc[0, 0]).strip().replace('.0', '')
-        no_header = first_val.isdigit()
-
-    buf.seek(0)
-    if filename.lower().endswith(('.xlsx', '.xls')):
-        df = pd.read_excel(buf, header=None) if no_header else normalize_columns(pd.read_excel(buf))
-    else:
-        if no_header:
-            buf.seek(0)
-            try:
-                df = pd.read_csv(buf, header=None, sep=None, engine='python', encoding='latin1', on_bad_lines='skip')
-            except:
-                df = normalize_columns(read_csv_smart(file_bytes, filename))
+        if filename.lower().endswith((".xlsx", ".xls")):
+            raw = pd.read_excel(buf, header=None, dtype=str)
         else:
-            df = normalize_columns(read_csv_smart(file_bytes, filename))
+            buf.seek(0)
+            raw = pd.read_csv(buf, header=None, sep=None, engine="python",
+                              encoding="latin1", on_bad_lines="skip", dtype=str)
+    except Exception as e:
+        return None, f"Lecture fichier : {e}"
 
-    if no_header or 'ARTICLE' not in df.columns:
-        if 'ARTICLE' not in df.columns:
-            df.columns = ['ARTICLE'] + [f'_COL{i}' for i in range(1, len(df.columns))]
+    if raw.shape[0] < 3 or raw.shape[1] < 3:
+        return None, "Fichier trop court ou mal formaté"
 
-    if 'ARTICLE' not in df.columns:
-        return None, f"Colonne 'ARTICLE' introuvable"
+    # — Extraction des magasins (ligne 0, colonnes 1 à avant-dernière) —
+    sites_raw = raw.iloc[0, 1:-1].tolist()   # exclure colonne Total
 
-    df['SKU'] = df['ARTICLE'].astype(str).str.strip().str.zfill(8).str.slice(0, 8)
-    df = df[df['SKU'].str.match(r'^\d{8}$', na=False)].drop_duplicates(subset='SKU').copy()
+    # — Données articles (lignes 2+) —
+    records = []
+    for _, row in raw.iloc[2:].iterrows():
+        art_raw = str(row.iloc[0]).strip()
+        if not art_raw or art_raw.lower() in ("nan", "article", "total", "rayon"):
+            continue
 
-    for col, default in [('LIBELLÉ ARTICLE', ''), ("FOURNISSEUR D'ORIGINE", ''), ('LIBELLÉ FOURNISSEUR ORIGINE', ''),
-                         ('MODE APPRO', ''), ('DATE CDE', ''), ('DATE LIV.', ''), ('SEMAINE RECEPTION', '')]:
-        if col not in df.columns:
-            df[col] = default
+        # Parsing "10000119 - 4X25CL BOIS,EN,RED BULL MM"
+        if " - " in art_raw:
+            parts = art_raw.split(" - ", 1)
+            sku = parts[0].strip().zfill(8)[:8]
+            lib = parts[1].strip()
+        else:
+            m = re.match(r"^(\d{6,8})", art_raw)
+            sku = m.group(1).zfill(8)[:8] if m else art_raw[:8].zfill(8)
+            lib = art_raw
 
-    df['SEMAINE RECEPTION'] = df['SEMAINE RECEPTION'].astype(str).str.strip().replace('nan', '')
-    df['SEM_NUM'] = df['SEMAINE RECEPTION'].apply(lambda s: int(str(s).strip('Ss')) if str(s).strip('Ss').isdigit() else 99)
-    df['ORIGINE'] = df['MODE APPRO'].apply(lambda m: 'IM' if 'IMPORT' in str(m).upper() else 'LO')
+        if not re.match(r"^\d{8}$", sku):
+            continue
+
+        # Stock par magasin
+        for col_idx, site_raw in enumerate(sites_raw, start=1):
+            site_str = str(site_raw).strip()
+            if not site_str or site_str.lower() == "nan":
+                continue
+            if " - " in site_str:
+                code_site, lib_site = site_str.split(" - ", 1)
+                code_site = code_site.strip()
+                lib_site  = lib_site.strip()
+            else:
+                code_site = site_str
+                lib_site  = site_str
+
+            val = row.iloc[col_idx]
+            try:
+                stock = int(float(str(val).replace(",", "."))) if pd.notna(val) and str(val).strip().lower() not in ("nan", "") else None
+            except (ValueError, TypeError):
+                stock = None
+
+            records.append({
+                "SKU"           : sku,
+                "Libellé article": lib,
+                "Code site"     : code_site.strip(),
+                "Libellé site"  : lib_site.strip(),
+                "Stock"         : stock,
+            })
+
+    if not records:
+        return None, "Aucune donnée extraite — vérifiez le format du fichier PBI"
+
+    df = pd.DataFrame(records)
     return df, None
 
-# ⭐ PATCH PARSER PBI
+
 @st.cache_data(show_spinner=False)
-def load_pbi_stock(file_bytes, filename, sku_scope):
+def load_t1(file_bytes: bytes, filename: str) -> tuple[pd.DataFrame | None, str | None]:
+    """
+    Parse le fichier T1 (liste nouvelles références à implanter).
+    Colonnes attendues : ARTICLE (code 8 chiffres), LIBELLÉ ARTICLE, MODE APPRO,
+                         SEMAINE RECEPTION, LIBELLÉ FOURNISSEUR ORIGINE, DATE LIV.
+    """
     buf = io.BytesIO(file_bytes)
     try:
-        if filename.lower().endswith(('.xlsx', '.xls')):
-            df_raw = pd.read_excel(buf, header=None)
+        if filename.lower().endswith((".xlsx", ".xls")):
+            df_raw = pd.read_excel(buf, header=None, dtype=str)
         else:
             buf.seek(0)
-            df_raw = pd.read_csv(buf, header=None, sep=None, engine='python', encoding='latin1', on_bad_lines='skip')
+            df_raw = pd.read_csv(buf, header=None, sep=None, engine="python",
+                                 encoding="latin1", on_bad_lines="skip", dtype=str)
     except Exception as e:
-        return None, f"Lecture PBI : {e}"
+        return None, f"Lecture T1 : {e}"
 
-    if len(df_raw) < 3:
-        return None, "Fichier PBI trop court"
+    if df_raw.empty:
+        return None, "Fichier T1 vide"
 
-    # 🔧 Structure PBI corrigée
-    # Ligne 0 : headers (Site nom court | NaN | NaN | site1 | site2 | ...)
-    # Ligne 1 : types (Rayon | NaN | NaN | Stock | Stock | ...)
-    # Ligne 2+ : données
-    
-    # Les noms de sites commencent à la colonne 3
-    sites_raw = df_raw.iloc[0, 3:].tolist()
-    data_block = df_raw.iloc[2:].copy()
-    results = []
+    # Détection auto header : si la première cellule est numérique → sans header
+    first_val = str(df_raw.iloc[0, 0]).strip().replace(".0", "")
+    has_header = not first_val.isdigit()
 
-    for _, row in data_block.iterrows():
-        # Colonne 0 = Rayon (ex: '00010 - BOISSONS')
-        rayon = str(row.iloc[0]).strip() if pd.notna(row.iloc[0]) else ""
-        
-        # Colonne 1 = Article (ex: '10000119 - 4X25CL BOIS,EN,RED BULL MM')
-        article_raw = str(row.iloc[1]).strip() if pd.notna(row.iloc[1]) else ""
-        
-        # Skip les totaux et les lignes vides
-        if not article_raw or article_raw.upper() == "TOTAL" or article_raw.upper() == "RAYON":
-            continue
+    if has_header:
+        df_raw.columns = df_raw.iloc[0].astype(str).str.strip().str.upper()
+        df_raw = df_raw.iloc[1:].reset_index(drop=True)
+    else:
+        df_raw.columns = ["ARTICLE"] + [f"_COL{i}" for i in range(1, len(df_raw.columns))]
 
-        def parse_article(s):
-            s = str(s).strip()
-            if " - " in s:
-                parts = s.split(" - ", 1)
-                return parts[0].strip().zfill(8), parts[1].strip()
-            m = re.match(r'^(\d{8})', s)
-            if m:
-                return m.group(1), s
-            return s[:8].zfill(8), s
+    # Normaliser les noms de colonnes
+    df_raw.columns = (
+        df_raw.columns.astype(str)
+        .str.strip()
+        .str.upper()
+        .str.replace("\ufeff", "", regex=False)
+        .str.replace("\xa0", " ", regex=False)
+    )
 
-        sku, lib = parse_article(article_raw)
-        if sku_scope and sku not in sku_scope:
-            continue
+    if "ARTICLE" not in df_raw.columns:
+        return None, "Colonne ARTICLE introuvable dans le fichier T1"
 
-        # Parcourir les sites (colonnes 3+)
-        for site_idx, site_raw in enumerate(sites_raw, start=3):
-            if pd.isna(site_raw):
-                continue
-            site_str = str(site_raw).strip()
+    df_raw["SKU"] = (
+        df_raw["ARTICLE"].astype(str).str.strip()
+        .str.replace(r"\.0$", "", regex=True)
+        .str.zfill(8).str[:8]
+    )
+    df_raw = df_raw[df_raw["SKU"].str.match(r"^\d{8}$", na=False)].drop_duplicates("SKU").copy()
 
-            def parse_site(s):
-                s = str(s).strip()
-                if " - " in s:
-                    parts = s.split(" - ", 1)
-                    return parts[0].strip(), parts[1].strip()
-                return s, s
+    # Colonnes optionnelles avec valeurs par défaut
+    defaults = {
+        "LIBELLÉ ARTICLE"              : "",
+        "LIBELLÉ FOURNISSEUR ORIGINE"  : "",
+        "MODE APPRO"                   : "",
+        "SEMAINE RECEPTION"            : "",
+        "DATE LIV."                    : "",
+    }
+    for col, default in defaults.items():
+        if col not in df_raw.columns:
+            df_raw[col] = default
 
-            code_site, lib_site = parse_site(site_str)
-            stock_val = row.iloc[site_idx]
-            try:
-                stock = int(float(stock_val)) if pd.notna(stock_val) else 0
-            except:
-                stock = 0
+    df_raw["SEMAINE RECEPTION"] = df_raw["SEMAINE RECEPTION"].astype(str).str.strip().replace("nan", "")
+    df_raw["SEM_NUM"] = df_raw["SEMAINE RECEPTION"].apply(
+        lambda s: int(re.sub(r"[Ss]", "", s)) if re.match(r"^[Ss]?\d+$", s.strip()) else 99
+    )
+    df_raw["ORIGINE"] = df_raw["MODE APPRO"].apply(
+        lambda m: "IM" if "IMPORT" in str(m).upper() else "LO"
+    )
 
-            results.append({'SKU': sku, 'Libellé article': lib, 'Code site': code_site, 'Libellé site': lib_site, 'Stock': stock})
+    return df_raw, None
 
-    if not results:
-        return None, "Aucune donnée"
 
-    return pd.DataFrame(results), None
-
-def compute_cessions(df_stock_pbi, sku_scope, magasins_detresse, tous_magasins, seuil_detresse=0, seuil_cedant=2):
-    if not magasins_detresse or not sku_scope:
-        return pd.DataFrame()
-
-    scope_df = df_stock_pbi[df_stock_pbi['SKU'].isin(sku_scope)].copy()
-    magasins_cedants = [m for m in tous_magasins if m not in magasins_detresse]
-    suggestions = []
-
-    for sku in sku_scope:
-        sku_df = scope_df[scope_df['SKU'] == sku]
-        if sku_df.empty:
-            continue
-        lib = sku_df['Libellé article'].iloc[0]
-        detresse_rows = sku_df[(sku_df['Libellé site'].isin(magasins_detresse)) & (sku_df['Stock'] <= seuil_detresse)]
-        if detresse_rows.empty:
-            continue
-        cedant_rows = sku_df[(sku_df['Libellé site'].isin(magasins_cedants)) & (sku_df['Stock'] > seuil_cedant)].sort_values('Stock', ascending=False)
-        if cedant_rows.empty:
-            for _, dr in detresse_rows.iterrows():
-                suggestions.append({'SKU': sku, 'Libellé article': lib, 'Magasin détresse': dr['Libellé site'],
-                                   'Stock détresse': int(dr['Stock']), 'Cédant suggéré': '⚠️ Aucun cédant',
-                                   'Stock cédant': 0, 'Qté cessible': 0, 'Faisabilité': '🔴 Impossible'})
-            continue
-        best = cedant_rows.iloc[0]
-        qty_cessible = int(best['Stock']) - seuil_cedant
-        for _, dr in detresse_rows.iterrows():
-            faisable = '🟢 Possible' if qty_cessible >= 1 else '🟠 Partielle'
-            suggestions.append({'SKU': sku, 'Libellé article': lib, 'Magasin détresse': dr['Libellé site'],
-                               'Stock détresse': int(dr['Stock']), 'Cédant suggéré': best['Libellé site'],
-                               'Stock cédant': int(best['Stock']), 'Qté cessible': qty_cessible, 'Faisabilité': faisable})
-
-    if not suggestions:
-        return pd.DataFrame()
-    return pd.DataFrame(suggestions).sort_values(['Faisabilité', 'Qté cessible'], ascending=[True, False]).reset_index(drop=True)
-
+# ─────────────────────────────────────────────────────────────────────────────
 # TOPBAR
+# ─────────────────────────────────────────────────────────────────────────────
 st.markdown(f"""
 <div class="topbar">
-  <div class="topbar-left">
-    <div class="topbar-icon">📋</div>
+  <div style="display:flex;align-items:center;gap:14px;">
+    <div class="topbar-icon">📦</div>
     <div>
-      <div class="topbar-title">Rapport Implantation</div>
-      <div class="topbar-sub">Nouvelles Références · Suivi Stock PBI · Cessions</div>
+      <div class="topbar-title">Suivi Implantation Nouvelles Références</div>
+      <div class="topbar-sub">Parser PBI natif · Alertes stock · Cessions inter-magasins</div>
     </div>
   </div>
   <div style="display:flex;align-items:center;gap:12px;">
     <div class="topbar-date">{TODAY_STR}</div>
-    <div class="topbar-pill">v2.1.1 ✅</div>
+    <div class="topbar-pill">v3.0 · SmartBuyer</div>
   </div>
 </div>
 """, unsafe_allow_html=True)
 
-# SIDEBAR
-with st.sidebar:
-    st.markdown("### 📁 Chargement")
-    st.divider()
-    st.markdown("**T1 — Nouvelles Références**")
-    t1_file = st.file_uploader("T1", type=["csv", "xlsx"], key="t1", label_visibility="collapsed")
-    st.markdown("**Stock PBI**")
-    pbi_file = st.file_uploader("Stock PBI", type=["xlsx", "xls", "csv"], key="pbi", label_visibility="collapsed")
+# ─────────────────────────────────────────────────────────────────────────────
+# BLOC INTRO MÉTIER
+# ─────────────────────────────────────────────────────────────────────────────
+st.markdown("""
+<div class="module-intro">
+  <div class="module-intro-title">📦 À quoi sert ce module ?</div>
+  <div class="module-intro-body">
+    Ce module contrôle l'implantation physique des <strong>nouvelles références T1</strong> dans les magasins du réseau.
+    Après chaque vague de lancement, il croise le fichier T1 (liste des articles à implanter) avec l'export
+    PBI de stock pour détecter en temps réel les articles <strong>non encore présents</strong> (stock NaN),
+    en <strong>stock négatif</strong> (écart d'inventaire à corriger) ou correctement <strong>implantés</strong> (stock &gt; 0).<br><br>
+    <strong>Cas d'usage :</strong>
+    <span class="tag-badge">📋 Suivi COPIL lancement</span>
+    <span class="tag-badge green">✅ Validation implantation rayon</span>
+    <span class="tag-badge red">🚨 Escalade fournisseur stock négatif</span>
+    <span class="tag-badge orange">🔄 Cession inter-magasins</span>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
+# ─────────────────────────────────────────────────────────────────────────────
+# SIDEBAR — CHARGEMENT
+# ─────────────────────────────────────────────────────────────────────────────
+with st.sidebar:
+    st.markdown("## 📁 Fichiers")
+    st.divider()
+
+    st.markdown("**① Liste T1 — Nouvelles Références**")
+    st.caption("Fichier ERP : colonnes ARTICLE, MODE APPRO, SEMAINE RECEPTION…")
+    t1_file = st.file_uploader("T1", type=["csv", "xlsx", "xls"],
+                               key="t1", label_visibility="collapsed")
+
+    st.markdown("**② Export PBI — Stocks par magasin**")
+    st.caption("Export pivoté : lignes = articles, colonnes = magasins, valeurs = Stock")
+    pbi_file = st.file_uploader("PBI Stock", type=["xlsx", "xls", "csv"],
+                                key="pbi", label_visibility="collapsed")
+
+# — Gates de chargement —
 if not t1_file:
-    st.markdown('<div class="info-banner" style="margin-top:16px">⬆️ Charge T1</div>', unsafe_allow_html=True)
+    st.markdown('<div class="info-box blue">⬆️ <strong>Étape 1</strong> — Charge le fichier T1 (Nouvelles Références) dans la sidebar.</div>', unsafe_allow_html=True)
     st.stop()
 
 with st.spinner("Lecture T1…"):
-    t1_raw, t1_err = load_t1(t1_file.read(), t1_file.name)
+    t1_df, t1_err = load_t1(t1_file.read(), t1_file.name)
 
-if t1_err:
+if t1_err or t1_df is None:
     st.error(f"❌ T1 : {t1_err}")
     st.stop()
 
-SKU_TUPLE = tuple(sorted(t1_raw['SKU'].unique()))
-total_sku = len(SKU_TUPLE)
-sku_im_total = int((t1_raw['ORIGINE'] == 'IM').sum())
-sku_lo_total = int((t1_raw['ORIGINE'] == 'LO').sum())
-
-T1_KEEP = ['LIBELLÉ ARTICLE', 'LIBELLÉ FOURNISSEUR ORIGINE', 'MODE APPRO', 'SEMAINE RECEPTION', 'DATE LIV.', 'ORIGINE', 'SEM_NUM']
-t1_idx = t1_raw.set_index('SKU')[T1_KEEP]
-
 if not pbi_file:
-    st.markdown('<div class="info-banner">⬆️ Charge PBI</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="info-box blue">✅ T1 chargé — <strong>{len(t1_df):,}</strong> références. ⬆️ <strong>Étape 2</strong> — Charge maintenant l\'export PBI Stock.</div>', unsafe_allow_html=True)
     st.stop()
 
-with st.spinner("Parsing PBI…"):
+with st.spinner("Parsing export PBI…"):
     pbi_bytes = pbi_file.read()
-    df_stock_all, pbi_err = load_pbi_stock(pbi_bytes, pbi_file.name, sku_scope=())
-    if pbi_err:
-        st.error(f"❌ PBI : {pbi_err}")
-        st.stop()
-    df_stock_t1, _ = load_pbi_stock(pbi_bytes, pbi_file.name, sku_scope=SKU_TUPLE)
-    
-    # Vérifier que df_stock_t1 n'est pas None
-    if df_stock_t1 is None:
-        st.error("❌ Impossible de parser le fichier PBI — vérifiez le format")
-        st.stop()
+    df_stock, pbi_err = parse_pbi_stock(pbi_bytes, pbi_file.name)
 
-# 🔧 FIX LIGNE 375 : Utiliser get_magasins_from_pbi() au lieu d'accéder directement à la colonne
-magasins_list = get_magasins_from_pbi(df_stock_t1)
-tous_magasins = get_magasins_from_pbi(df_stock_all) if df_stock_all is not None else magasins_list
-
-if not magasins_list:
-    st.error("❌ Aucun magasin détecté dans le fichier PBI — vérifiez le format")
+if pbi_err or df_stock is None:
+    st.error(f"❌ PBI : {pbi_err}")
     st.stop()
 
-# FILTRES
+# ─────────────────────────────────────────────────────────────────────────────
+# SIDEBAR — FILTRES
+# ─────────────────────────────────────────────────────────────────────────────
+# Détecter les pays
+all_sites    = df_stock["Libellé site"].unique().tolist()
+all_codes    = df_stock["Code site"].unique().tolist()
+sites_ci     = sorted([s for s in all_sites if any(
+                   df_stock.loc[df_stock["Libellé site"]==s, "Code site"].str.startswith(p).any()
+                   for p in CI_PREFIX)])
+sites_cm     = sorted([s for s in all_sites if any(
+                   df_stock.loc[df_stock["Libellé site"]==s, "Code site"].str.startswith(p).any()
+                   for p in CM_PREFIX)])
+sites_autres = sorted([s for s in all_sites if s not in sites_ci and s not in sites_cm])
+
 with st.sidebar:
     st.divider()
-    st.markdown("### 🔍 Filtres")
-    mag_sel = st.multiselect("Magasins", magasins_list, default=magasins_list)
-    origine_sel = st.multiselect("Origine", ['IM', 'LO'], default=['IM', 'LO'])
-    sem_dispo = sorted([s for s in t1_raw['SEMAINE RECEPTION'].unique() if pd.notna(s) and str(s).strip() and str(s).strip() not in ('nan', '')], key=sem_sort)
-    sem_sel = st.multiselect("Semaine", sem_dispo, default=sem_dispo)
-    mode_list = [m for m in t1_raw['MODE APPRO'].unique() if pd.notna(m) and str(m).strip() and str(m).strip() not in ('nan', '')]
-    mode_list = sorted(mode_list)
-    mode_sel = st.multiselect("Mode", mode_list, default=mode_list)
+    st.markdown("## 🔍 Filtres")
+
+    # Pays / périmètre
+    pays_opt = []
+    if sites_ci: pays_opt.append("🇨🇮 Côte d'Ivoire")
+    if sites_cm: pays_opt.append("🇨🇲 Cameroun")
+    if sites_autres: pays_opt.append("Autres")
+    pays_sel = st.multiselect("Périmètre", pays_opt,
+                              default=["🇨🇮 Côte d'Ivoire"] if "🇨🇮 Côte d'Ivoire" in pays_opt else pays_opt)
+
+    # Construction liste magasins selon pays
+    mag_pool = []
+    if "🇨🇮 Côte d'Ivoire" in pays_sel: mag_pool += sites_ci
+    if "🇨🇲 Cameroun"       in pays_sel: mag_pool += sites_cm
+    if "Autres"             in pays_sel: mag_pool += sites_autres
+    mag_pool = sorted(set(mag_pool))
+
+    mag_sel = st.multiselect("Magasins", mag_pool, default=mag_pool)
+
+    # Flux
+    orig_sel = st.multiselect("Flux", ["IM", "LO"], default=["IM", "LO"])
+
+    # Semaine
+    sem_dispo = sorted(
+        [s for s in t1_df["SEMAINE RECEPTION"].unique()
+         if s and s not in ("nan", "", "99")],
+        key=lambda s: int(re.sub(r"[Ss]", "", s)) if re.match(r"^[Ss]?\d+$", s.strip()) else 99
+    )
+    sem_sel = st.multiselect("Semaine réception", sem_dispo, default=sem_dispo)
+
     st.divider()
-    st.markdown("### 🔄 Cessions")
-    magasins_detresse = st.multiselect("Magasins détresse", options=tous_magasins, default=[])
-    seuil_detresse = st.number_input("Seuil stock (≤)", min_value=0, max_value=50, value=0, step=1)
-    seuil_cedant = st.number_input("Réserve cédant", min_value=0, max_value=20, value=2, step=1)
+    st.markdown("## 🔄 Cessions")
+    mag_detresse = st.multiselect(
+        "Magasins en détresse (stock ≤ seuil)",
+        options=mag_pool, default=[]
+    )
+    seuil_det = st.number_input("Seuil stock détresse (≤)", 0, 50, 0, 1)
+    reserve   = st.number_input("Réserve magasin cédant (≥)", 0, 50, 2, 1)
 
 if not mag_sel:
-    st.warning("Au moins 1 magasin")
+    st.warning("⚠️ Sélectionne au moins un magasin.")
     st.stop()
 
-mc1, mc2, mc3 = st.columns([6, 1, 1])
-with mc1:
-    mag_main = st.multiselect("🏪 Affichés", magasins_list, default=mag_sel, key="mag_main")
-with mc2:
-    if st.button("✅ Tous", use_container_width=True): mag_main = magasins_list
-with mc3:
-    if st.button("❌ Aucun", use_container_width=True): mag_main = []
+# ─────────────────────────────────────────────────────────────────────────────
+# CONSTRUCTION DU DATASET PRINCIPAL
+# ─────────────────────────────────────────────────────────────────────────────
+# Filtre SKU selon origine + semaine
+mask = (
+    t1_df["ORIGINE"].isin(orig_sel)
+    & (t1_df["SEMAINE RECEPTION"].isin(sem_sel) if sem_sel else pd.Series(True, index=t1_df.index))
+)
+t1_scope = t1_df[mask].copy()
+sku_scope = t1_scope["SKU"].unique()
 
-mag_actifs = mag_main if mag_main else mag_sel
-if not mag_actifs:
+if len(sku_scope) == 0:
+    st.warning("Aucun SKU correspondant aux filtres sélectionnés.")
     st.stop()
 
-sku_mask = (t1_raw['ORIGINE'].isin(origine_sel) & (t1_raw['SEMAINE RECEPTION'].isin(sem_sel) if sem_sel else True)
-            & (t1_raw['MODE APPRO'].isin(mode_sel) if mode_sel else True))
-sku_scope = t1_raw.loc[sku_mask, 'SKU'].unique()
-total_sku_sel = len(sku_scope)
+# Référentiel T1 : index par SKU
+t1_ref = t1_scope.set_index("SKU")[[
+    "LIBELLÉ ARTICLE", "LIBELLÉ FOURNISSEUR ORIGINE",
+    "MODE APPRO", "SEMAINE RECEPTION", "DATE LIV.", "ORIGINE", "SEM_NUM"
+]]
 
-if total_sku_sel == 0:
-    st.warning("Aucun SKU")
-    st.stop()
+# Grille complète magasins × SKU (produit cartésien)
+grid = pd.DataFrame(
+    pd.MultiIndex.from_product(
+        [mag_sel, sku_scope], names=["Libellé site", "SKU"]
+    ).tolist(),
+    columns=["Libellé site", "SKU"]
+)
 
-base_df = pd.DataFrame(pd.MultiIndex.from_product([mag_actifs, sku_scope], names=['Libellé site', 'SKU']).tolist(),
-                       columns=['Libellé site', 'SKU'])
-stock_scope = df_stock_t1[(df_stock_t1['Libellé site'].isin(mag_actifs)) & (df_stock_t1['SKU'].isin(sku_scope))][['Libellé site', 'SKU', 'Stock', 'Libellé article']].copy()
-merged = base_df.merge(stock_scope, on=['Libellé site', 'SKU'], how='left')
-merged['Stock'] = merged['Stock'].fillna(0).astype(int)
-merged = merged.merge(t1_idx.reset_index().rename(columns={'LIBELLÉ ARTICLE': 'T1_lib', 'LIBELLÉ FOURNISSEUR ORIGINE': 'Fournisseur',
-                      'MODE APPRO': 'Mode Appro', 'SEMAINE RECEPTION': 'Sem. Réception', 'DATE LIV.': 'Date Livraison',
-                      'ORIGINE': 'Origine', 'SEM_NUM': 'SEM_NUM'}), on='SKU', how='left')
-merged['Libellé article'] = merged['Libellé article'].fillna('').astype(str)
-merged['Libellé article'] = merged.apply(lambda r: r['Libellé article'] if r['Libellé article'] else r['T1_lib'], axis=1)
-merged.drop(columns='T1_lib', inplace=True)
-merged['Statut'] = np.where(merged['Stock'] > 0, "Implantation Terminée", "Alerte Aucun Mouvement")
-detail_df = merged.rename(columns={'Libellé site': 'Magasin'})
+# Jointure avec les stocks PBI
+stock_scope = df_stock[
+    df_stock["Libellé site"].isin(mag_sel) &
+    df_stock["SKU"].isin(sku_scope)
+][["Libellé site", "SKU", "Stock", "Libellé article"]].copy()
 
-S_ORDER = ["Implantation Terminée", "Alerte Aucun Mouvement"]
-S_COLORS = {"Implantation Terminée": "#059669", "Alerte Aucun Mouvement": "#dc2626"}
-pivot = (detail_df.groupby(['Magasin', 'Statut']).size().unstack(fill_value=0).reindex(columns=S_ORDER, fill_value=0).reset_index())
-pivot.columns.name = None
-pivot['Total'] = total_sku_sel
-pivot['Taux (%)'] = (pivot['Implantation Terminée'] / total_sku_sel * 100).round(0).astype(int)
+merged = grid.merge(stock_scope, on=["Libellé site", "SKU"], how="left")
 
-total_cells = len(mag_actifs) * total_sku_sel
-ct = int(pivot['Implantation Terminée'].sum())
-cal = int(pivot['Alerte Aucun Mouvement'].sum())
-avg_impl = int(pivot['Taux (%)'].mean()) if not pivot.empty else 0
-pct = lambda n: int(n / total_cells * 100) if total_cells > 0 else 0
+# Jointure avec T1
+merged = merged.merge(
+    t1_ref.reset_index().rename(columns={
+        "LIBELLÉ ARTICLE"             : "T1_lib",
+        "LIBELLÉ FOURNISSEUR ORIGINE" : "Fournisseur",
+        "MODE APPRO"                  : "Mode Appro",
+        "SEMAINE RECEPTION"           : "Sem. Réception",
+        "DATE LIV."                   : "Date Livraison",
+        "ORIGINE"                     : "Origine",
+        "SEM_NUM"                     : "SEM_NUM",
+    }),
+    on="SKU", how="left"
+)
 
-df_im = detail_df[detail_df['Origine'] == 'IM']
-df_lo = detail_df[detail_df['Origine'] == 'LO']
-df_alerte = detail_df[detail_df['Statut'] == 'Alerte Aucun Mouvement']
-alerte_im = len(df_alerte[df_alerte['Origine'] == 'IM'])
-alerte_lo = len(df_alerte[df_alerte['Origine'] == 'LO'])
-tim = taux_implantation(df_im)
-tlo = taux_implantation(df_lo)
+# Libellé article : PBI > T1
+merged["Libellé article"] = merged["Libellé article"].fillna("").astype(str)
+merged["Libellé article"] = merged.apply(
+    lambda r: r["Libellé article"] if r["Libellé article"] else r.get("T1_lib", ""), axis=1
+)
+merged.drop(columns=["T1_lib"], errors="ignore", inplace=True)
+merged.rename(columns={"Libellé site": "Magasin"}, inplace=True)
 
-# ══════════════════════════════════════════════════════════════════════════════
-# BANNIÈRE + KPI
-# ══════════════════════════════════════════════════════════════════════════════
-if cal > 0:
-    st.markdown(f"""<div class="alert-banner"><div class="ab-badge">⚡ ACTIONS</div><div class="ab-item"><div class="ab-num" style="color:#dc2626">{cal}</div><div class="ab-lbl">Alertes</div></div><div class="ab-item"><div class="ab-num" style="color:#dc2626">{alerte_im}</div><div class="ab-lbl">IM</div></div><div class="ab-item"><div class="ab-num" style="color:#ea580c">{alerte_lo}</div><div class="ab-lbl">LO</div></div><div style="margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;"><div style="font-size:36px;font-weight:900;color:#dc2626;line-height:1">{cal}</div><div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;">à traiter</div></div></div>""", unsafe_allow_html=True)
+# Statut métier
+def statut(row):
+    s = row["Stock"]
+    if pd.isna(s):   return "⚠️ Non implanté"
+    if s < 0:        return "🔴 Stock négatif"
+    return "✅ Implanté"
 
-st.markdown(f"""<div class="strip"><div class="strip-card"><div class="strip-tag tag-im">IM</div><div class="strip-label">Refs</div><div class="strip-val" style="color:#2563eb">{sku_im_total}</div><div class="strip-sub">SKU</div></div><div class="strip-card"><div class="strip-tag tag-im">IM</div><div class="strip-label">Taux</div><div class="strip-val" style="color:#{color_taux(tim)}">{tim}%</div><div class="strip-sub">implanté</div></div><div class="strip-card"><div class="strip-tag tag-im">IM</div><div class="strip-label">Alertes</div><div class="strip-val" style="color:#dc2626">{alerte_im}</div><div class="strip-sub">aucun mvt</div></div><div class="strip-card"><div class="strip-tag tag-lo">LO</div><div class="strip-label">Refs</div><div class="strip-val" style="color:#059669">{sku_lo_total}</div><div class="strip-sub">SKU</div></div><div class="strip-card"><div class="strip-tag tag-lo">LO</div><div class="strip-label">Taux</div><div class="strip-val" style="color:#{color_taux(tlo)}">{tlo}%</div><div class="strip-sub">implanté</div></div><div class="strip-card"><div class="strip-tag tag-lo">LO</div><div class="strip-label">Alertes</div><div class="strip-val" style="color:#dc2626">{alerte_lo}</div><div class="strip-sub">aucun mvt</div></div></div>""", unsafe_allow_html=True)
+merged["Statut"] = merged.apply(statut, axis=1)
 
-st.markdown(f"""<div class="kpi-row"><div class="kpi g"><div class="kpi-lbl">✅ Implanté</div><div class="kpi-val">{ct}</div><div class="kpi-pct">{pct(ct)}%</div><div class="kpi-bar"><div class="kpi-bar-fill" style="width:{pct(ct)}%;background:#059669"></div></div></div><div class="kpi r"><div class="kpi-lbl">🚨 Alerte</div><div class="kpi-val">{cal}</div><div class="kpi-pct">{pct(cal)}%</div><div class="kpi-bar"><div class="kpi-bar-fill" style="width:{pct(cal)}%;background:#dc2626"></div></div></div><div class="kpi o"><div class="kpi-lbl">📊 Taux Réseau</div><div class="kpi-val">{avg_impl}%</div><div class="kpi-pct">{len(mag_actifs)} mag × {total_sku_sel} SKU</div><div class="kpi-bar"><div class="kpi-bar-fill" style="width:{avg_impl}%;background:#b45309"></div></div></div></div>""", unsafe_allow_html=True)
+# ─────────────────────────────────────────────────────────────────────────────
+# MÉTRIQUES RÉSEAU
+# ─────────────────────────────────────────────────────────────────────────────
+total_cells  = len(merged)
+n_implante   = int((merged["Statut"] == "✅ Implanté").sum())
+n_non_impl   = int((merged["Statut"] == "⚠️ Non implanté").sum())
+n_negatif    = int((merged["Statut"] == "🔴 Stock négatif").sum())
+n_sku        = len(sku_scope)
+n_mag        = len(mag_sel)
+taux_reseau  = int(n_implante / total_cells * 100) if total_cells else 0
 
-# SCORECARD
+n_sku_im     = int((t1_scope["ORIGINE"] == "IM").sum())
+n_sku_lo     = int((t1_scope["ORIGINE"] == "LO").sum())
+
+pct = lambda n: int(n / total_cells * 100) if total_cells else 0
+
+# ─────────────────────────────────────────────────────────────────────────────
+# BANNIÈRE ALERTES
+# ─────────────────────────────────────────────────────────────────────────────
+if n_non_impl + n_negatif > 0:
+    st.markdown(f"""
+    <div class="alert-banner">
+      <div class="alert-pill">⚡ ACTIONS REQUISES</div>
+      <div class="alert-item">
+        <div class="alert-num" style="color:{C['orange']}">{fmt_n(n_non_impl)}</div>
+        <div class="alert-lbl">Non implanté</div>
+      </div>
+      <div class="alert-item">
+        <div class="alert-num" style="color:{C['red']}">{fmt_n(n_negatif)}</div>
+        <div class="alert-lbl">Stock négatif</div>
+      </div>
+      <div style="margin-left:auto;font-size:13px;color:{C['muted']};">
+        {n_mag} magasins · {fmt_n(n_sku)} SKUs · {fmt_n(total_cells)} combinaisons
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# KPI GRID (5 cartes)
+# ─────────────────────────────────────────────────────────────────────────────
+st.markdown(f"""
+<div class="kpi-grid">
+  <div class="kpi-card green">
+    <div class="kpi-label">✅ Implanté</div>
+    <div class="kpi-value" style="color:{C['green']}">{fmt_n(n_implante)}</div>
+    <div class="kpi-sub">{pct(n_implante)}% du réseau</div>
+    <div class="kpi-bar"><div class="kpi-bar-fill" style="width:{pct(n_implante)}%;background:{C['green']}"></div></div>
+  </div>
+  <div class="kpi-card orange">
+    <div class="kpi-label">⚠️ Non implanté</div>
+    <div class="kpi-value" style="color:{C['orange']}">{fmt_n(n_non_impl)}</div>
+    <div class="kpi-sub">{pct(n_non_impl)}% — à traiter</div>
+    <div class="kpi-bar"><div class="kpi-bar-fill" style="width:{pct(n_non_impl)}%;background:{C['orange']}"></div></div>
+  </div>
+  <div class="kpi-card red">
+    <div class="kpi-label">🔴 Stock négatif</div>
+    <div class="kpi-value" style="color:{C['red']}">{fmt_n(n_negatif)}</div>
+    <div class="kpi-sub">{pct(n_negatif)}% — écart inventaire</div>
+    <div class="kpi-bar"><div class="kpi-bar-fill" style="width:{pct(n_negatif)}%;background:{C['red']}"></div></div>
+  </div>
+  <div class="kpi-card blue">
+    <div class="kpi-label">📊 Taux réseau</div>
+    <div class="kpi-value" style="color:{color_taux(taux_reseau)}">{taux_reseau}%</div>
+    <div class="kpi-sub">{n_mag} mag × {fmt_n(n_sku)} SKU</div>
+    <div class="kpi-bar"><div class="kpi-bar-fill" style="width:{taux_reseau}%;background:{C['blue']}"></div></div>
+  </div>
+  <div class="kpi-card purple">
+    <div class="kpi-label">🔀 Flux IM / LO</div>
+    <div class="kpi-value" style="color:{C['purple']}">{n_sku_im}<span style="font-size:18px;font-weight:500;color:{C['muted']}"> / </span>{n_sku_lo}</div>
+    <div class="kpi-sub">Import · Local</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SCORECARD PAR MAGASIN
+# ─────────────────────────────────────────────────────────────────────────────
+pivot_mag = (
+    merged.groupby(["Magasin", "Statut"])
+    .size().unstack(fill_value=0)
+    .reindex(columns=list(STATUT_COLORS.keys()), fill_value=0)
+    .reset_index()
+)
+pivot_mag.columns.name = None
+pivot_mag["Total"]    = n_sku
+pivot_mag["Taux (%)"] = (pivot_mag.get("✅ Implanté", 0) / n_sku * 100).round(0).astype(int)
+
 st.markdown('<div class="sh">SCORECARD MAGASINS</div>', unsafe_allow_html=True)
-rag_html = '<div class="rag-grid">'
-for _, row in pivot.sort_values('Taux (%)', ascending=False).iterrows():
-    t_ = row['Taux (%)']
-    cls, c_hex = ('g', '#059669') if t_ >= 80 else ('r', '#dc2626')
-    rag_html += f"""<div class="rag-card {cls}"><div style="width:8px;height:8px;border-radius:50%;background:{c_hex};position:absolute;top:14px;right:14px;"></div><div class="rag-name">{row['Magasin']}</div><div class="rag-pct" style="color:{c_hex}">{t_}%</div><div class="rag-detail">{int(row['Implantation Terminée'])}✅ {int(row['Alerte Aucun Mouvement'])}🚨</div></div>"""
-rag_html += '</div>'
+rag_html = '<div class="scorecard-grid">'
+for _, row in pivot_mag.sort_values("Taux (%)", ascending=False).iterrows():
+    t_ = row["Taux (%)"]
+    cls = scorecard_cls(t_)
+    col = color_taux(t_)
+    ok_ = int(row.get("✅ Implanté", 0))
+    ko_ = int(row.get("⚠️ Non implanté", 0))
+    neg = int(row.get("🔴 Stock négatif", 0))
+    rag_html += f"""
+    <div class="scorecard-card {cls}">
+      <div class="scorecard-dot" style="background:{col}"></div>
+      <div class="scorecard-name">{row['Magasin']}</div>
+      <div class="scorecard-pct" style="color:{col}">{t_}%</div>
+      <div class="scorecard-sub">{ok_}✅ {ko_}⚠️ {neg}🔴</div>
+    </div>"""
+rag_html += "</div>"
 st.markdown(rag_html, unsafe_allow_html=True)
 
-# TABS
-TABS = ["📊 Vue Globale", "🚨 Alertes", "🗓️ Calendrier", "📋 Actions", "🔄 Cessions"]
-if "tab" not in st.session_state:
-    st.session_state.tab = TABS[0]
+# ─────────────────────────────────────────────────────────────────────────────
+# NAVIGATION ONGLETS
+# ─────────────────────────────────────────────────────────────────────────────
+TABS = ["📊 Vue Réseau", "⚠️ Non Implantés", "🔴 Stocks Négatifs", "🗓️ Calendrier", "🔄 Cessions", "📥 Export"]
+if "impl_tab" not in st.session_state:
+    st.session_state.impl_tab = TABS[0]
 
 nav_cols = st.columns(len(TABS))
 for i, t in enumerate(TABS):
     with nav_cols[i]:
-        if st.session_state.tab == t:
-            st.markdown(f'<div class="nav-tab-active">{t}</div>', unsafe_allow_html=True)
-        if st.button(t, key=f"nav_{i}", use_container_width=True):
-            st.session_state.tab = t
+        if st.session_state.impl_tab == t:
+            st.markdown(f'<div class="nav-active">{t}</div>', unsafe_allow_html=True)
+        if st.button(t, key=f"impl_nav_{i}", use_container_width=True):
+            st.session_state.impl_tab = t
             st.rerun()
 
-active = st.session_state.tab
+active = st.session_state.impl_tab
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 1 — VUE GLOBALE
+# TAB 1 — VUE RÉSEAU
 # ══════════════════════════════════════════════════════════════════════════════
 if active == TABS[0]:
     c1, c2 = st.columns([3, 2])
+
     with c1:
-        mel = pivot.melt(id_vars='Magasin', value_vars=list(S_COLORS.keys()), var_name='Statut', value_name='N')
-        fig = px.bar(mel, x='Magasin', y='N', color='Statut', color_discrete_map=S_COLORS, barmode='stack')
-        fig.update_traces(textposition='inside', texttemplate='%{y}', textfont=dict(size=11, color='white'))
+        mel = pivot_mag.melt(
+            id_vars="Magasin",
+            value_vars=[s for s in STATUT_COLORS if s in pivot_mag.columns],
+            var_name="Statut", value_name="N"
+        )
+        fig = px.bar(
+            mel, x="Magasin", y="N", color="Statut",
+            color_discrete_map=STATUT_COLORS, barmode="stack",
+            title="Situation par magasin"
+        )
+        fig.update_traces(
+            textposition="inside", texttemplate="%{y}",
+            textfont=dict(size=11, color="white")
+        )
         fig.update_layout(
-            paper_bgcolor="#fff", plot_bgcolor="#fff", height=400,
-            font=dict(family="Inter", color="#64748b", size=12),
-            margin=dict(l=20, r=20, t=44, b=20),
-            legend=dict(orientation='h', y=-0.22, bgcolor='rgba(0,0,0,0)', font=dict(size=11)),
-            xaxis=dict(gridcolor='#f0f2f8'), yaxis=dict(gridcolor='#f0f2f8'),
-            title='Situation par magasin'
+            paper_bgcolor=C["surface"], plot_bgcolor=C["surface"], height=420,
+            font=dict(family="Inter", color=C["muted"], size=12),
+            margin=dict(l=10, r=10, t=44, b=20),
+            legend=dict(orientation="h", y=-0.25, bgcolor="rgba(0,0,0,0)"),
+            xaxis=dict(gridcolor=C["bg"]), yaxis=dict(gridcolor=C["bg"]),
         )
         st.plotly_chart(fig, use_container_width=True)
+
     with c2:
-        fig_d = go.Figure(go.Pie(labels=list(S_COLORS.keys()), values=[ct, cal], hole=0.65,
-                                 marker=dict(colors=list(S_COLORS.values()), line=dict(color='#fff', width=3))))
-        fig_d.add_annotation(text=f"<b>{avg_impl}%</b><br>implanté", x=0.5, y=0.5,
-                            font=dict(size=18, color='#0f1729', family='Inter'), showarrow=False)
+        labels = ["✅ Implanté", "⚠️ Non implanté", "🔴 Stock négatif"]
+        values = [n_implante, n_non_impl, n_negatif]
+        colors = [C["green"], C["orange"], C["red"]]
+        fig_d = go.Figure(go.Pie(
+            labels=labels, values=values, hole=0.62,
+            marker=dict(colors=colors, line=dict(color="#fff", width=3)),
+        ))
+        fig_d.add_annotation(
+            text=f"<b>{taux_reseau}%</b><br>implanté",
+            x=0.5, y=0.5, showarrow=False,
+            font=dict(size=20, color=C["text"], family="Inter"),
+        )
         fig_d.update_layout(
-            paper_bgcolor="#fff", plot_bgcolor="#fff", height=400,
-            font=dict(family="Inter", color="#64748b", size=12),
-            margin=dict(l=20, r=20, t=44, b=20),
-            legend=dict(orientation='v', x=1.01, bgcolor='rgba(0,0,0,0)', font=dict(size=11)),
-            title='Répartition'
+            paper_bgcolor=C["surface"], height=420,
+            font=dict(family="Inter", color=C["muted"], size=12),
+            margin=dict(l=10, r=10, t=44, b=20),
+            legend=dict(orientation="v", x=1.01, bgcolor="rgba(0,0,0,0)"),
+            title="Répartition réseau",
         )
         st.plotly_chart(fig_d, use_container_width=True)
-    st.markdown('<div class="sh">DÉTAIL MAGASINS</div>', unsafe_allow_html=True)
-    st.dataframe(pivot[["Magasin","Implantation Terminée","Alerte Aucun Mouvement","Taux (%)"]].style
-        .background_gradient(subset=['Implantation Terminée'], cmap='Greens')
-        .background_gradient(subset=['Alerte Aucun Mouvement'], cmap='Reds')
-        .format({'Taux (%)': '{}%'}), use_container_width=True, hide_index=True)
+
+    st.markdown('<div class="sh">TABLEAU SYNTHÈSE PAR MAGASIN</div>', unsafe_allow_html=True)
+    cols_disp = ["Magasin"] + [c for c in STATUT_COLORS if c in pivot_mag.columns] + ["Total", "Taux (%)"]
+    st.dataframe(
+        pivot_mag[cols_disp].sort_values("Taux (%)", ascending=False).reset_index(drop=True)
+        .style
+        .background_gradient(subset=["✅ Implanté"] if "✅ Implanté" in pivot_mag.columns else [], cmap="Greens")
+        .background_gradient(subset=["⚠️ Non implanté"] if "⚠️ Non implanté" in pivot_mag.columns else [], cmap="Oranges")
+        .background_gradient(subset=["🔴 Stock négatif"] if "🔴 Stock négatif" in pivot_mag.columns else [], cmap="Reds")
+        .format({"Taux (%)": "{}%"}),
+        use_container_width=True, hide_index=True
+    )
+
+    # Répartition IM / LO
+    st.markdown('<div class="sh">RÉPARTITION FLUX IM / LO PAR MAGASIN</div>', unsafe_allow_html=True)
+    df_flux = merged[merged["Statut"] == "✅ Implanté"].groupby(["Magasin", "Origine"]).size().reset_index(name="N")
+    if not df_flux.empty:
+        fig_flux = px.bar(
+            df_flux, x="Magasin", y="N", color="Origine",
+            color_discrete_map={"IM": C["blue"], "LO": C["green"]},
+            barmode="group", title="Articles implantés par flux",
+        )
+        fig_flux.update_layout(
+            paper_bgcolor=C["surface"], plot_bgcolor=C["surface"], height=320,
+            font=dict(family="Inter", color=C["muted"], size=12),
+            margin=dict(l=10, r=10, t=44, b=20),
+            legend=dict(orientation="h", y=-0.28),
+            xaxis=dict(gridcolor=C["bg"]), yaxis=dict(gridcolor=C["bg"]),
+        )
+        st.plotly_chart(fig_flux, use_container_width=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 2 — ALERTES
+# TAB 2 — NON IMPLANTÉS
 # ══════════════════════════════════════════════════════════════════════════════
 elif active == TABS[1]:
-    st.markdown(f"""<div class="ac red"><div><div class="ac-title" style="color:#dc2626">🚨 Aucun Mouvement</div><div class="ac-sub">Action : Escalade fournisseur · Cession interne · Informer magasin</div></div><div class="ac-count" style="color:#dc2626">{cal}</div></div>""", unsafe_allow_html=True)
-    if df_alerte.empty:
-        st.success("✅ Aucune alerte")
+    df_ni = merged[merged["Statut"] == "⚠️ Non implanté"].copy()
+
+    if df_ni.empty:
+        st.markdown('<div class="info-box green">✅ Tous les articles sont implantés dans les magasins sélectionnés !</div>', unsafe_allow_html=True)
     else:
-        rupture_commune_skus = []
-        for sku in df_alerte['SKU'].unique():
-            sku_data = detail_df[detail_df['SKU'] == sku]
-            stock_par_mag = sku_data.groupby('Magasin')['Stock'].first()
-            if len(stock_par_mag) == len(mag_actifs) and (stock_par_mag == 0).all():
-                rupture_commune_skus.append(sku)
-        
-        n_rupture_commune = len(rupture_commune_skus)
-        kc1, kc2, kc3 = st.columns([1, 1, 2])
-        with kc1:
-            st.metric("🔴 Ruptures Communes", n_rupture_commune)
-        with kc2:
-            st.metric("Articles Impactés", len(df_alerte['SKU'].unique()))
-        with kc3:
-            if n_rupture_commune > 0:
-                st.warning(f"⚠️ {n_rupture_commune} article(s) en rupture sur TOUS les magasins — escalade critique")
-        
-        df_alerte_display = df_alerte.copy()
-        df_alerte_display['Rupture Commune'] = df_alerte_display['SKU'].isin(rupture_commune_skus).map({True: '🔴 OUI', False: '—'})
-        
-        ACOLS = ["Magasin","SKU","Libellé article","Origine","Mode Appro","Sem. Réception","Stock","Rupture Commune"]
-        st.dataframe(df_alerte_display[[c for c in ACOLS if c in df_alerte_display.columns]].sort_values(['Rupture Commune', 'Magasin'], ascending=[False, True]).reset_index(drop=True),
-                    use_container_width=True, hide_index=True)
+        # Ruptures communes (tous magasins = 0)
+        sku_counts = df_ni.groupby("SKU")["Magasin"].count()
+        sku_rupture_totale = sku_counts[sku_counts == len(mag_sel)].index.tolist()
+
+        kc1, kc2, kc3 = st.columns(3)
+        kc1.metric("⚠️ Lignes manquantes", fmt_n(len(df_ni)))
+        kc2.metric("Articles distincts", fmt_n(len(df_ni["SKU"].unique())))
+        kc3.metric("🔴 Rupture totale (tous mag)", len(sku_rupture_totale))
+
+        if sku_rupture_totale:
+            st.markdown(f'<div class="info-box orange">⚠️ <strong>{len(sku_rupture_totale)} article(s)</strong> absent(s) de TOUS les magasins — escalade critique recommandée.</div>', unsafe_allow_html=True)
+
+        df_ni["Rupture totale"] = df_ni["SKU"].isin(sku_rupture_totale).map({True: "🔴 OUI", False: "—"})
+        COLS = ["Magasin", "SKU", "Libellé article", "Origine", "Mode Appro",
+                "Sem. Réception", "Fournisseur", "Rupture totale"]
+        st.dataframe(
+            df_ni[[c for c in COLS if c in df_ni.columns]]
+            .sort_values(["Rupture totale", "Magasin"])
+            .reset_index(drop=True),
+            use_container_width=True, hide_index=True
+        )
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 3 — CALENDRIER
+# TAB 3 — STOCKS NÉGATIFS
 # ══════════════════════════════════════════════════════════════════════════════
 elif active == TABS[2]:
-    cal_df = detail_df[detail_df['Sem. Réception'].str.match(r'^S\d+$', na=False)].copy()
-    if cal_df.empty:
-        st.info("Aucune semaine")
+    df_neg = merged[merged["Statut"] == "🔴 Stock négatif"].copy()
+
+    if df_neg.empty:
+        st.markdown('<div class="info-box green">✅ Aucun stock négatif détecté.</div>', unsafe_allow_html=True)
     else:
-        st.dataframe(cal_df.groupby('Sem. Réception').agg(
-            Terminé=('Statut', lambda x: (x=='Implantation Terminée').sum()),
-            Alerte=('Statut', lambda x: (x=='Alerte Aucun Mouvement').sum())
-        ).reset_index(), use_container_width=True, hide_index=True)
+        st.markdown("""
+        <div class="info-box orange">
+          <strong>📌 Stock négatif = écart d'inventaire</strong> — un stock négatif indique que des articles
+          ont été vendus/sortis sans réception ERP correspondante, ou que l'inventaire n'a pas été mis à jour.
+          Action : régularisation inventaire + vérification des entrées ERP.
+        </div>
+        """, unsafe_allow_html=True)
+
+        kc1, kc2 = st.columns(2)
+        kc1.metric("🔴 Lignes stock négatif", fmt_n(len(df_neg)))
+        kc2.metric("Articles distincts", fmt_n(len(df_neg["SKU"].unique())))
+
+        COLS = ["Magasin", "SKU", "Libellé article", "Origine", "Stock", "Mode Appro", "Fournisseur"]
+        st.dataframe(
+            df_neg[[c for c in COLS if c in df_neg.columns]]
+            .sort_values("Stock")  # Les plus négatifs en premier
+            .reset_index(drop=True),
+            use_container_width=True, hide_index=True
+        )
+
+        # Distribution des valeurs négatives
+        fig_neg = px.histogram(
+            df_neg, x="Stock", nbins=40,
+            title="Distribution des stocks négatifs",
+            color_discrete_sequence=[C["red"]]
+        )
+        fig_neg.update_layout(
+            paper_bgcolor=C["surface"], plot_bgcolor=C["surface"], height=280,
+            font=dict(family="Inter", color=C["muted"], size=12),
+            margin=dict(l=10, r=10, t=44, b=20),
+        )
+        st.plotly_chart(fig_neg, use_container_width=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 4 — PLAN D'ACTION
+# TAB 4 — CALENDRIER
 # ══════════════════════════════════════════════════════════════════════════════
 elif active == TABS[3]:
-    mag_pa = st.selectbox("Magasin", mag_actifs)
-    df_pa = detail_df[(detail_df['Magasin']==mag_pa) & (detail_df['Statut']=='Alerte Aucun Mouvement')]
-    st.metric("Alertes", len(df_pa))
-    if not df_pa.empty:
-        PA_COLS = ["SKU","Libellé article","Origine","Mode Appro","Stock"]
-        st.dataframe(df_pa[[c for c in PA_COLS if c in df_pa.columns]].reset_index(drop=True),
-                    use_container_width=True, hide_index=True)
+    cal_df = merged[merged["Sem. Réception"].str.match(r"^[Ss]?\d+$", na=False)].copy()
+
+    if cal_df.empty:
+        st.info("Aucune semaine de réception renseignée dans le fichier T1.")
+    else:
+        cal_agg = cal_df.groupby("Sem. Réception").agg(
+            Implanté     =("Statut", lambda x: (x == "✅ Implanté").sum()),
+            Non_implanté =("Statut", lambda x: (x == "⚠️ Non implanté").sum()),
+            Stock_négatif=("Statut", lambda x: (x == "🔴 Stock négatif").sum()),
+            SKU_distincts =("SKU", "nunique"),
+        ).reset_index().rename(columns={"Non_implanté": "Non implanté", "Stock_négatif": "Stock négatif"})
+        cal_agg["Taux (%)"] = (cal_agg["Implanté"] / (cal_agg["Implanté"] + cal_agg["Non implanté"] + cal_agg["Stock négatif"]) * 100).round(0).astype(int)
+
+        st.markdown('<div class="sh">PROGRESSION PAR SEMAINE DE RÉCEPTION</div>', unsafe_allow_html=True)
+        fig_cal = px.bar(
+            cal_agg.melt(id_vars="Sem. Réception",
+                         value_vars=["Implanté", "Non implanté", "Stock négatif"]),
+            x="Sem. Réception", y="value", color="variable",
+            color_discrete_map={"Implanté": C["green"], "Non implanté": C["orange"], "Stock négatif": C["red"]},
+            barmode="stack", title="Statut par semaine de réception"
+        )
+        fig_cal.update_layout(
+            paper_bgcolor=C["surface"], plot_bgcolor=C["surface"], height=360,
+            font=dict(family="Inter", color=C["muted"], size=12),
+            margin=dict(l=10, r=10, t=44, b=20),
+            legend=dict(orientation="h", y=-0.25),
+            xaxis=dict(gridcolor=C["bg"]), yaxis=dict(gridcolor=C["bg"]),
+        )
+        st.plotly_chart(fig_cal, use_container_width=True)
+        st.dataframe(cal_agg, use_container_width=True, hide_index=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 5 — CESSIONS
 # ══════════════════════════════════════════════════════════════════════════════
 elif active == TABS[4]:
-    st.markdown('<div class="sh">🔄 MOTEUR CESSIONS</div>', unsafe_allow_html=True)
-    if not magasins_detresse:
-        st.markdown("""<div class="gold-banner"><strong>💡 Comment utiliser ?</strong><br>Sidebar → Cessions → sélectionne magasins en détresse</div>""", unsafe_allow_html=True)
-    else:
-        with st.spinner("Calcul…"):
-            df_cessions = compute_cessions(df_stock_all if df_stock_all is not None else df_stock_t1,
-                                          list(sku_scope), magasins_detresse, tous_magasins,
-                                          int(seuil_detresse), int(seuil_cedant))
-        if df_cessions.empty:
-            st.success("✅ OK")
-        else:
-            st.dataframe(df_cessions, use_container_width=True, hide_index=True)
-            buf_c = io.BytesIO()
-            with pd.ExcelWriter(buf_c, engine='openpyxl') as writer:
-                df_cessions.to_excel(writer, sheet_name='Cessions', index=False)
-            buf_c.seek(0)
-            st.download_button(label=f"📥 Cessions_{TODAY_FILE}.xlsx", data=buf_c,
-                              file_name=f"Cessions_{TODAY_FILE}.xlsx",
-                              mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    st.markdown('<div class="sh">🔄 MOTEUR CESSIONS INTER-MAGASINS</div>', unsafe_allow_html=True)
+    st.markdown("""
+    <div class="info-box blue">
+      <strong>💡 Comment utiliser ?</strong><br>
+      Dans la sidebar, sélectionne les <strong>magasins en détresse</strong> (stock insuffisant) et le seuil de déclenchement.
+      Le moteur identifie les magasins cédants disposant d'un stock excédentaire et propose un plan de cession article par article.
+    </div>
+    """, unsafe_allow_html=True)
 
+    if not mag_detresse:
+        st.markdown('<div class="info-box orange">⬅️ Sélectionne des magasins en détresse dans la sidebar pour activer le moteur de cessions.</div>', unsafe_allow_html=True)
+    else:
+        mag_cedants = [m for m in mag_sel if m not in mag_detresse]
+        suggestions = []
+
+        for sku in sku_scope:
+            sku_df = df_stock[df_stock["SKU"] == sku].copy()
+            if sku_df.empty:
+                continue
+            lib = sku_df["Libellé article"].iloc[0]
+
+            det_rows = sku_df[
+                sku_df["Libellé site"].isin(mag_detresse) &
+                (sku_df["Stock"].fillna(0) <= seuil_det)
+            ]
+            if det_rows.empty:
+                continue
+
+            ced_rows = sku_df[
+                sku_df["Libellé site"].isin(mag_cedants) &
+                (sku_df["Stock"].fillna(0) > reserve)
+            ].sort_values("Stock", ascending=False)
+
+            for _, dr in det_rows.iterrows():
+                if ced_rows.empty:
+                    suggestions.append({
+                        "SKU": sku, "Libellé article": lib,
+                        "Magasin détresse": dr["Libellé site"],
+                        "Stock détresse": int(dr["Stock"]) if pd.notna(dr["Stock"]) else "NaN",
+                        "Cédant suggéré": "⚠️ Aucun cédant disponible",
+                        "Stock cédant": 0, "Qté cessible": 0,
+                        "Faisabilité": "🔴 Impossible",
+                    })
+                else:
+                    best = ced_rows.iloc[0]
+                    qty  = int(best["Stock"]) - reserve
+                    suggestions.append({
+                        "SKU": sku, "Libellé article": lib,
+                        "Magasin détresse": dr["Libellé site"],
+                        "Stock détresse": int(dr["Stock"]) if pd.notna(dr["Stock"]) else "NaN",
+                        "Cédant suggéré": best["Libellé site"],
+                        "Stock cédant": int(best["Stock"]),
+                        "Qté cessible": qty,
+                        "Faisabilité": "🟢 Possible" if qty >= 1 else "🟠 Partielle",
+                    })
+
+        if not suggestions:
+            st.success("✅ Aucune cession nécessaire selon les critères actuels.")
+        else:
+            df_cess = pd.DataFrame(suggestions).sort_values(
+                ["Faisabilité", "Qté cessible"], ascending=[True, False]
+            ).reset_index(drop=True)
+
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Cessions possibles", int((df_cess["Faisabilité"] == "🟢 Possible").sum()))
+            c2.metric("Impossible", int((df_cess["Faisabilité"] == "🔴 Impossible").sum()))
+            c3.metric("Articles concernés", df_cess["SKU"].nunique())
+
+            st.dataframe(df_cess, use_container_width=True, hide_index=True)
+
+            buf_c = io.BytesIO()
+            with pd.ExcelWriter(buf_c, engine="openpyxl") as writer:
+                df_cess.to_excel(writer, sheet_name="Plan Cessions", index=False)
+            buf_c.seek(0)
+            st.download_button(
+                f"📥 Télécharger Plan_Cessions_{TODAY_FILE}.xlsx",
+                data=buf_c,
+                file_name=f"Plan_Cessions_{TODAY_FILE}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 6 — EXPORT EXCEL
+# ══════════════════════════════════════════════════════════════════════════════
+elif active == TABS[5]:
+    st.markdown('<div class="sh">📥 EXPORT EXCEL ENRICHI</div>', unsafe_allow_html=True)
+    st.markdown("""
+    <div class="info-box blue">
+      L'export contient 3 feuilles : <strong>Synthèse réseau</strong> (scorecard magasins),
+      <strong>Détail complet</strong> (toutes les lignes avec statut) et
+      <strong>Alertes prioritaires</strong> (non implantés + stocks négatifs uniquement).
+    </div>
+    """, unsafe_allow_html=True)
+
+    if st.button("🔨 Générer l'export Excel", type="primary", use_container_width=False):
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from openpyxl.utils import get_column_letter
+
+        buf_x = io.BytesIO()
+
+        with pd.ExcelWriter(buf_x, engine="openpyxl") as writer:
+            # Feuille 1 — Synthèse
+            cols_synth = ["Magasin"] + [c for c in STATUT_COLORS if c in pivot_mag.columns] + ["Total", "Taux (%)"]
+            pivot_mag[cols_synth].sort_values("Taux (%)", ascending=False).to_excel(
+                writer, sheet_name="Synthèse Réseau", index=False
+            )
+
+            # Feuille 2 — Détail
+            cols_det = ["Magasin", "SKU", "Libellé article", "Origine", "Mode Appro",
+                        "Sem. Réception", "Fournisseur", "Stock", "Statut"]
+            merged[[c for c in cols_det if c in merged.columns]].to_excel(
+                writer, sheet_name="Détail Complet", index=False
+            )
+
+            # Feuille 3 — Alertes
+            df_alerte = merged[merged["Statut"].isin(["⚠️ Non implanté", "🔴 Stock négatif"])].copy()
+            df_alerte[[c for c in cols_det if c in df_alerte.columns]].sort_values(
+                ["Statut", "Magasin"]
+            ).to_excel(writer, sheet_name="Alertes Prioritaires", index=False)
+
+            # Mise en forme simple
+            wb = writer.book
+            FILL_HEADER = PatternFill("solid", fgColor="1C1C1E")
+            FONT_HEADER = Font(bold=True, color="FFFFFF", name="Arial", size=11)
+            ALIGN_CENTER = Alignment(horizontal="center", vertical="center")
+
+            for shname in wb.sheetnames:
+                ws = wb[shname]
+                # En-têtes
+                for cell in ws[1]:
+                    cell.fill   = FILL_HEADER
+                    cell.font   = FONT_HEADER
+                    cell.alignment = ALIGN_CENTER
+                # Largeur colonnes auto
+                for col in ws.columns:
+                    max_len = max(
+                        (len(str(cell.value)) for cell in col if cell.value), default=10
+                    )
+                    ws.column_dimensions[get_column_letter(col[0].column)].width = min(max_len + 4, 50)
+                # Freeze row 1
+                ws.freeze_panes = "A2"
+                # Coloriser colonne Statut si présente
+                for row in ws.iter_rows(min_row=2):
+                    for cell in row:
+                        if str(cell.value) == "✅ Implanté":
+                            cell.fill = PatternFill("solid", fgColor="D1FAE5")
+                            cell.font = Font(color="065F46", name="Arial", size=10)
+                        elif str(cell.value) == "⚠️ Non implanté":
+                            cell.fill = PatternFill("solid", fgColor="FEF3C7")
+                            cell.font = Font(color="92400E", name="Arial", size=10)
+                        elif str(cell.value) == "🔴 Stock négatif":
+                            cell.fill = PatternFill("solid", fgColor="FEE2E2")
+                            cell.font = Font(color="991B1B", name="Arial", size=10)
+
+        buf_x.seek(0)
+        st.download_button(
+            label=f"📥 Implantation_T1_{TODAY_FILE}.xlsx",
+            data=buf_x,
+            file_name=f"Implantation_T1_{TODAY_FILE}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        st.success(f"✅ Export généré — {fmt_n(len(merged))} lignes · 3 feuilles")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FOOTER
+# ─────────────────────────────────────────────────────────────────────────────
 st.markdown("<br>", unsafe_allow_html=True)
-st.info("✅ v2.1.1 — Fix ligne 375 · Format PBI long + pivoté · 5 tabs · 0 erreurs")
+st.markdown(
+    f'<div style="text-align:center;font-size:11px;color:{C["muted"]};font-family:JetBrains Mono;">'
+    f'SmartBuyer · NovaRetail Solutions · Implantation v3.0 · {TODAY_STR}'
+    f'</div>',
+    unsafe_allow_html=True
+)
