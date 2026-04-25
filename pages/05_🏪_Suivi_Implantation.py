@@ -34,8 +34,7 @@
 ║    ✅ Implanté              Code etat=2 · Stock > 0                         ║
 ║    🔵 Appro en cours        Code etat=2 · Stock = 0 · RAL > 0              ║
 ║    🛒 Passer commande       Code etat=2 · Stock = 0 · RAL = 0              ║
-║    🔧 Régulariser + appro   Code etat=2 · Stock < 0 · RAL > 0              ║
-║    🔧 Régulariser           Code etat=2 · Stock < 0 · RAL = 0              ║
+║    ✅ Implanté (étendu)     Stock < 0 → inclus dans Implanté              ║
 ║    🚩 Anomalie référ.       Code etat ≠ 2 (hors P)                         ║
 ║    ⚪ Non référencé         Article absent du fichier stock                  ║
 ║                                                                              ║
@@ -75,23 +74,17 @@ ETAT_LABEL    = {
 
 # Alertes et couleurs
 ALERTES = {
-    "✅ Implanté"            : "#34C759",
-    "🔵 Appro en cours"      : "#007AFF",
-    "🛒 Passer commande"     : "#FF9500",
-    "🔧 Régulariser + appro" : "#FF6B6B",
-    "🔧 Régulariser"         : "#FF3B30",
-    "🚩 Anomalie référ."     : "#FFD60A",
-    "⚪ Non référencé"       : "#8E8E93",
+    "✅ Implanté"       : "#34C759",
+    "🔵 Appro en cours" : "#007AFF",
+    "🛒 Passer commande": "#FF9500",
+    "🚩 Anomalie référ.": "#FFD60A",
 }
 
 ACTION_LABEL = {
-    "✅ Implanté"            : "—",
-    "🔵 Appro en cours"      : "Accélérer livraison",
-    "🛒 Passer commande"     : "Passer commande fournisseur",
-    "🔧 Régulariser + appro" : "Régulariser inventaire + livraison en cours",
-    "🔧 Régulariser"         : "Régulariser inventaire magasin",
-    "🚩 Anomalie référ."     : "Vérifier référencement magasin",
-    "⚪ Non référencé"       : "Article non dans le stock ERP",
+    "✅ Implanté"       : "—",
+    "🔵 Appro en cours" : "Accélérer livraison",
+    "🛒 Passer commande": "Passer commande fournisseur",
+    "🚩 Anomalie référ.": "Vérifier référencement magasin",
 }
 
 C = {
@@ -271,31 +264,28 @@ def _sem_sort(s) -> int:
     return int(cleaned) if cleaned.isdigit() else 99
 
 def get_alerte(row) -> str:
-    """Logique d'alerte métier centrale."""
+    """
+    Logique d'alerte métier — 4 catégories :
+      ✅ Implanté        : stock > 0 OU stock < 0 (présent en rayon, négatif = écart ERP)
+      🔵 Appro en cours  : stock = 0 · RAL > 0
+      🛒 Passer commande : stock = 0 · RAL = 0
+      🚩 Anomalie référ. : code etat ≠ 2, absent du stock, ou purge résiduel
+    """
     etat  = str(row.get("Code etat", "")).strip()
     stock = row.get("Nouveau stock")
     ral   = float(row.get("Ral", 0) or 0)
 
-    # Article absent du stock (left join → ligne vide)
-    if not etat or etat == "nan":
-        return "⚪ Non référencé"
-    # Purge — ne devrait pas arriver (filtré au parsing) mais sécurité
-    if etat == ETAT_PURGE:
-        return "⚪ Non référencé"
-    # Anomalie référencement
-    if etat in ETAT_ANOMALIE:
+    # Absent, purge ou anomalie référencement → 1 bloc
+    if not etat or etat in ("nan", ETAT_PURGE) or etat in ETAT_ANOMALIE:
         return "🚩 Anomalie référ."
-    # Actif (Code etat = 2)
+    # Actif (Code etat = 2) mais absent du stock → même bloc
     if pd.isna(stock):
-        return "⚪ Non référencé"
+        return "🚩 Anomalie référ."
     s = float(stock)
-    if s > 0:
+    # Stock présent (positif OU négatif) → Implanté
+    if s != 0:
         return "✅ Implanté"
-    if s < 0 and ral > 0:
-        return "🔧 Régulariser + appro"
-    if s < 0:
-        return "🔧 Régulariser"
-    # stock = 0
+    # Stock = 0
     if ral > 0:
         return "🔵 Appro en cours"
     return "🛒 Passer commande"
@@ -647,10 +637,7 @@ n_base_taux  = len(merged_actif)
 n_impl       = int((merged["Alerte"] == "✅ Implanté").sum())
 n_appro      = int((merged["Alerte"] == "🔵 Appro en cours").sum())
 n_cmd        = int((merged["Alerte"] == "🛒 Passer commande").sum())
-n_reg_appro  = int((merged["Alerte"] == "🔧 Régulariser + appro").sum())
-n_reg        = int((merged["Alerte"] == "🔧 Régulariser").sum())
 n_anomalie   = int((merged["Alerte"] == "🚩 Anomalie référ.").sum())
-n_non_ref    = int((merged["Alerte"] == "⚪ Non référencé").sum())
 taux_reseau  = int(n_impl / n_base_taux * 100) if n_base_taux else 0
 n_sku_im     = int((t1_scope["ORIGINE"] == "IM").sum())
 n_sku_lo     = int((t1_scope["ORIGINE"] == "LO").sum())
@@ -661,6 +648,7 @@ pct          = lambda n: int(n / total_cells * 100) if total_cells else 0
 def taux_mag(mag):
     dm = merged_actif[merged_actif["Magasin"] == mag]
     if len(dm) == 0: return 0
+    # ✅ Implanté inclut déjà stock négatif (regroupé dans get_alerte)
     return int((dm["Alerte"] == "✅ Implanté").sum() / len(dm) * 100)
 
 pivot_mag = (
@@ -690,14 +678,13 @@ if "Libellé rayon" in merged.columns:
 # ─────────────────────────────────────────────────────────────────────────────
 # BANNIÈRE
 # ─────────────────────────────────────────────────────────────────────────────
-n_actions = n_appro + n_cmd + n_reg + n_reg_appro + n_anomalie
+n_actions = n_appro + n_cmd + n_anomalie
 if n_actions > 0:
     st.markdown(f"""
     <div class="alert-banner">
       <div class="alert-pill">⚡ ACTIONS</div>
       <div class="alert-item"><div class="alert-num" style="color:{C['blue']}">{fmt_n(n_appro)}</div><div class="alert-lbl">Appro en cours</div></div>
       <div class="alert-item"><div class="alert-num" style="color:{C['orange']}">{fmt_n(n_cmd)}</div><div class="alert-lbl">À commander</div></div>
-      <div class="alert-item"><div class="alert-num" style="color:{C['red']}">{fmt_n(n_reg + n_reg_appro)}</div><div class="alert-lbl">Régulariser</div></div>
       <div class="alert-item"><div class="alert-num" style="color:#B8860B">{fmt_n(n_anomalie)}</div><div class="alert-lbl">Anomalies</div></div>
       <div style="margin-left:auto;font-size:11px;color:{C['muted']};">{n_mag} mag · {fmt_n(n_sku)} SKU</div>
     </div>""", unsafe_allow_html=True)
@@ -729,32 +716,32 @@ st.markdown(f"""
     <div class="kpi-value">{fmt_n(n_cmd)}</div>
     <div class="kpi-sub">Stock 0 · RAL 0</div>
   </div>
-  <div class="kpi-card red">
-    <div class="kpi-label">🔧 À régulariser</div>
-    <div class="kpi-value">{fmt_n(n_reg + n_reg_appro)}</div>
-    <div class="kpi-sub">Stock négatif</div>
-  </div>
-</div>
-<div class="kpi-grid-4" style="margin-top:-8px;">
   <div class="kpi-card yellow">
     <div class="kpi-label">🚩 Anomalies référ.</div>
     <div class="kpi-value">{fmt_n(n_anomalie)}</div>
-    <div class="kpi-sub">Code etat ≠ 2 · hors taux</div>
+    <div class="kpi-sub">Référencement à vérifier</div>
   </div>
+</div>
+<div class="kpi-grid-4" style="margin-top:-8px;">
   <div class="kpi-card purple">
     <div class="kpi-label">🔀 Flux IM / LO</div>
     <div class="kpi-value" style="font-size:24px">{n_sku_im} <span style="font-size:15px;color:{C['muted']}">/ </span>{n_sku_lo}</div>
     <div class="kpi-sub">Import · Local</div>
   </div>
   <div class="kpi-card" style="border-top:3px solid {C['muted']};">
-    <div class="kpi-label">⚪ Non référencés</div>
-    <div class="kpi-value" style="color:{C['muted']}">{fmt_n(n_non_ref)}</div>
-    <div class="kpi-sub">Absents du stock ERP</div>
-  </div>
-  <div class="kpi-card" style="border-top:3px solid {C['muted']};">
     <div class="kpi-label">📅 Données stock</div>
     <div class="kpi-value" style="font-size:18px;color:{C['red'] if age_stock>7 else C['blue']}">{date_stock_str}</div>
     <div class="kpi-sub">{"⚠️ " + str(age_stock) + "j — recharger" if age_stock > 7 else str(age_stock) + "j"}</div>
+  </div>
+  <div class="kpi-card" style="border-top:3px solid {C['muted']};">
+    <div class="kpi-label">📋 SKUs analysés</div>
+    <div class="kpi-value" style="font-size:24px;color:{C['muted']}">{fmt_n(n_sku)}</div>
+    <div class="kpi-sub">{n_mag} magasin(s)</div>
+  </div>
+  <div class="kpi-card" style="border-top:3px solid {C['muted']};">
+    <div class="kpi-label">🔄 Combinaisons</div>
+    <div class="kpi-value" style="font-size:24px;color:{C['muted']}">{fmt_n(total_cells)}</div>
+    <div class="kpi-sub">SKU × magasin</div>
   </div>
 </div>
 """, unsafe_allow_html=True)
@@ -770,14 +757,13 @@ for _, row in pivot_mag.sort_values("Taux (%)", ascending=False).iterrows():
     impl = int(row.get("✅ Implanté", 0))
     app  = int(row.get("🔵 Appro en cours", 0))
     cmd  = int(row.get("🛒 Passer commande", 0))
-    reg  = int(row.get("🔧 Régulariser", 0)) + int(row.get("🔧 Régulariser + appro", 0))
     an   = int(row.get("🚩 Anomalie référ.", 0))
     sc_html += f"""
     <div class="scorecard-card {scorecard_cls(t_)}">
       <div class="scorecard-dot" style="background:{col}"></div>
       <div class="scorecard-name">{row['Magasin']}</div>
       <div class="scorecard-pct" style="color:{col}">{t_}%</div>
-      <div class="scorecard-sub">{impl}✅ {app}🔵 {cmd}🛒 {reg}🔧 {an}🚩</div>
+      <div class="scorecard-sub">{impl}✅ {app}🔵 {cmd}🛒 {an}🚩</div>
     </div>"""
 sc_html += "</div>"
 st.markdown(sc_html, unsafe_allow_html=True)
@@ -881,25 +867,38 @@ elif active == TABS[1]:
         st.plotly_chart(fig, use_container_width=True)
 
     with c2:
-        labels = list(ALERTES.keys())
-        vals   = [int(pivot_mag.get(a, pd.Series([0])).sum()) if a in pivot_mag.columns else 0
-                  for a in labels]
-        fig_d = go.Figure(go.Pie(
-            labels=labels, values=vals, hole=0.62,
-            marker=dict(colors=list(ALERTES.values()),
-                        line=dict(color="#fff", width=3))
-        ))
-        fig_d.add_annotation(
-            text=f"<b>{taux_reseau}%</b><br>implanté",
-            x=0.5, y=0.5, showarrow=False,
-            font=dict(size=20, color=C["text"], family="Inter")
-        )
-        fig_d.update_layout(paper_bgcolor=C["surface"], height=400,
-                            font=dict(family="Inter", color=C["muted"], size=12),
-                            margin=dict(l=10,r=10,t=44,b=20),
-                            legend=dict(orientation="v", x=1.01),
-                            title="Répartition réseau")
-        st.plotly_chart(fig_d, use_container_width=True)
+        # Répartition réseau — barres horizontales lisibles
+        labels = [a for a in ALERTES if a in pivot_mag.columns]
+        vals   = [int(pivot_mag[a].sum()) for a in labels]
+        total  = sum(vals) or 1
+        pcts   = [round(v / total * 100, 1) for v in vals]
+
+        rows_html = ""
+        for lbl, val, pct_v in zip(labels, vals, pcts):
+            color = ALERTES[lbl]
+            bar_w = max(pct_v, 1)  # min 1% pour visibilité
+            rows_html += f"""
+            <div style="margin-bottom:10px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+                <span style="font-size:12px;font-weight:600;color:{C['text']}">{lbl}</span>
+                <span style="font-size:12px;font-family:'JetBrains Mono';color:{C['muted']}">{fmt_n(val)} · {pct_v}%</span>
+              </div>
+              <div style="background:{C['border']};border-radius:4px;height:10px;">
+                <div style="background:{color};width:{bar_w}%;height:100%;border-radius:4px;"></div>
+              </div>
+            </div>"""
+
+        st.markdown(f"""
+        <div style="background:{C['surface']};border:1px solid {C['border']};border-radius:14px;
+                    padding:20px 22px;box-shadow:0 1px 3px rgba(0,0,0,.06);">
+          <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.10em;
+                      color:{C['muted']};margin-bottom:4px;">Répartition réseau</div>
+          <div style="font-size:36px;font-weight:800;color:{color_taux(taux_reseau)};
+                      letter-spacing:-.02em;margin-bottom:16px;">{taux_reseau}%
+            <span style="font-size:14px;font-weight:500;color:{C['muted']}"> implanté</span>
+          </div>
+          {rows_html}
+        </div>""", unsafe_allow_html=True)
 
     # Matrice rayon
     if not rayon_pivot.empty:
@@ -932,8 +931,8 @@ elif active == TABS[2]:
     st.markdown('<div class="sh">TOUTES LES ALERTES AVEC ACTION</div>', unsafe_allow_html=True)
 
     # Filtre alerte
-    alertes_dispo = [a for a in ALERTES if a != "✅ Implanté" and
-                     (merged["Alerte"] == a).any()]
+    alertes_dispo = [a for a in ALERTES
+                     if a != "✅ Implanté" and (merged["Alerte"] == a).any()]
     alerte_sel = st.multiselect(
         "Filtrer par alerte", alertes_dispo, default=alertes_dispo,
         format_func=lambda a: f"{a} — {ACTION_LABEL[a]}"
@@ -981,7 +980,7 @@ elif active == TABS[2]:
 
         # Ruptures totales réseau (non implanté sur tous les magasins)
         df_non_impl = merged[merged["Alerte"].isin([
-            "🛒 Passer commande","🔵 Appro en cours","🔧 Régulariser","🔧 Régulariser + appro"
+            "🛒 Passer commande","🔵 Appro en cours"
         ])]
         sku_counts = df_non_impl.groupby("SKU")["Magasin"].count()
         sku_rupt   = sku_counts[sku_counts == n_mag].index.tolist()
@@ -1155,8 +1154,6 @@ elif active == TABS[4]:
             "✅ Implanté"            : ("D1FAE5","065F46"),
             "🔵 Appro en cours"      : ("DBEAFE","1D4ED8"),
             "🛒 Passer commande"     : ("FEF3C7","92400E"),
-            "🔧 Régulariser + appro" : ("FEE2E2","991B1B"),
-            "🔧 Régulariser"         : ("FEE2E2","991B1B"),
             "🚩 Anomalie référ."     : ("FFFDE7","795548"),
             "⚪ Non référencé"       : ("F3F4F6","374151"),
         }
