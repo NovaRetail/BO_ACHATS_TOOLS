@@ -944,6 +944,34 @@ elif active == TABS[2]:
         default=sorted(merged["Magasin"].unique())
     )
 
+    # ── Ruptures communes — card identique aux autres alertes ─────────────────
+    df_non_impl = merged[merged["Alerte"].isin(["🛒 Passer commande", "🔵 Appro en cours"])]
+    sku_counts  = df_non_impl.groupby("SKU")["Magasin"].count()
+    sku_rupt    = sku_counts[sku_counts == n_mag].index.tolist()
+
+    # Card ruptures communes — même style que les autres
+    color_rupt = C["red"]
+    st.markdown(f"""
+    <div style="background:{color_rupt}18;border:1px solid {color_rupt}44;border-left:4px solid {color_rupt};
+                border-radius:10px;padding:10px 16px;margin-bottom:8px;
+                display:flex;align-items:center;justify-content:space-between;">
+      <div>
+        <span style="font-size:14px;font-weight:700;color:{C['text']}">🚨 Ruptures communes réseau</span>
+        <span style="font-size:12px;color:{C['muted']};margin-left:12px;">→ Escalade critique — aucun stock sur tous les magasins</span>
+      </div>
+      <span style="font-size:22px;font-weight:800;color:{color_rupt}">{fmt_n(len(sku_rupt))}</span>
+    </div>""", unsafe_allow_html=True)
+
+    if sku_rupt:
+        df_rupt = (merged[merged["SKU"].isin(sku_rupt)]
+                   [["SKU","Libellé article","Origine","Fournisseur T1","Alerte"]]
+                   .drop_duplicates("SKU")
+                   .sort_values(["Alerte","Libellé article"])
+                   .reset_index(drop=True))
+        with st.expander(f"📋 Voir le détail des {len(sku_rupt)} ruptures communes", expanded=False):
+            st.dataframe(df_rupt, use_container_width=True, hide_index=True)
+
+    # ── Filtres + tableau alertes ─────────────────────────────────────────────
     df_al = merged[
         merged["Alerte"].isin(alerte_sel) &
         merged["Magasin"].isin(mag_alerte_sel)
@@ -978,23 +1006,6 @@ elif active == TABS[2]:
             .sort_values(["Alerte","Magasin"]).reset_index(drop=True),
             use_container_width=True, hide_index=True
         )
-
-        # Ruptures totales réseau (non implanté sur tous les magasins)
-        df_non_impl = merged[merged["Alerte"].isin([
-            "🛒 Passer commande","🔵 Appro en cours"
-        ])]
-        sku_counts = df_non_impl.groupby("SKU")["Magasin"].count()
-        sku_rupt   = sku_counts[sku_counts == n_mag].index.tolist()
-
-        if sku_rupt:
-            st.markdown(f"""
-            <div class="info-box orange" style="margin-top:14px;">
-              🚨 <strong>{len(sku_rupt)} article(s) en alerte sur TOUS les magasins</strong> — escalade critique recommandée.
-            </div>""", unsafe_allow_html=True)
-            df_rupt = (merged[merged["SKU"].isin(sku_rupt)]
-                       [["SKU","Libellé article","Origine","Fournisseur T1","Alerte"]]
-                       .drop_duplicates("SKU").sort_values("Alerte").reset_index(drop=True))
-            st.dataframe(df_rupt, use_container_width=True, hide_index=True)
 
         # Anomalies référencement
         if n_anomalie > 0 and "🚩 Anomalie référ." in alerte_sel:
