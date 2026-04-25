@@ -420,9 +420,12 @@ def load_t1(file_bytes: bytes, filename: str) -> tuple[pd.DataFrame | None, str 
             df_raw[col] = default
 
     df_raw["SEMAINE RECEPTION"] = df_raw["SEMAINE RECEPTION"].astype(str).str.strip().replace("nan", "")
-    df_raw["SEM_NUM"] = df_raw["SEMAINE RECEPTION"].apply(
-        lambda s: int(re.sub(r"[Ss]", "", s)) if re.match(r"^[Ss]?\d+$", s.strip()) else 99
-    )
+    def _sem_to_num(s):
+        s = str(s).strip()
+        cleaned = re.sub(r"[Ss]", "", s)
+        return int(cleaned) if cleaned.isdigit() else 99
+
+    df_raw["SEM_NUM"] = df_raw["SEMAINE RECEPTION"].apply(_sem_to_num)
     df_raw["ORIGINE"] = df_raw["MODE APPRO"].apply(
         lambda m: "IM" if "IMPORT" in str(m).upper() else "LO"
     )
