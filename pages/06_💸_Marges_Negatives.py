@@ -52,13 +52,11 @@ hr { border-color: #E5E5EA !important; margin: 1rem 0 !important; }
 .alert-blue  { background: #F0F8FF; border-color: #007AFF; color: #001A3A; }
 .alert-purple{ background: #F5F0FF; border-color: #AF52DE; color: #1A0033; }
 
-/* Bloc format */
 .format-card { border-radius: 12px; padding: 14px 16px; margin-bottom: 6px; border: 0.5px solid; }
 .format-hyper  { background: #EFF6FF; border-color: #B3D9FF; }
 .format-market { background: #F0FFF4; border-color: #A8E6BF; }
 .format-supeco { background: #F5F0FF; border-color: #D9B3FF; }
 
-/* Badge format */
 .badge { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; }
 .badge-hyper  { background: #154360; color: #FFFFFF; }
 .badge-market { background: #145A32; color: #FFFFFF; }
@@ -93,7 +91,6 @@ def get_format(site_name):
     return "Market"
 
 def short_name(s):
-    """Retourne le libellé après le ' - '"""
     s = str(s)
     return s.split(" - ", 1)[-1].strip() if " - " in s else s
 
@@ -125,6 +122,10 @@ def load_data(byt, fname):
 
     periode, nb_jours = extract_periode(df)
 
+    # ── FIX : normalisation du nom "CA Promo" (le PBI exporte "CA Promo", pas "CA HT Promo")
+    if "CA Promo" in df.columns and "CA HT Promo" not in df.columns:
+        df = df.rename(columns={"CA Promo": "CA HT Promo"})
+
     num_cols = ["CA", "Marge", "CA Hors Promo", "Marge Hors Promo",
                 "CA HT Promo", "Marge Promo", "Qté Vente",
                 "Casse (Valeur)", "Casse (Qté)", "%Marge", "%CA Poids Promo"]
@@ -132,7 +133,6 @@ def load_data(byt, fname):
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    # Libellés courts
     df["lib_art"]    = df["Article"].apply(       lambda s: short_name(s) if pd.notna(s) else None)
     df["code_art"]   = df["Article"].apply(       lambda s: str(s).split(" - ", 1)[0].strip() if pd.notna(s) and " - " in str(s) else None)
     df["lib_site"]   = df["Site nom long"].apply( lambda s: short_name(s) if pd.notna(s) else None)
@@ -140,7 +140,6 @@ def load_data(byt, fname):
     df["lib_fam"]    = df["Famille"].apply(       lambda s: short_name(s) if pd.notna(s) else None)
     df["format"]     = df["Site nom long"].apply( lambda s: get_format(s) if pd.notna(s) else None)
 
-    # Nettoyage : garder uniquement lignes article × site réelles
     df_clean = df[
         df["lib_art"].notna()  & (df["lib_art"]  != "Total") &
         df["lib_site"].notna() & (df["lib_site"] != "Total") &
@@ -240,7 +239,7 @@ if not f_pbi:
     st.markdown("""
 <div class='col-required'><div style='font-size:16px'>📊</div>
 <div><div class='col-name'>Export PBI ventes réseau</div>
-<div class='col-desc'>Excel · Axes : Rayon / Famille / Article / Site nom long · Colonnes : CA, Marge, CA HT Promo, Marge Promo, CA Hors Promo, Marge Hors Promo, Qté Vente, Casse (Valeur)</div>
+<div class='col-desc'>Excel · Axes : Rayon / Famille / Article / Site nom long · Colonnes : CA, Marge, CA Promo, Marge Promo, CA Hors Promo, Marge Hors Promo, Qté Vente, Casse (Valeur)</div>
 <div class='col-desc' style='margin-top:4px'>Le fichier doit inclure tous les formats de magasins (Hyper, Market, Supeco) pour une analyse réseau complète.</div>
 </div></div>""", unsafe_allow_html=True)
 
@@ -354,7 +353,6 @@ flop100 = agg_art[agg_art["CA"] > 5000].nsmallest(100, "TxMarge").copy()
 flop100 = flop100.reset_index(drop=True)
 flop100["Rang"] = range(1, len(flop100) + 1)
 
-# Construire les blocs format pour chaque article du flop
 def build_bloc(article_full, fmt_name):
     rows = art_site[
         (art_site["Article"] == article_full) &
@@ -405,7 +403,6 @@ k6.metric("Casse Réseau",      fmt_pct(tx_casse, dec=2),   fmt(abs(casse_total)
 st.markdown("---")
 st.markdown("<div class='section-label'>Signaux critiques réseau</div>", unsafe_allow_html=True)
 
-# Supeco
 supeco_row = agg_fmt[agg_fmt["format"] == "Supeco"]
 hyper_row  = agg_fmt[agg_fmt["format"] == "Hyper"]
 if not supeco_row.empty and not hyper_row.empty:
@@ -423,7 +420,6 @@ if not supeco_row.empty and not hyper_row.empty:
   <span style='font-size:12px;opacity:.85'>→ Mix produit défavorable et sur-pression promotionnelle dans les Supecos à retravailler.</span>
 </div>""", unsafe_allow_html=True)
 
-# Articles à marge négative
 if nb_art_neg > 0:
     st.markdown(f"""
 <div class='alert-card alert-red'>
@@ -432,7 +428,6 @@ if nb_art_neg > 0:
   <span style='font-size:12px;opacity:.85'>→ Chaque vente de ces articles génère une perte nette. Vérification PA / PV / mécanique promo urgente.</span>
 </div>""", unsafe_allow_html=True)
 
-# Effet promo
 if delta_hp_p > 5:
     st.markdown(f"""
 <div class='alert-card alert-amber'>
@@ -441,7 +436,6 @@ if delta_hp_p > 5:
   <span style='font-size:12px;opacity:.85'>→ Revoir les conditions d'achat promo ou réviser les prix de vente promotionnels.</span>
 </div>""", unsafe_allow_html=True)
 
-# Casse élevée
 sites_casse = agg_site[agg_site["TxCasse"] > 1].sort_values("TxCasse", ascending=False)
 if not sites_casse.empty:
     noms = ", ".join([f"{r['lib_site']} ({r['TxCasse']:.1f}%)" for _, r in sites_casse.iterrows()])
@@ -451,7 +445,6 @@ if not sites_casse.empty:
   <span style='font-size:12px;opacity:.85'>→ Vérifier les procédures de démarque. Un taux > 1% du CA indique un problème opérationnel.</span>
 </div>""", unsafe_allow_html=True)
 
-# Familles sous seuil
 agg_fam = df_f.groupby("lib_fam").agg(CA=("CA","sum"), Marge=("Marge","sum")).reset_index()
 agg_fam["TxMarge"] = (agg_fam["Marge"] / agg_fam["CA"] * 100).where(agg_fam["CA"] > 0)
 fam_sous_seuil = agg_fam[(agg_fam["TxMarge"] < 8) & (agg_fam["CA"] > 500_000)]
@@ -475,7 +468,6 @@ tab1, tab2, tab3, tab4 = st.tabs([
 # ═══ TAB 1 — SYNTHÈSE RÉSEAU ══════════════════════════════════════════════════
 with tab1:
 
-    # Section A : Par format
     st.markdown("<div class='section-label'>Performance par format de magasin</div>", unsafe_allow_html=True)
 
     fmt_cols = st.columns(len(agg_fmt))
@@ -485,7 +477,6 @@ with tab1:
     for i, (_, row) in enumerate(agg_fmt.iterrows()):
         fc, bg, border = fmt_colors.get(row["format"], ("#3A3A3C","#F9F9FB","#CCCCCC"))
         with fmt_cols[i]:
-            ecart_p = row["TxMarge_HP"] - row["TxMarge_Promo"] if pd.notna(row.get("TxMarge_Promo")) else None
             st.markdown(f"""
 <div style='background:{bg};border:1px solid {border};border-radius:12px;padding:16px;margin-bottom:8px'>
   <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:10px'>
@@ -505,7 +496,6 @@ with tab1:
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # Section B : Récap par rayon
     st.markdown("<div class='section-label'>Récapitulatif par rayon — Fond de rayon vs Promotion</div>", unsafe_allow_html=True)
     disp_rax = agg_rax.copy()
     disp_rax["Rayon"]           = disp_rax["lib_rayon"]
@@ -524,15 +514,12 @@ with tab1:
         disp_rax[["Rayon","CA (FCFA)","Poids CA","Marge (FCFA)","Tx Marge",
                   "Tx Marge HP","Tx Marge Promo","Écart HP−Promo","Pds Promo","Tx Casse"]],
         use_container_width=True, hide_index=True,
-        column_config={
-            "Rayon": st.column_config.TextColumn("Rayon", width="medium"),
-        }
+        column_config={"Rayon": st.column_config.TextColumn("Rayon", width="medium")}
     )
     st.caption("Écart HP−Promo : différence entre le taux de marge hors promo et sous promotion — mesure l'érosion causée par la mécanique promotionnelle.")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # Section C : Palmarès magasins
     st.markdown("<div class='section-label'>Palmarès magasins — Classé par taux de marge décroissant</div>", unsafe_allow_html=True)
 
     disp_site = agg_site.copy()
@@ -555,13 +542,12 @@ with tab1:
         }
     )
 
-    # Graphique barres horizontales taux de marge par magasin
     try:
         import plotly.graph_objects as go
         s = agg_site.sort_values("TxMarge")
         colors_bar = []
         for _, r in s.iterrows():
-            if r["format"] == "Hyper":   colors_bar.append("#154360")
+            if r["format"] == "Hyper":    colors_bar.append("#154360")
             elif r["format"] == "Market": colors_bar.append("#145A32")
             else:                         colors_bar.append("#6E2F8A")
 
@@ -597,7 +583,6 @@ with tab2:
     st.caption("Lecture : chaque cellule = taux de marge brute pour ce rayon dans ce magasin · Une cellule vide = aucune vente ce jour-là")
 
     if not mat_pivot.empty:
-        # Afficher avec formatage %
         mat_display = mat_pivot.copy()
         for col in mat_display.columns:
             mat_display[col] = mat_display[col].apply(
@@ -605,30 +590,21 @@ with tab2:
             )
         st.dataframe(mat_display, use_container_width=True)
 
-        # Heatmap plotly
         try:
             import plotly.graph_objects as go
-            import plotly.express as px
 
-            sites_ordered = mat_pivot.columns.tolist()
+            sites_ordered  = mat_pivot.columns.tolist()
             rayons_ordered = mat_pivot.index.tolist()
-            z = mat_pivot.values.tolist()
+            z      = mat_pivot.values.tolist()
             text_z = [[f"{v:.1f}%" if pd.notna(v) else "—" for v in row] for row in z]
 
             fig_h = go.Figure(go.Heatmap(
-                z=z,
-                x=sites_ordered,
-                y=rayons_ordered,
-                text=text_z,
-                texttemplate="%{text}",
+                z=z, x=sites_ordered, y=rayons_ordered,
+                text=text_z, texttemplate="%{text}",
                 textfont=dict(size=12, family="-apple-system, Helvetica Neue"),
                 colorscale=[
-                    [0.0,  "#C0392B"],
-                    [0.25, "#E74C3C"],
-                    [0.45, "#F39C12"],
-                    [0.60, "#F0E68C"],
-                    [0.75, "#A8D5A2"],
-                    [1.0,  "#27AE60"],
+                    [0.0,  "#C0392B"], [0.25, "#E74C3C"], [0.45, "#F39C12"],
+                    [0.60, "#F0E68C"], [0.75, "#A8D5A2"], [1.0,  "#27AE60"],
                 ],
                 showscale=True,
                 colorbar=dict(title="Tx Marge %", ticksuffix="%", len=0.8),
@@ -662,7 +638,6 @@ with tab3:
   </span>
 </div>""", unsafe_allow_html=True)
 
-    # Filtres inline
     fc1, fc2, fc3 = st.columns(3)
     with fc1:
         filtre_rayon_f = st.selectbox("Rayon", ["Tous"] + sorted(flop100["lib_rayon"].dropna().unique().tolist()), key="f100_rayon")
@@ -687,7 +662,6 @@ with tab3:
 
     st.markdown(f"<div style='font-size:12px;color:#8E8E93;margin-bottom:8px'>{len(df_flop)} article(s) affichés</div>", unsafe_allow_html=True)
 
-    # Préparer affichage
     disp_flop = df_flop.copy()
     disp_flop["#"]              = disp_flop["Rang"]
     disp_flop["Article"]        = disp_flop["lib_art"]
@@ -705,8 +679,7 @@ with tab3:
     st.dataframe(
         disp_flop[["#","Article","Rayon","Famille","CA (FCFA)","Marge (FCFA)",
                    "Tx Marge","Pds Promo","Qté","🔵 HYPER","🟢 MARKET","🟣 SUPECO"]],
-        use_container_width=True,
-        hide_index=True,
+        use_container_width=True, hide_index=True,
         column_config={
             "#":          st.column_config.NumberColumn("#",        width=40),
             "Article":    st.column_config.TextColumn("Article",    width="large"),
@@ -738,7 +711,6 @@ with tab4:
 
             wb_exp = Workbook()
 
-            # Styles communs
             C_HDR = "1B2A4A"; C_SUB = "2E4B7A"; C_WH = "FFFFFF"; C_DK = "1A1A2E"
             C_HYP = "154360"; C_MKT = "145A32"; C_SUP = "6E2F8A"
 
@@ -773,11 +745,10 @@ with tab4:
                 ws.row_dimensions[2].height = 16
                 ws.row_dimensions[3].height = 6
 
-            # ── Onglet 1 : Synthèse réseau ────────────────────────────────────
+            # ── Onglet 1 : Synthèse réseau
             ws1 = wb_exp.active; ws1.title = "Synthèse Réseau"
             title_block(ws1, "DIAGNOSTIC RENTABILITÉ RÉSEAU — SYNTHÈSE", span=8)
 
-            # KPIs
             r = 4
             kpi_data = [
                 ("CA Réseau (FCFA)",    f"{ca_total:,.0f}"),
@@ -800,7 +771,6 @@ with tab4:
             ws1.row_dimensions[r].height = 20; ws1.row_dimensions[r+1].height = 28
             r += 3
 
-            # Par format
             ws1.merge_cells(start_row=r, start_column=1, end_row=r, end_column=8)
             c = ws1.cell(row=r, column=1, value="  PERFORMANCE PAR FORMAT")
             c.font = Font("Calibri", size=10, bold=True, color=C_WH)
@@ -830,7 +800,6 @@ with tab4:
                     c.alignment = xrgt() if ci2 in [1,2] else xctr()
                 ws1.row_dimensions[r].height = 20; r += 1
 
-            # Palmarès magasins
             r += 1
             ws1.merge_cells(start_row=r, start_column=1, end_row=r, end_column=8)
             c = ws1.cell(row=r, column=1, value="  PALMARÈS MAGASINS — classé par taux de marge décroissant")
@@ -857,7 +826,7 @@ with tab4:
 
             ws1.freeze_panes = "A4"
 
-            # ── Onglet 2 : Récap rayon ────────────────────────────────────────
+            # ── Onglet 2 : Récap rayon
             ws2 = wb_exp.create_sheet("Récap Rayon")
             title_block(ws2, "RÉCAPITULATIF PAR RAYON — Fond de Rayon vs Promotion", span=10)
             write_header_row(ws2, 4,
@@ -882,11 +851,11 @@ with tab4:
                 ws2.row_dimensions[r4].height = 20
             ws2.freeze_panes = "A5"
 
-            # ── Onglet 3 : Matrice ────────────────────────────────────────────
+            # ── Onglet 3 : Matrice
             ws3 = wb_exp.create_sheet("Matrice Marge")
             title_block(ws3, "MATRICE TAUX DE MARGE — RAYON × MAGASIN", span=len(mat_pivot.columns)+2)
             ws3.cell(row=4, column=1, value="Rayon").font = Font("Calibri", size=10, bold=True, color=C_WH)
-            ws3.cell(row=4, column=1).fill   = xfill(C_SUB)
+            ws3.cell(row=4, column=1).fill      = xfill(C_SUB)
             ws3.cell(row=4, column=1).alignment = xctr()
             ws3.cell(row=4, column=1).border    = xbdr()
             ws3.column_dimensions["A"].width = 22
@@ -912,7 +881,7 @@ with tab4:
                 ws3.row_dimensions[r5].height = 28
             ws3.freeze_panes = "B5"
 
-            # ── Onglet 4 : Flop 100 ──────────────────────────────────────────
+            # ── Onglet 4 : Flop 100
             ws4 = wb_exp.create_sheet("Flop 100")
             title_block(ws4, f"FLOP {len(flop100)} — DESTRUCTEURS DE MARGE · Taux de marge par bloc magasin", span=12)
             ws4.merge_cells("A3:L3")
@@ -928,7 +897,6 @@ with tab4:
                       "🟣 SUPECO — Tx marge % par site"]
             wdths4 = [5, 44, 16, 24, 13, 13, 10, 10, 8, 42, 46, 50]
 
-            # En-têtes avec couleurs blocs
             bloc_bg = {9: C_HYP, 10: C_MKT, 11: C_SUP}
             for ci6, (h, w) in enumerate(zip(hdrs4, wdths4)):
                 bg6 = bloc_bg.get(ci6, C_SUB)
@@ -959,11 +927,11 @@ with tab4:
                     c.font  = Font("Calibri", size=10 if ci6<9 else 9, color=C_DK)
                     c.fill  = xfill(cell_bg); c.border = xbdr()
                     if f6: c.number_format = f6
-                    if ci6 == 0:   c.font = Font("Calibri", size=10, bold=True, color=C_DK); c.alignment = xctr()
-                    elif ci6 in [4,5]:  c.alignment = xrgt()
+                    if ci6 == 0:         c.font = Font("Calibri", size=10, bold=True, color=C_DK); c.alignment = xctr()
+                    elif ci6 in [4,5]:   c.alignment = xrgt()
                     elif ci6 in [6,7,8]: c.alignment = xctr()
-                    elif ci6 >= 9: c.alignment = xlft(w=True)
-                    else: c.alignment = xlft(w=(ci6 in [1,3]))
+                    elif ci6 >= 9:       c.alignment = xlft(w=True)
+                    else:                c.alignment = xlft(w=(ci6 in [1,3]))
                 ws4.row_dimensions[r6].height = 30
 
             ws4.freeze_panes = "A5"
