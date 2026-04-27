@@ -1,10 +1,16 @@
 """
-SmartBuyer · On Time In Full — v6
-──────────────────────────────────
-Nouveauté v6 : la liste de surveillance affiche la CLASSE de l'article
-  - load_watchlist retourne un dict {code: classe} (ex: {"10001801": "GOLD"})
-  - La colonne "Surveillance" affiche la classe (GOLD, SILVER, A, B…) au lieu de ⭐
-  - Partout : fond doré Excel + filtre conservés, label = classe
+SmartBuyer · On Time In Full — v6.1 (fix KeyError is_watched)
+─────────────────────────────────────────────────────────────
+Correction v6.1 :
+  - `is_watched` ajouté dans les sélections de colonnes (detail_cols, export_df)
+    avant tout sort_values qui s'en sert.
+  - Tri défensif partout : on ne trie que sur les colonnes réellement présentes.
+  - `is_watched` retiré juste avant l'écriture Excel pour ne pas polluer l'export.
+
+Nouveauté v6 (préservée) :
+  - load_watchlist retourne un dict {code: classe}.
+  - Colonne "Surveillance" affiche la classe (GOLD, SILVER, A, B…).
+  - Fond doré Excel + filtre conservés, label = classe.
 """
 
 import streamlit as st
@@ -160,6 +166,24 @@ SEUIL_SURVEILLER = 90
 
 WATCH_GOLD_HEX  = "FFD60A"
 WATCH_LIGHT_HEX = "FFFDE7"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# HELPER GÉNÉRIQUE — Tri défensif
+# ══════════════════════════════════════════════════════════════════════════════
+def safe_sort(df: pd.DataFrame, keys, ascending) -> pd.DataFrame:
+    """
+    Trie un DataFrame uniquement sur les colonnes réellement présentes.
+    Évite les KeyError si une colonne attendue est manquante.
+    """
+    if df is None or df.empty:
+        return df
+    present = [(k, a) for k, a in zip(keys, ascending) if k in df.columns]
+    if not present:
+        return df
+    cols = [k for k, _ in present]
+    asc  = [a for _, a in present]
+    return df.sort_values(cols, ascending=asc)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -373,9 +397,14 @@ def prepare_dataset(df: pd.DataFrame, exclude_technical: bool = True,
     work["otif"]    = ((work["qte_rec_retained"] >= work["qte_cde"]) & work["on_time"]).astype(int)
     work["criticality_score"] = work["service_gap_value"] * (1 - work["line_fill_rate"])
 
-    # ── FLAG SURVEILLANCE : colonne "watch_classe" = classe ou "" 
-    if watchdict and "Code" in work.columns:
-        work["code_str"]    = work["Code"].apply(normalise_code)
+    # ── FLAG SURVEILLANCE : colonnes "watch_classe" + "is_watched" + "code_str"
+    # Toujours créées (avec valeurs neutres si pas de watchdict) pour éviter les KeyError ailleurs
+    if "Code" in work.columns:
+        work["code_str"] = work["Code"].apply(normalise_code)
+    else:
+        work["code_str"] = ""
+
+    if watchdict:
         work["watch_classe"] = work["code_str"].map(watchdict).fillna("")
         work["is_watched"]   = work["watch_classe"] != ""
     else:
@@ -485,7 +514,8 @@ def agg_article(df: pd.DataFrame, watchdict: dict = None) -> pd.DataFrame:
         g["code_str"]  = g["Code"].apply(normalise_code)
         g["Classe"]    = g["code_str"].map(watchdict).fillna("")
     else:
-        g["Classe"] = ""
+        g["code_str"]  = g["Code"].apply(normalise_code) if "Code" in g.columns else ""
+        g["Classe"]    = ""
     return g
 
 
@@ -568,9 +598,9 @@ def render_kpi_row(kpi: dict, watch_kpi: dict = None):
 # ══════════════════════════════════════════════════════════════════════════════
 # EXPORT EXCEL — helpers couleur classe
 # ══════════════════════════════════════════════════════════════════════════════
-GOLD_FILL  = PatternFill("solid", fgColor=WATCH_GOLD_HEX)
-GOLDL_FILL = PatternFill("solid", fgColor=WATCH_LIGHT_HEX)
-SILVER_FILL = PatternFill("solid", fgColor="E8E8E8")
+GOLD_FILL    = PatternFill("solid", fgColor=WATCH_GOLD_HEX)
+GOLDL_FILL   = PatternFill("solid", fgColor=WATCH_LIGHT_HEX)
+SILVER_FILL  = PatternFill("solid", fgColor="E8E8E8")
 SILVERL_FILL = PatternFill("solid", fgColor="F5F5F5")
 
 
@@ -622,6 +652,7 @@ def build_export_excel(df, by_supplier, by_site, by_article, quality,
     H_FONT = Font(bold=True, color="FFFFFF", size=11)
     CTR    = Alignment(horizontal="center", vertical="center")
 
+    # ── Onglet 1 : Synthèse qualité
     ws1 = wb.active
     ws1.title = "Synthese"
     synthese = pd.DataFrame([
@@ -642,35 +673,51 @@ def build_export_excel(df, by_supplier, by_site, by_article, quality,
     art_cols = list(by_article.columns)
     classe_idx = (art_cols.index("Classe") + 1) if "Classe" in art_cols else None
 
+    # by_article peut contenir code_str (technique) → on l'enlève pour l'export
+    by_article_export = by_article.drop(columns=["code_str"], errors="ignore")
+    art_cols_export = list(by_article_export.columns)
+    classe_idx_export = (art_cols_export.index("Classe") + 1) if "Classe" in art_cols_export else None
+
     _xl_write_sheet(wb.create_sheet("Par fournisseur"), "Analyse fournisseur", by_supplier, H_FILL, H_FONT, CTR)
     _xl_write_sheet(wb.create_sheet("Par magasin"),     "Analyse magasin",     by_site,     H_FILL, H_FONT, CTR)
-    _xl_write_sheet(wb.create_sheet("Par article"),     "Analyse article",     by_article,  H_FILL, H_FONT, CTR,
-                    classe_col_idx=classe_idx)
+    _xl_write_sheet(wb.create_sheet("Par article"),     "Analyse article",     by_article_export,  H_FILL, H_FONT, CTR,
+                    classe_col_idx=classe_idx_export)
 
-    # Onglet Articles Surveillés
-    if watchdict and "is_watched" in df.columns:
-        watched_art = by_article[by_article["Classe"] != ""].copy() if "Classe" in by_article.columns else pd.DataFrame()
+    # ── Onglet Articles Surveillés
+    if watchdict and "Classe" in by_article_export.columns:
+        watched_art = by_article_export[by_article_export["Classe"] != ""].copy()
         if not watched_art.empty:
             ws_w = wb.create_sheet("⭐ Articles surveillés")
             _xl_write_sheet(ws_w, "Articles de la liste surveillance", watched_art, H_FILL, H_FONT, CTR,
-                            classe_col_idx=classe_idx)
+                            classe_col_idx=classe_idx_export)
             for i in range(1, len(watched_art.columns) + 1):
                 c = ws_w.cell(3, i)
                 c.fill = PatternFill("solid", fgColor=WATCH_GOLD_HEX)
                 c.font = Font(bold=True, color="1C1C1E", size=11)
 
-    # Lignes critiques
+    # ── Lignes critiques (FIX KeyError : is_watched inclus pour le tri puis retiré)
     detail_cols = [c for c in [
         "date_received", "date_expected", "site_label", "supplier_name",
         "Code", "article_label", "N° Cde", "qte_cde", "qte_rec_retained",
-        "qty_missing", "service_gap_value", "on_time", "otif", "delay_days", "watch_classe",
+        "qty_missing", "service_gap_value", "on_time", "otif", "delay_days",
+        "watch_classe", "is_watched",   # ← inclus pour permettre le tri
     ] if c in df.columns]
-    crit = (df[df["otif"] == 0][detail_cols]
-            .sort_values(["is_watched", "qty_missing", "service_gap_value"],
-                         ascending=[False, False, False])
-            .head(500))
+
+    crit = df[df["otif"] == 0][detail_cols].copy()
+
+    # Tri défensif sur les clés disponibles
+    crit = safe_sort(crit,
+                     keys=["is_watched", "qty_missing", "service_gap_value"],
+                     ascending=[False, False, False])
+    crit = crit.head(500)
+
+    # is_watched servait uniquement au tri → on le retire de l'export
+    if "is_watched" in crit.columns:
+        crit = crit.drop(columns=["is_watched"])
+
     if "watch_classe" in crit.columns:
-        crit = crit.copy().rename(columns={"watch_classe": "Classe"})
+        crit = crit.rename(columns={"watch_classe": "Classe"})
+
     crit_classe_idx = (list(crit.columns).index("Classe") + 1) if "Classe" in crit.columns else None
     _xl_write_sheet(wb.create_sheet("Lignes critiques"), "Lignes non OTIF", crit, H_FILL, H_FONT, CTR,
                     classe_col_idx=crit_classe_idx)
@@ -769,7 +816,8 @@ def build_fiche_excel(fournisseur: str, df_all: pd.DataFrame, df_bad: pd.DataFra
     ws2.append([])
     headers2 = ["Magasin", "Fill Rate", "Vol. manquant", "Impact CA proxy (FCFA)", "Cmdes", "Articles"]
     write_header_row(ws2, 3, headers2)
-    for _, r in site_recap.sort_values("qty_missing", ascending=False).iterrows():
+    site_recap_sorted = safe_sort(site_recap, keys=["qty_missing"], ascending=[False])
+    for _, r in site_recap_sorted.iterrows():
         ws2.append([r.get("site_label",""), r.get("Fill Rate",""), r.get("Vol. manquant",""),
                     r.get("Impact CA proxy",""), r.get("nb_cdes",""), r.get("nb_articles","")])
         n = ws2.max_row
@@ -976,8 +1024,11 @@ def build_export_all_fiches(df: pd.DataFrame, by_supplier: pd.DataFrame,
     mask = (df["line_fill_rate"] < seuil / 100) | (df["otif"] == 0)
     export_df = df[mask].copy()
     export_df = export_df.merge(sup_meta, on="supplier_name", how="left")
-    export_df = export_df.sort_values(
-        ["is_watched", "crit_sup", "qty_missing", "service_gap_value"],
+
+    # Tri défensif (is_watched peut être absent en théorie)
+    export_df = safe_sort(
+        export_df,
+        keys=["is_watched", "crit_sup", "qty_missing", "service_gap_value"],
         ascending=[False, False, False, False],
     )
 
@@ -1046,7 +1097,7 @@ def build_export_all_fiches(df: pd.DataFrame, by_supplier: pd.DataFrame,
             c.font = Font(bold=True, color="1C1C1E", size=10)
             c.alignment = CTR; c.border = THIN
 
-        watched_rows = export_df[export_df["is_watched"] == True]
+        watched_rows = export_df[export_df["is_watched"] == True] if "is_watched" in export_df.columns else export_df.iloc[0:0]
         for _, row in watched_rows.iterrows():
             fr     = row.get("line_fill_rate", np.nan)
             ot     = row.get("otif", 0)
@@ -1131,7 +1182,6 @@ def build_recap_fournisseur_excel(df: pd.DataFrame, watchdict: dict = None) -> B
     GRN_FILL  = PatternFill("solid", fgColor="E8F8EE")
     AMB_FILL  = PatternFill("solid", fgColor="FFF8E8")
     RED_FILL  = PatternFill("solid", fgColor="FFF0F0")
-    GOLD_L    = PatternFill("solid", fgColor="FFFDE7")
     CTR       = Alignment(horizontal="center", vertical="center")
     LFT       = Alignment(horizontal="left",   vertical="center")
     THIN_SIDE = Side(style="thin", color="E5E5EA")
@@ -1172,9 +1222,6 @@ def build_recap_fournisseur_excel(df: pd.DataFrame, watchdict: dict = None) -> B
     ws.row_dimensions[hdr_row].height = 30
 
     # ── Agrégation par fournisseur
-    # Refs totales = nb de codes distincts commandés
-    # Refs livrées = nb de codes distincts avec au moins 1 unité reçue
-    # Sites impactés = sites où fill rate < 100% (au moins une ligne incomplète)
     grp = df.groupby(["Fou", "supplier_name"], as_index=False)
 
     agg = grp.agg(
@@ -1693,8 +1740,12 @@ with tab4:
 
 # ── Tab 5 : Lignes critiques
 with tab5:
-    crit_lines = view[view["otif"] == 0].sort_values(["is_watched","qty_missing","service_gap_value"], ascending=[False,False,False])
-    pct_non_otif = len(crit_lines) / len(view) * 100
+    crit_lines = safe_sort(
+        view[view["otif"] == 0],
+        keys=["is_watched","qty_missing","service_gap_value"],
+        ascending=[False,False,False],
+    )
+    pct_non_otif = len(crit_lines) / len(view) * 100 if len(view) > 0 else 0
     st.caption(f"{len(crit_lines):,} lignes non OTIF sur {len(view):,} ({pct_non_otif:.1f}%) — articles surveillés remontés en tête avec leur classe")
     dcols = [c for c in ["watch_classe","date_received","date_expected","site_label","supplier_name","Code","article_label","N° Cde","qte_cde","qte_rec_retained","qty_missing","service_gap_value","delay_days"] if c in crit_lines.columns]
     dl = crit_lines[dcols].copy()
@@ -1734,7 +1785,11 @@ with tab7:
         st.markdown("<div class='alert-card alert-blue'><strong>ℹ️ Comment utiliser la Fiche Fournisseur ?</strong><br><br>1. Sélectionnez un fournisseur dans la sidebar<br>2. Ajustez le seuil Fill Rate<br>3. Téléchargez la fiche Excel (colonne Classe incluse si liste chargée)</div>", unsafe_allow_html=True)
     else:
         fiche_df  = view[view["supplier_name"] == fiche_supplier].copy()
-        fiche_bad = fiche_df[fiche_df["line_fill_rate"] < seuil_fill / 100].sort_values(["is_watched","qty_missing","service_gap_value"], ascending=[False,False,False])
+        fiche_bad = safe_sort(
+            fiche_df[fiche_df["line_fill_rate"] < seuil_fill / 100],
+            keys=["is_watched","qty_missing","service_gap_value"],
+            ascending=[False,False,False],
+        )
         fkpi      = compute_global_kpis(fiche_df)
         col_txt   = score_color(fkpi["score"])
 
