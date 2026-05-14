@@ -594,16 +594,16 @@ def export_excel(df_all, periodes):
 
     ws_neg.merge_cells('A2:J2')
     cn2 = ws_neg.cell(row=2, column=1,
-        value='  Toutes periodes confondues -- Trie par remise necessaire decroissante -- Utiliser ce tableau en preparation des rendez-vous fournisseurs')
+        value=f'  Periode : {periode_latest}  --  Trie par remise necessaire decroissante  --  Utiliser ce tableau en preparation des rendez-vous fournisseurs')
     cn2.font = Font('Calibri', size=9, italic=True, color='AABBCC')
     cn2.fill = xfill(C_HDR); cn2.alignment = xlft()
     ws_neg.row_dimensions[2].height = 16
 
     # En-têtes
-    NEG_HDRS = ['Rayon','Famille','Acheteur','CA (FCFA)','Marge (FCFA)',
+    NEG_HDRS = ['Rayon','Famille','Magasin','Acheteur','CA (FCFA)','Marge (FCFA)',
                 'Taux actuel','Cible','Dev. N-1 (pts)',
                 'Remise necessaire FCFA','Action a mener']
-    NEG_W    = [20, 30, 20, 14, 14, 12, 12, 13, 18, 44]
+    NEG_W    = [20, 30, 24, 20, 14, 14, 12, 12, 13, 18, 44]
     for j, (h, w) in enumerate(zip(NEG_HDRS, NEG_W), 1):
         c = ws_neg.cell(row=3, column=j, value=h)
         c.font = Font('Calibri', size=9, bold=True, color=C_WH)
@@ -612,9 +612,11 @@ def export_excel(df_all, periodes):
         ws_neg.column_dimensions[get_column_letter(j)].width = w
     ws_neg.row_dimensions[3].height = 28
 
-    # Données — toutes périodes, statut rouge uniquement, triées par remise décroissante
+    # Données — période la plus récente uniquement, statut rouge, agrégé par Rayon+Famille+Acheteur
+    periode_latest = sorted(df_all['Periode'].unique())[-1]
     df_neg = df_all[
-        df_all['Statut'] == '🔴 Action requise'
+        (df_all['Periode'] == periode_latest) &
+        (df_all['Statut'] == '🔴 Action requise')
     ].copy()
     df_neg = df_neg.sort_values('Remise_Necessaire_FCFA', ascending=False)
 
@@ -623,6 +625,7 @@ def export_excel(df_all, periodes):
         neg_vals = [
             r.get('Rayon_court', ''),
             r.get('SF_court', ''),
+            r.get('Site nom long', '—') if 'Site nom long' in r.index else '—',
             r.get('Acheteur', ''),
             r.get('CA', None),
             r.get('Marge', None),
@@ -632,17 +635,17 @@ def export_excel(df_all, periodes):
             r.get('Remise_Necessaire_FCFA', None),
             r.get('Que_faire', ''),
         ]
-        NEG_FMTS = [None, None, None, '#,##0', '#,##0', '0.0%', '0.0%',
+        NEG_FMTS = [None, None, None, None, '#,##0', '#,##0', '0.0%', '0.0%',
                     '+0.0%;-0.0%;-', '#,##0', None]
         for j, (v, f) in enumerate(zip(neg_vals, NEG_FMTS), 1):
             c = ws_neg.cell(row=i, column=j, value=v)
-            c.fill = xfill('FFE8E8' if j == 9 and (v or 0) > 500000 else bg)
+            c.fill = xfill('FFE8E8' if j == 10 and (v or 0) > 500000 else bg)
             c.font = Font('Calibri', size=9,
-                          bold=(j == 9 and (v or 0) > 500000),
-                          color='CC2200' if j == 9 and (v or 0) > 500000 else '1A1A2E')
+                          bold=(j == 10 and (v or 0) > 500000),
+                          color='CC2200' if j == 10 and (v or 0) > 500000 else '1A1A2E')
             c.alignment = Alignment(
-                horizontal='right' if j in (4, 5, 9) else 'center' if j in (6, 7, 8) else 'left',
-                vertical='center', wrap_text=(j == 10))
+                horizontal='right' if j in (5, 6, 10) else 'center' if j in (7, 8, 9) else 'left',
+                vertical='center', wrap_text=(j == 11))
             c.border = xbdr()
             if f: c.number_format = f
         ws_neg.row_dimensions[i].height = 18
@@ -653,7 +656,7 @@ def export_excel(df_all, periodes):
     ct = ws_neg.cell(row=r_tot_neg, column=1, value='TOTAL REMISE NECESSAIRE POUR ATTEINDRE LES CIBLES')
     ct.font = Font('Calibri', size=10, bold=True, color=C_WH)
     ct.fill = xfill(C_HDR); ct.alignment = xlft()
-    cv = ws_neg.cell(row=r_tot_neg, column=9,
+    cv = ws_neg.cell(row=r_tot_neg, column=10,
                      value=df_neg['Remise_Necessaire_FCFA'].sum())
     cv.font      = Font('Calibri', size=11, bold=True, color=C_WH)
     cv.fill      = xfill('CC2200')
@@ -661,7 +664,7 @@ def export_excel(df_all, periodes):
     cv.alignment = xctr(); cv.border = xbdr()
     ws_neg.row_dimensions[r_tot_neg].height = 24
     ws_neg.freeze_panes = 'A4'
-    ws_neg.auto_filter.ref = f'A3:J{r_tot_neg - 1}'
+    ws_neg.auto_filter.ref = f'A3:K{r_tot_neg - 1}'
 
     # ── Onglet Lexique ─────────────────────────────────────────────────────────
     ws_lex = wb.create_sheet("Lexique et Statuts")
