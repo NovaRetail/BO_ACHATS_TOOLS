@@ -317,10 +317,10 @@ def export_excel(df_all, periodes):
         ws.row_dimensions[2].height = 16
 
         HDRS = ['Rayon','Famille','Segment','Source cible','Acheteur',
-                'CA (FCFA)','Taux actuel','Taux N-1','Cible','Plancher',
+                'CA (FCFA)','Marge (FCFA)','Taux actuel','Taux N-1','Cible','Plancher',
                 'Dév. N-1 (pts)','Dév. Cible (pts)','Marge Δ FCFA','Score Impact',
                 'Statut','Que faire ?']
-        WIDTHS = [20,30,16,18,18,14,12,12,12,12,14,14,16,13,16,46]
+        WIDTHS = [20,30,16,18,18,14,14,12,12,12,12,14,14,16,13,16,46]
         write_header_row(ws, 3, HDRS, WIDTHS)
 
         C_R='FFD6D6'; C_O='FFF3CC'; C_G='D6F5D6'; C_L='F7F7F7'; C_W='FFFFFF'
@@ -335,6 +335,7 @@ def export_excel(df_all, periodes):
                 r.get('Source_cible',''),
                 r.get('Acheteur',''),
                 r.get('CA', None),
+                r.get('Marge', None),
                 r.get('%Marge', None),
                 r.get('Tx_N1', None),
                 r.get('Cible', None),
@@ -346,18 +347,163 @@ def export_excel(df_all, periodes):
                 stat,
                 r.get('Que_faire',''),
             ]
-            FMTS = [None,None,None,None,None,'#,##0','0.0%','0.0%','0.0%','0.0%',
+            FMTS = [None,None,None,None,None,'#,##0','#,##0','0.0%','0.0%','0.0%','0.0%',
                     '+0.0%;-0.0%;-','+0.0%;-0.0%;-','+#,##0;-#,##0;-','#,##0',None,None]
             for j, (v, f) in enumerate(zip(vals, FMTS), 1):
                 c = ws.cell(row=i, column=j, value=v)
                 c.fill = xfill(bg); c.border = xbdr()
                 c.font = Font('Calibri', size=10 if j < 15 else 9, color=C_DK)
                 if f: c.number_format = f
-                c.alignment = xctr() if j in (7,8,9,10,11,12,15) else xrgt() if j in (6,13,14) else xlft(w=(j==16))
+                c.alignment = xctr() if j in (8,9,10,11,12,13,16) else xrgt() if j in (6,7,14,15) else xlft(w=(j==17))
             ws.row_dimensions[i].height = 16
 
         ws.freeze_panes = 'A4'
         ws.auto_filter.ref = f'A3:{get_column_letter(len(HDRS))}{3+len(df)}'
+
+    # ── Onglet Lexique ─────────────────────────────────────────────────────────
+    ws_lex = wb.create_sheet("Lexique et Statuts")
+    ws_lex.sheet_view.showGridLines = False
+    ws_lex.column_dimensions['A'].width = 26
+    ws_lex.column_dimensions['B'].width = 50
+    ws_lex.column_dimensions['C'].width = 54
+
+    def lex_title(ws, row, txt):
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=3)
+        c = ws.cell(row=row, column=1, value=txt)
+        c.font = Font('Calibri', size=13, bold=True, color=C_WH)
+        c.fill = xfill(C_HDR); c.alignment = xctr()
+        ws.row_dimensions[row].height = 30
+
+    def lex_section(ws, row, txt):
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=3)
+        c = ws.cell(row=row, column=1, value=txt)
+        c.font = Font('Calibri', size=10, bold=True, color=C_WH)
+        c.fill = xfill(C_SUB); c.alignment = xlft()
+        ws.row_dimensions[row].height = 22
+
+    def lex_hdr(ws, row, cols):
+        for j, t in enumerate(cols, 1):
+            c = ws.cell(row=row, column=j, value=t)
+            c.font = Font('Calibri', size=9, bold=True, color='3A3A3C')
+            c.fill = xfill('F2F2F7'); c.alignment = xctr(); c.border = xbdr()
+        ws.row_dimensions[row].height = 20
+
+    def lex_row(ws, row, vals, bg='FFFFFF', h=45, bold1=False):
+        for j, v in enumerate(vals, 1):
+            c = ws.cell(row=row, column=j, value=v)
+            c.font = Font('Calibri', size=9, bold=(bold1 and j == 1), color='1A1A2E')
+            c.fill = xfill(bg)
+            c.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
+            c.border = xbdr()
+        ws.row_dimensions[row].height = h
+
+    lex_title(ws_lex, 1, "GUIDE DE LECTURE ET LEXIQUE  --  MODULE RENTABILITE SMARTBUYER v2.2")
+
+    # BLOC 1 : Colonnes cles
+    lex_section(ws_lex, 2, "  1.  DEFINITION DES COLONNES CLES")
+    lex_hdr(ws_lex, 3, ["Colonne", "Ce que ca mesure", "Comment le lire"])
+
+    COLS_DEF = [
+        ("Taux actuel",
+         "Taux de marge brute realise sur la periode chargee.\nFormule : Marge / CA x 100",
+         "Ex : 18,5 %  ->  sur 100 FCFA vendus, 18,5 FCFA restent en marge avant charges."),
+        ("Taux N-1",
+         "Taux de marge de la meme periode l'annee precedente.\nSert de reference historique.",
+         "Ex : 22,0 % en N-1 vs 18,5 % aujourd'hui  ->  la famille a perdu 3,5 pts en un an."),
+        ("Cible",
+         "Objectif de taux fixe avec la direction.\nFormule : MAX(Taux N-1 x 1,02 ; Plancher segment)",
+         "Ex : N-1 = 22 %  ->  Cible = 22,44 %.\nSi pas d'historique N-1 (nouveaute)  ->  Cible = Plancher segment."),
+        ("Plancher",
+         "Taux de marge minimum absolu selon la nature de la famille.\nEn dessous = non rentable.",
+         "Produit d'appel : 10 %   Coeur de gamme : 18 %\nValeur ajoutee : 25 %   PH / Droguerie : 22 %"),
+        ("Dev. N-1 (pts)",
+         "Ecart en points entre le taux actuel et le taux N-1.\nMesure la progression ou regression vs l'an dernier.",
+         "Ex : -3,5 pts  ->  la marge a recule de 3,5 points vs N-1.\nEx : +2,1 pts  ->  la marge a progresse."),
+        ("Dev. Cible (pts)",
+         "Ecart en points entre le taux actuel et la cible fixee.\nMesure l'atteinte de l'objectif.",
+         "Ex : -4,0 pts  ->  l'acheteur est 4 points sous son objectif.\nAction requise si ecart > 3 pts."),
+        ("Marge delta FCFA",
+         "Marge gagnee ou perdue en valeur vs N-1 sur la periode.\nFormule : Dev. N-1 (pts) x CA",
+         "Ex : -432 000 FCFA  ->  sur cette semaine, 432 000 FCFA de marge en moins vs N-1.\nIndicateur de l'impact financier reel."),
+        ("Score Impact",
+         "Indicateur de priorite : marge perdue ponderee par le volume de la famille.",
+         "Ex : Riz Long score 850 000  vs  Chips score 48 000.\nRiz Long est prioritaire meme si son ecart en % est plus faible car il pese plus en volume."),
+        ("Source cible",
+         "Indique comment la cible a ete calculee pour cette famille.",
+         '"N-1 x 1,02"  ->  calcule depuis l historique N-1.\n"Plancher segment (nouveaute)"  ->  article sans historique, compare uniquement vs plancher.'),
+    ]
+
+    for i, row_data in enumerate(COLS_DEF):
+        bg = 'FFFFFF' if i % 2 == 0 else 'F7F7F7'
+        lex_row(ws_lex, 4 + i, list(row_data), bg=bg, h=45, bold1=True)
+
+    # BLOC 2 : Statuts
+    r2 = 4 + len(COLS_DEF) + 1
+    lex_section(ws_lex, r2, "  2.  GUIDE DES STATUTS  --  QUE FAIRE SELON L'ALERTE")
+    lex_hdr(ws_lex, r2 + 1, ["Statut", "Signification et seuil", "Exemple concret + action recommandee"])
+
+    STATUTS = [
+        ("OK",            "D8F5D8", "145A32",
+         "Taux actuel >= Cible - 1,5 pt.\nLa famille tient son objectif de marge.",
+         "Cafe Soluble : Taux 21,8 %  Cible 21,0 %  Dev. +0,8 pt\n-> RAS. Surveiller que la tendance se maintienne la semaine suivante."),
+        ("VIGILANCE",     "FEF9C3", "854D0E",
+         "Taux actuel entre Cible - 1,5 pt et Cible - 3 pts.\nDegradation en cours, pas encore critique.",
+         "Biscuits : Taux 19,2 %  Cible 21,5 %  Dev. -2,3 pts\n-> Verifier si une promo en cours erode la marge. A surveiller cette semaine."),
+        ("ACTION REQUISE","FFD6D6", "991B1B",
+         "Taux actuel < Cible - 3 pts.\nDegradation significative. Intervention acheteur necessaire cette semaine.",
+         "Huile : Taux 8,1 %  Cible 12,0 %  Dev. -3,9 pts  Marge delta -680 000 FCFA\n-> Contacter le fournisseur cette semaine. Verifier le prix d'achat et suspendre toute promo deficitaire."),
+        ("N/A",           "F3F4F6", "6B7280",
+         "Pas de donnees N-1 disponibles.\nComparaison historique impossible.",
+         "Nouveau referencement lance ce mois-ci : pas d'historique N-1.\n-> Comparer uniquement vs la Cible Plancher segment. Surveiller des la periode suivante."),
+    ]
+
+    for i, (stat, bg, fg, seuil, exemple) in enumerate(STATUTS):
+        r = r2 + 2 + i
+        for j, v in enumerate([stat, seuil, exemple], 1):
+            c = ws_lex.cell(row=r, column=j, value=v)
+            c.fill = xfill(bg)
+            c.font = Font('Calibri', size=9, bold=(j == 1), color=fg if j == 1 else '1A1A2E')
+            c.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
+            c.border = xbdr()
+        ws_lex.row_dimensions[r].height = 60
+
+    # BLOC 3 : Segments
+    r3 = r2 + 2 + len(STATUTS) + 1
+    lex_section(ws_lex, r3, "  3.  SEGMENTATION DES FAMILLES  --  PLANCHERS DE MARGE")
+    lex_hdr(ws_lex, r3 + 1, ["Segment", "Plancher P&L", "Familles concernees"])
+
+    SEGMENTS = [
+        ("Produit d'appel",  "FFF3E0", "B25000", "10 %",
+         "Riz Long, Huiles, Laits, Eaux, Sucres, Farines, Pates, Semoules, Bouillon, Legumes secs\n-> Prix contraints par le marche. Ne pas viser 21 % : structurellement impossible."),
+        ("Coeur de gamme",   "E3F2FD", "0D47A1", "18 %",
+         "PGC standard Epicerie et Boissons non classes ailleurs.\n-> Objectif atteignable via negociation fournisseur et calibrage promo."),
+        ("Valeur ajoutee",   "E8F5E9", "1B5E20", "25 %",
+         "BIO, Chips, Snacking, Soins visage/corps, Complements, Produits du monde, Diet.\n-> Moins de concurrence prix. Marge < 25 % doit alerter l'acheteur."),
+        ("PH / Droguerie",   "FCE4EC", "880E4F", "22 %",
+         "Tout le rayon Parfumerie Hygiene et Droguerie.\n-> Structurellement plus riche. En dessous de 22 % : investiguer la pression promo."),
+    ]
+
+    for i, (seg, bg, fg, plancher, fam) in enumerate(SEGMENTS):
+        r = r3 + 2 + i
+        for j, v in enumerate([seg, plancher, fam], 1):
+            c = ws_lex.cell(row=r, column=j, value=v)
+            c.fill = xfill(bg)
+            c.font = Font('Calibri', size=9, bold=(j in (1, 2)), color=fg if j in (1, 2) else '1A1A2E')
+            c.alignment = Alignment(horizontal='center' if j == 2 else 'left',
+                                    vertical='center', wrap_text=True)
+            c.border = xbdr()
+        ws_lex.row_dimensions[r].height = 50
+
+    # Note bas de page
+    r_note = r3 + 2 + len(SEGMENTS) + 1
+    ws_lex.merge_cells(start_row=r_note, start_column=1, end_row=r_note, end_column=3)
+    c = ws_lex.cell(row=r_note, column=1,
+        value="SmartBuyer Hub v2.2  --  NovaRetail Solutions  --  "
+              "Les cibles sont revisables chaque debut d'exercice via le referentiel embarque.")
+    c.font = Font('Calibri', size=8, italic=True, color='8E8E93')
+    c.fill = xfill('F9F9FB')
+    c.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    ws_lex.row_dimensions[r_note].height = 20
 
     buf = BytesIO(); wb.save(buf); buf.seek(0)
     return buf
