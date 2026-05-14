@@ -1095,12 +1095,16 @@ with tab1:
     if len(rouge) == 0:
         st.markdown("<div class='alert-card alert-green'>✅ Aucune famille en alerte rouge cette période.</div>", unsafe_allow_html=True)
     else:
-        disp = rouge[['Rayon_court','SF_court','Segment','Acheteur','CA',
-                      '%Marge','Tx_N1','Dev_N1_pts','Dev_N1_FCFA','Impact_Score',
-                      'Cible','Source_cible','Dev_Cible_pts','Statut','Que_faire']].copy()
-        disp.columns = ['Rayon','Famille','Segment','Acheteur','CA (FCFA)',
-                        'Taux act.','Taux N-1','Dév. N-1','Marge Δ FCFA','Score Impact',
-                        'Cible','Source cible','Dév. Cible','Statut','Que faire ?']
+        has_site_r = 'Site nom long' in rouge.columns and rouge['Site nom long'].notna().any()
+        cols_r = ['Rayon_court','SF_court','Segment','Acheteur']
+        names_r = ['Rayon','Famille','Segment','Acheteur']
+        if has_site_r:
+            cols_r.insert(2, 'Site nom long')
+            names_r.insert(2, 'Magasin')
+        cols_r  += ['CA','%Marge','Tx_N1','Dev_N1_pts','Dev_N1_FCFA','Impact_Score','Cible','Source_cible','Dev_Cible_pts','Statut','Que_faire']
+        names_r += ['CA (FCFA)','Taux act.','Taux N-1','Dév. N-1','Marge Δ FCFA','Score Impact','Cible','Source cible','Dév. Cible','Statut','Que faire ?']
+        disp = rouge[cols_r].copy()
+        disp.columns = names_r
         disp['CA (FCFA)']=disp['CA (FCFA)'].apply(lambda x: f"{x:,.0f}")
         disp['Score Impact']=disp['Score Impact'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else '—')
         for col in ['Taux act.','Taux N-1','Cible']: disp[col]=disp[col].apply(lambda x: fp(x,False))
@@ -1118,10 +1122,16 @@ with tab1:
 
     with st.expander(f"🟡 Familles en vigilance ({n_o})"):
         orange = df[df['Statut']=='🟡 Vigilance'].sort_values('Impact_Score',ascending=False)
-        d2 = orange[['Rayon_court','SF_court','Segment','Acheteur',
-                     '%Marge','Tx_N1','Dev_N1_pts','Dev_N1_FCFA','Impact_Score','Que_faire']].copy()
-        d2.columns=['Rayon','Famille','Segment','Acheteur',
-                    'Taux act.','Taux N-1','Dév. N-1','Marge Δ FCFA','Score Impact','Que faire ?']
+        has_site_o = 'Site nom long' in orange.columns and orange['Site nom long'].notna().any()
+        cols_o = ['Rayon_court','SF_court','Segment','Acheteur']
+        names_o = ['Rayon','Famille','Segment','Acheteur']
+        if has_site_o:
+            cols_o.insert(2, 'Site nom long')
+            names_o.insert(2, 'Magasin')
+        cols_o  += ['%Marge','Tx_N1','Dev_N1_pts','Dev_N1_FCFA','Impact_Score','Que_faire']
+        names_o += ['Taux act.','Taux N-1','Dév. N-1','Marge Δ FCFA','Score Impact','Que faire ?']
+        d2 = orange[cols_o].copy()
+        d2.columns = names_o
         for col in ['Taux act.','Taux N-1']: d2[col]=d2[col].apply(lambda x: fp(x,False))
         d2['Dév. N-1']=d2['Dév. N-1'].apply(fp)
         d2['Marge Δ FCFA']=d2['Marge Δ FCFA'].apply(fk)
@@ -1224,12 +1234,16 @@ with tab2:
 </div>""", unsafe_allow_html=True)
 
     st.markdown("<div class='section-label'>Toutes les familles — triées par priorité et impact financier</div>", unsafe_allow_html=True)
-    da = df_ach[['Rayon_court','SF_court','Segment','CA','%Marge','Tx_N1',
-                 'Dev_N1_pts','Dev_N1_FCFA','Impact_Score','Cible','Plancher',
-                 'Source_cible','Dev_Cible_pts','Statut','Que_faire']].copy()
-    da.columns=['Rayon','Famille','Segment','CA (FCFA)','Taux act.','Taux N-1',
-                'Dév. N-1','Marge Δ FCFA','Score Impact','Cible','Plancher',
-                'Source cible','Dév. Cible','Statut','Que faire ?']
+    has_site_a = 'Site nom long' in df_ach.columns and df_ach['Site nom long'].notna().any()
+    cols_a = ['Rayon_court','SF_court','Segment']
+    names_a = ['Rayon','Famille','Segment']
+    if has_site_a:
+        cols_a.insert(2, 'Site nom long')
+        names_a.insert(2, 'Magasin')
+    cols_a  += ['CA','%Marge','Tx_N1','Dev_N1_pts','Dev_N1_FCFA','Impact_Score','Cible','Plancher','Source_cible','Dev_Cible_pts','Statut','Que_faire']
+    names_a += ['CA (FCFA)','Taux act.','Taux N-1','Dév. N-1','Marge Δ FCFA','Score Impact','Cible','Plancher','Source cible','Dév. Cible','Statut','Que faire ?']
+    da = df_ach[cols_a].copy()
+    da.columns = names_a
     da['CA (FCFA)']=da['CA (FCFA)'].apply(lambda x: f"{x:,.0f}")
     da['Score Impact']=da['Score Impact'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else '—')
     for col in ['Taux act.','Taux N-1','Cible','Plancher']: da[col]=da[col].apply(lambda x: fp(x,False))
