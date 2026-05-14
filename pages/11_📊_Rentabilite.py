@@ -1,6 +1,7 @@
 """
 11_📊_Rentabilite.py — SmartBuyer Hub
-Suivi Déviation Marge · Pilotage acheteurs · Cibles vs N-1
+Cockpit Direction · Briefing Acheteur · Analyse Approfondie
+Architecture : 1 question par zone · 1 réponse immédiate · 1 action
 """
 
 import streamlit as st
@@ -42,26 +43,37 @@ html, body, [class*="css"] {
 [data-testid="stFileUploader"] { border: 1.5px dashed #D1D1D6 !important; border-radius: 10px !important; background: #F9F9FB !important; }
 .stDownloadButton > button { background: #007AFF !important; color: white !important; border: none !important; border-radius: 8px !important; font-weight: 500 !important; font-size: 13px !important; padding: 10px 24px !important; width: 100% !important; }
 hr { border-color: #E5E5EA !important; margin: 1rem 0 !important; }
-
 .page-title   { font-size: 28px; font-weight: 700; color: #1C1C1E; letter-spacing: -0.03em; margin: 0; }
 .page-caption { font-size: 13px; color: #8E8E93; margin-top: 3px; margin-bottom: 1.5rem; }
 .section-label { font-size: 11px; font-weight: 600; color: #8E8E93; text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 10px; }
-.alert-card  { padding: 12px 16px; border-radius: 10px; margin-bottom: 8px; font-size: 13px; line-height: 1.5; border-left: 3px solid; }
+.alert-card  { padding: 12px 16px; border-radius: 10px; margin-bottom: 8px; font-size: 13px; line-height: 1.6; border-left: 3px solid; }
 .alert-red   { background: #FFF2F2; border-color: #FF3B30; color: #3A0000; }
 .alert-amber { background: #FFFBF0; border-color: #FF9500; color: #3A2000; }
 .alert-green { background: #F0FFF4; border-color: #34C759; color: #003A10; }
 .alert-blue  { background: #F0F8FF; border-color: #007AFF; color: #001A3A; }
-.alert-purple{ background: #F5F0FF; border-color: #AF52DE; color: #1A0033; }
-
-.acheteur-card { border-radius: 12px; padding: 14px 16px; margin-bottom: 6px; border: 0.5px solid; }
-.card-boissons { background: #E3F0FF; border-color: #B3D9FF; }
-.card-epicerie { background: #F0FFF4; border-color: #A8E6BF; }
-.card-dph      { background: #F5F0FF; border-color: #D9B3FF; }
-
-.badge-ok     { display:inline-block; padding:2px 8px; border-radius:6px; font-size:11px; font-weight:600; background:#D5F5E3; color:#145A32; }
-.badge-warn   { display:inline-block; padding:2px 8px; border-radius:6px; font-size:11px; font-weight:600; background:#FEF9C3; color:#854D0E; }
-.badge-alert  { display:inline-block; padding:2px 8px; border-radius:6px; font-size:11px; font-weight:600; background:#FEE2E2; color:#991B1B; }
-.badge-na     { display:inline-block; padding:2px 8px; border-radius:6px; font-size:11px; font-weight:600; background:#F3F4F6; color:#6B7280; }
+.verdict-box {
+    background: #FFFFFF; border-radius: 14px; padding: 18px 22px;
+    border: 0.5px solid #E5E5EA; margin-bottom: 16px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+}
+.verdict-title { font-size: 11px; font-weight: 600; color: #8E8E93; text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 6px; }
+.verdict-text  { font-size: 15px; font-weight: 500; color: #1C1C1E; line-height: 1.5; }
+.action-card {
+    background: #FFFFFF; border-radius: 12px; padding: 14px 18px;
+    border: 0.5px solid #E5E5EA; margin-bottom: 8px;
+    border-left: 4px solid #FF3B30;
+}
+.action-card.amber { border-left-color: #FF9500; }
+.action-card.green { border-left-color: #34C759; }
+.action-num  { font-size: 11px; font-weight: 700; color: #8E8E93; text-transform: uppercase; letter-spacing: 0.05em; }
+.action-fam  { font-size: 15px; font-weight: 700; color: #1C1C1E; margin: 2px 0; }
+.action-fcfa { font-size: 13px; font-weight: 600; color: #FF3B30; }
+.action-fcfa.amber { color: #FF9500; }
+.action-what { font-size: 13px; color: #3A3A3C; margin-top: 4px; }
+.sante-rouge { background:#FEE2E2; color:#991B1B; border-radius:8px; padding:2px 10px; font-size:12px; font-weight:700; display:inline-block; }
+.sante-orange{ background:#FEF9C3; color:#854D0E; border-radius:8px; padding:2px 10px; font-size:12px; font-weight:700; display:inline-block; }
+.sante-vert  { background:#D5F5E3; color:#145A32; border-radius:8px; padding:2px 10px; font-size:12px; font-weight:700; display:inline-block; }
+.casse-badge { background:#F5F0FF; color:#6B21A8; border-radius:8px; padding:2px 8px; font-size:11px; font-weight:600; display:inline-block; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -93,7 +105,7 @@ ORDRE_RAYONS  = ['BOISSONS','EPICERIE','DROGUERIE','PARFUMERIE HYGIENE']
 TOLERANCE     = 0.015
 COLS_REQUIRED = ['Rayon','Sous Famille','CA','Marge','%Marge','CA N-1','%Vs N-1.1']
 
-# ─── HELPERS FORMAT ────────────────────────────────────────────────────────────
+# ─── HELPERS FORMAT ───────────────────────────────────────────────────────────
 def fp(v, sign=True):
     try:
         if pd.isna(v): return '—'
@@ -102,42 +114,36 @@ def fp(v, sign=True):
 
 def fk(v):
     try:
-        if pd.isna(v) or v == 0: return '-'
+        if pd.isna(v) or v == 0: return '—'
         a = abs(v)
         if a >= 1_000_000: return f"{v/1_000_000:+.2f} M FCFA"
         return f"{v/1000:+,.0f} K FCFA"
-    except: return '-'
+    except: return '—'
 
 def fk_abs(v):
     try:
-        if pd.isna(v) or v == 0: return '-'
+        if pd.isna(v) or v == 0: return '—'
         a = abs(v)
-        if a >= 1_000_000: return f"{a/1_000_000:.2f} M FCFA perdus"
-        return f"{a/1000:,.0f} K FCFA perdus"
-    except: return '-'
-
-def badge_statut(s):
-    if '✅' in str(s): return '<span class="badge-ok">✅ OK</span>'
-    if '🟡' in str(s): return '<span class="badge-warn">🟡 Vigilance</span>'
-    if '🔴' in str(s): return '<span class="badge-alert">🔴 Action</span>'
-    return '<span class="badge-na">⚪ N/A</span>'
+        if a >= 1_000_000: return f"{a/1_000_000:.1f} M FCFA"
+        return f"{a/1000:,.0f} K FCFA"
+    except: return '—'
 
 def cs(v):
-    if '✅' in str(v): return 'background:#D5F5E3;color:#145A32;font-weight:600'
-    if '🟡' in str(v): return 'background:#FEF9C3;color:#854D0E;font-weight:600'
-    if '🔴' in str(v): return 'background:#FEE2E2;color:#991B1B;font-weight:600'
+    if '✅' in str(v) or 'OK' == str(v).strip(): return 'background:#D5F5E3;color:#145A32;font-weight:600'
+    if '🟡' in str(v) or 'Vigi' in str(v):       return 'background:#FEF9C3;color:#854D0E;font-weight:600'
+    if '🔴' in str(v) or 'Action' in str(v):      return 'background:#FEE2E2;color:#991B1B;font-weight:600'
     return ''
 
 def cd(v):
     try:
-        x = float(str(v).replace('%','').replace('+','').replace(' K','')
-                        .replace(' M','').replace(',','').replace('—','').strip())
+        x = float(str(v).replace('%','').replace('+','').replace(' K FCFA','')
+                        .replace(' M FCFA','').replace(',','').replace('—','').strip())
         if x >= -1.5: return 'color:#145A32;font-weight:600'
         if x >= -3.0: return 'color:#854D0E;font-weight:600'
         return 'color:#991B1B;font-weight:600'
     except: return ''
 
-# ─── FONCTIONS VECTORISÉES ────────────────────────────────────────────────────
+# ─── MOTEUR DE CALCUL — fonctions vectorisées ─────────────────────────────────
 def _segment_vec(sf_s, ray_s):
     sf  = sf_s.str.upper().fillna('')
     ray = ray_s.str.upper().fillna('')
@@ -150,35 +156,37 @@ def _segment_vec(sf_s, ray_s):
     return seg
 
 def _statut_vec(dev):
-    s = pd.Series('⚪ N/A', index=dev.index)
+    s = pd.Series('N/A', index=dev.index)
     nn = dev.notna()
-    s[nn & (dev >= -TOLERANCE)]                         = '✅ OK'
-    s[nn & (dev < -TOLERANCE) & (dev >= -TOLERANCE*2)]  = '🟡 Vigilance'
-    s[nn & (dev < -TOLERANCE*2)]                        = '🔴 Action requise'
+    s[nn & (dev >= -TOLERANCE)]                        = 'OK'
+    s[nn & (dev < -TOLERANCE) & (dev >= -TOLERANCE*2)] = 'Vigilance'
+    s[nn & (dev < -TOLERANCE*2)]                       = 'Action'
     return s
 
-def _cause_probable_vec(df):
+def _cause_vec(df):
+    """Cause de la déviation : Promo / Conditions achat / Effet mix / Produit appel / OK"""
     dev = df['Dev_N1_pts']
     seg = df['Segment']
     has_promo = 'CA Promo' in df.columns and 'Marge Promo' in df.columns
     if has_promo:
-        poids_promo = df['CA Promo'].fillna(0) / df['CA'].replace(0,1)
-        tx_promo    = df['Marge Promo'].fillna(0) / df['CA Promo'].replace(0,1)
-        promo_def   = (poids_promo > 0.20) & (tx_promo < 0.05) & dev.notna() & (dev < -0.02)
+        pp = df['CA Promo'].fillna(0) / df['CA'].replace(0, 1)
+        tp = df['Marge Promo'].fillna(0) / df['CA Promo'].replace(0, 1)
+        promo_def = (pp > 0.20) & (tp < 0.05) & dev.notna() & (dev < -0.02)
     else:
-        promo_def   = pd.Series(False, index=df.index)
+        promo_def = pd.Series(False, index=df.index)
     alerte_mix = df.get('Alerte_Mix', pd.Series(False, index=df.index))
-    cause = pd.Series('A investiguer', index=df.index)
-    cause[dev.notna() & (dev >= -TOLERANCE)]                     = 'Marge OK'
-    cause[promo_def]                                              = 'Promo deficitaire'
-    cause[alerte_mix & ~promo_def]                               = 'Effet mix defavorable'
-    cause[dev.notna() & (dev < -0.05) & ~promo_def & ~alerte_mix] = 'Conditions achat degradees'
-    cause[dev.notna() & (dev < -0.10) & ~promo_def]             = 'Chute severe prix achat'
-    cause[seg == 'Produit d appel']                              = 'Produit appel - remise arriere'
-    cause[df['%Marge'].notna() & (df['%Marge'] < 0)]            = 'Marge negative - urgence'
-    return cause
+    c = pd.Series('A vérifier', index=df.index)
+    c[dev.notna() & (dev >= -TOLERANCE)]                        = 'OK'
+    c[promo_def]                                                 = 'Promo déficitaire'
+    c[alerte_mix & ~promo_def]                                   = 'Effet mix défavorable'
+    c[dev.notna() & (dev < -0.05) & ~promo_def & ~alerte_mix]   = 'Conditions achat'
+    c[dev.notna() & (dev < -0.10) & ~promo_def]                 = 'Chute sévère PA'
+    c[seg == 'Produit d appel']                                  = "Prod. d'appel — remise arrière"
+    c[df['%Marge'].notna() & (df['%Marge'] < 0)]                = 'Marge négative'
+    return c
 
-def _que_faire_vec(df):
+def _action_vec(df):
+    """1 action claire par famille — courte, directe, actionnable"""
     tx  = df['%Marge']
     dev = df['Dev_N1_pts']
     seg = df['Segment']
@@ -186,56 +194,120 @@ def _que_faire_vec(df):
     gros   = df['CA'] > ca_med * 1.5
     has_promo = 'CA Promo' in df.columns and 'Marge Promo' in df.columns
     if has_promo:
-        poids_promo  = df['CA Promo'].fillna(0) / df['CA'].replace(0,1)
-        tx_promo_ser = df['Marge Promo'].fillna(0) / df['CA Promo'].replace(0,1)
-        promo_def    = (poids_promo > 0.20) & (tx_promo_ser < 0.05)
+        pp       = df['CA Promo'].fillna(0) / df['CA'].replace(0, 1)
+        tp       = df['Marge Promo'].fillna(0) / df['CA Promo'].replace(0, 1)
+        promo_def = (pp > 0.20) & (tp < 0.05)
     else:
         promo_def = pd.Series(False, index=df.index)
-    c = pd.Series('OK - maintenir les conditions', index=df.index)
-    c[promo_def & dev.notna() & (dev < -0.02)]                   = 'Stopper ou reneg. la promo en cours'
-    c[dev.notna() & (dev < -TOLERANCE*2) & ~promo_def]           = 'Verifier conditions achat fournisseur'
-    c[dev.notna() & (dev < -0.05) & ~promo_def]                  = 'Revision conditions achat + audit promos'
-    c[dev.notna() & (dev < -0.05) & gros & ~promo_def]           = 'Volume eleve en derive - reneg. urgente'
-    c[dev.notna() & (dev < -0.10) & ~promo_def]                  = 'Convocation fourn. - analyse PA vs marche'
-    c[seg == 'Produit d appel']                                   = 'Negocier remise arriere ou ristourne vol.'
-    c[(seg=='Produit d appel') & dev.notna() & (dev < -0.05)]    = "Produit appel sous pression - remise arriere urgente"
-    c[tx.notna() & (tx < 0)]                                      = 'MARGE NEGATIVE - stopper promo immediat'
-    return c
 
-def _impact_score_vec(df):
-    ca_med = df.groupby('Rayon_court')['CA'].transform('median').replace(0, 1)
-    poids  = (df['CA'] / ca_med).clip(0.5, 3.0)
-    return (df['Dev_N1_FCFA'].abs() * poids).round(0)
+    a = pd.Series('Maintenir les conditions', index=df.index)
+    # Marge négative — priorité absolue
+    a[tx.notna() & (tx < 0)]                                    = 'Stopper toute promo — vérifier PA'
+    # Promo déficitaire
+    a[promo_def & dev.notna() & (dev < -0.02)]                  = 'Suspendre la promo en cours'
+    # Produit d'appel sous pression
+    a[(seg == 'Produit d appel') & dev.notna() & (dev < -0.05)] = 'Négocier remise arrière fournisseur'
+    # Gros volume + chute sévère
+    a[dev.notna() & (dev < -0.10) & gros & ~promo_def]          = 'Convoquer le fournisseur cette semaine'
+    # Gros volume + dérive
+    a[dev.notna() & (dev < -0.05) & gros & ~promo_def]          = 'Renégocier conditions — volume en jeu'
+    # Dérive standard
+    a[dev.notna() & (dev < -0.05) & ~promo_def & ~gros]         = 'Revoir tarif achat fournisseur'
+    # Vigilance
+    a[dev.notna() & (dev < -TOLERANCE) & (dev >= -TOLERANCE*2) & ~promo_def] = 'Surveiller — confirmer semaine prochaine'
+    return a
 
-def _commentaires_auto(df):
-    rouge = df[df['Statut'] == '🔴 Action requise'].nlargest(6, 'Impact_Score')
-    out = []
+def _score_sante_vec(df):
+    """
+    Score de santé 0-100 par famille.
+    100 = parfait. 0 = catastrophique.
+    Composantes : déviation N-1 (50%) + atteinte cible (30%) + impact casse (20%)
+    """
+    # Composante 1 : déviation N-1 (50 pts max)
+    dev = df['Dev_N1_pts'].fillna(0)
+    # +5pts = 50, 0pt = 40, -3pts = 20, -10pts = 0
+    score_dev = np.clip(40 + dev * (30 / 0.05), 0, 50)
+
+    # Composante 2 : atteinte cible (30 pts max)
+    dev_cible = df['Dev_Cible_pts'].fillna(0)
+    score_cible = np.clip(30 + dev_cible * (20 / 0.05), 0, 30)
+
+    # Composante 3 : impact casse (20 pts max)
+    tx_casse = df.get('Tx_Casse_Fam', pd.Series(0, index=df.index)).fillna(0)
+    # 0% casse = 20pts, 1% casse = 10pts, 5% casse = 0pts
+    score_casse = np.clip(20 - tx_casse * (20 / 0.05), 0, 20)
+
+    total = (score_dev + score_cible + score_casse).round(0).astype(int)
+    return total.clip(0, 100)
+
+def _verdict_auto(df, periode):
+    """Génère la phrase de verdict réseau pour la direction."""
+    ca   = df['CA'].sum()
+    mg   = df['Marge'].sum()
+    tx   = mg / ca if ca > 0 else 0
+    mn1  = df['Marge_N1'].sum()
+    cn1  = df['CA_N1'].sum()
+    tn1  = mn1 / cn1 if cn1 > 0 else 0
+    dev  = tx - tn1
+    perdu = df['Dev_N1_FCFA'].sum()
+    n_action = (df['Statut'] == 'Action').sum()
+
+    # Rayon le plus dégradé
+    worst = None
+    worst_dev = 0
+    for r in ORDRE_RAYONS:
+        sub = df[df['Rayon_court'] == r]
+        if len(sub) == 0: continue
+        ca_r = sub['CA'].sum(); mg_r = sub['Marge'].sum()
+        mn1_r = sub['Marge_N1'].sum(); cn1_r = sub['CA_N1'].sum()
+        tx_r  = mg_r / ca_r if ca_r > 0 else 0
+        tn1_r = mn1_r / cn1_r if cn1_r > 0 else 0
+        d_r   = tx_r - tn1_r
+        if d_r < worst_dev:
+            worst_dev = d_r
+            worst = r
+
+    # Top famille à risque
+    top = df[df['Statut'] == 'Action'].nlargest(1, 'Impact_Score')
+    top_txt = ''
+    if len(top):
+        r0 = top.iloc[0]
+        top_txt = f" Sujet principal : {r0['SF_court']} ({fk_abs(r0['Dev_N1_FCFA'])} perdus)."
+
+    if dev >= 0:
+        etat = f"en progression de {dev:+.1%} vs N-1"
+    elif dev >= -0.01:
+        etat = f"stable à {tx:.1%} (−{abs(dev):.1%} vs N-1)"
+    else:
+        etat = f"en recul de {abs(dev):.1%} vs N-1"
+
+    perdu_txt = f" Marge perdue : {fk_abs(perdu)}." if perdu < 0 else ""
+    worst_txt = f" {worst.title()} décroche." if worst else ""
+    action_txt = f" {n_action} famille(s) nécessitent une action cette semaine." if n_action > 0 else " Aucune alerte critique."
+
+    return f"Réseau {etat} à {tx:.1%}.{perdu_txt}{worst_txt}{action_txt}{top_txt}"
+
+def _top3_actions(df_ach):
+    """Retourne les 3 actions prioritaires pour un acheteur avec contexte complet."""
+    rouge = df_ach[df_ach['Statut'] == 'Action'].nlargest(3, 'Impact_Score')
+    actions = []
     for _, r in rouge.iterrows():
-        sf=r['SF_court']; ray=r['Rayon_court']; tx=r['%Marge']
-        dev=r['Dev_N1_pts']; fcfa=r['Dev_N1_FCFA']; seg=r['Segment']; vol=r['CA']
-        if pd.notna(tx) and tx < 0:
-            out.append(('red', f"🚨 <strong>{sf}</strong> ({ray}) — marge négative à {tx:.1%}. Arrêt immédiat des promos déficitaires."))
-        elif pd.notna(dev) and dev < -0.10:
-            out.append(('red', f"🔴 <strong>{sf}</strong> ({ray}) — effondrement de {dev:+.1%} vs N-1 ({fcfa:+,.0f} FCFA). Convocation fournisseur urgente."))
-        elif seg == 'Produit d appel':
-            out.append(('amber', f"🟠 <strong>{sf}</strong> ({ray}) — produit d'appel à {tx:.1%} ({dev:+.1%} vs N-1). Négocier remise arrière."))
-        else:
-            vtxt = f", volume {vol/1e6:.1f}M FCFA" if vol > 5e6 else ""
-            out.append(('amber', f"🟠 <strong>{sf}</strong> ({ray}{vtxt}) — {dev:+.1%} vs N-1 ({fcfa:+,.0f} FCFA). Réviser conditions achat."))
-    return out
-
-def _detect_periode(df_raw):
-    col_a = df_raw.iloc[:, 0].dropna().astype(str)
-    last  = col_a.iloc[-1] if len(col_a) else ''
-    dates = re.findall(r'\d{2}/\d{2}/\d{4}', last)
-    if len(dates) >= 2:   return f"{dates[0]} → {dates[1]}"
-    elif len(dates) == 1: return dates[0]
-    return 'Période inconnue'
-
-def _validate(df, filename):
-    missing = [c for c in COLS_REQUIRED if c not in df.columns]
-    if missing:
-        raise ValueError(f"**{filename}** — colonnes manquantes : `{'`, `'.join(missing)}`")
+        cause = str(r.get('Cause', ''))
+        action = str(r.get('Action', ''))
+        perdu  = r.get('Dev_N1_FCFA', 0)
+        # Icône selon la cause
+        if 'négatif' in cause.lower():  icone = 'rouge'
+        elif 'promo'  in cause.lower(): icone = 'amber'
+        else:                           icone = 'rouge'
+        actions.append({
+            'famille': r['SF_court'],
+            'perdu':   fk_abs(perdu),
+            'action':  action,
+            'cause':   cause,
+            'icone':   icone,
+            'site':    r.get('Site nom long', '') if 'Site nom long' in r.index else '',
+        })
+    return actions
 
 # ─── CHARGEMENT RÉFÉRENTIEL ───────────────────────────────────────────────────
 @st.cache_data(show_spinner=False)
@@ -249,38 +321,40 @@ def load_referentiel(override_bytes=None):
     if os.path.exists(repo_path): return pd.read_csv(repo_path)
     return None
 
-# ─── CHARGEMENT EXTRACTION — lecture unique, tout vectorisé ──────────────────
+# ─── CHARGEMENT EXTRACTION ────────────────────────────────────────────────────
 @st.cache_data(show_spinner=False)
 def load_extraction(file_bytes: bytes, filename: str, ref_bytes=None):
-    raw      = BytesIO(file_bytes)
-    df_raw   = pd.read_excel(raw, header=None)
-    periode  = _detect_periode(df_raw)
+    raw    = BytesIO(file_bytes)
+    df_raw = pd.read_excel(raw, header=None)
+    # Détection période depuis dernière cellule col A (lecture pandas uniquement)
+    col_a  = df_raw.iloc[:, 0].dropna().astype(str)
+    last   = col_a.iloc[-1] if len(col_a) else ''
+    dates  = re.findall(r'\d{2}/\d{2}/\d{4}', last)
+    if len(dates) >= 2:   periode = f"{dates[0]} → {dates[1]}"
+    elif len(dates) == 1: periode = dates[0]
+    else:                 periode = 'Période inconnue'
+
     raw.seek(0)
     df = pd.read_excel(raw)
-    _validate(df, filename)
 
-    # ── Suppression de toutes les lignes de total et lignes parasites PBI ──────
-    mask_keep = (
-        # Sous-famille : exclure les totaux et lignes vides
+    # Validation colonnes obligatoires
+    missing = [c for c in COLS_REQUIRED if c not in df.columns]
+    if missing:
+        raise ValueError(f"**{filename}** — colonnes manquantes : `{'`, `'.join(missing)}`")
+
+    # Nettoyage lignes parasites PBI
+    mask = (
         df['Sous Famille'].notna() &
         (df['Sous Famille'].astype(str).str.strip() != 'Total') &
         (~df['Sous Famille'].astype(str).str.startswith('Filtres', na=False)) &
-
-        # Rayon : garder uniquement les rayons codifiés (ex: 00010 - EPICERIE)
         df['Rayon'].notna() &
         df['Rayon'].str.startswith('000', na=False) &
         ~df['Rayon'].str.contains('CIGARETTE', na=False) &
-
-        # Site : exclure les lignes Total réseau si la colonne existe
         ~df.get('Site nom long', pd.Series('', index=df.index)).astype(str).isin(['Total','']) &
-
-        # Famille : exclure les totaux si la colonne existe
-        ~df.get('Famille', pd.Series('', index=df.index)).astype(str).isin(['Total']) &
-
-        # CA : uniquement les lignes avec des ventes réelles
+        ~df.get('Famille',       pd.Series('', index=df.index)).astype(str).isin(['Total']) &
         df['CA'].notna() & (df['CA'] > 0)
     )
-    df = df[mask_keep].copy()
+    df = df[mask].copy()
 
     df['SF_court']    = df['Sous Famille'].str.extract(r'\d+ - (.+)')[0]
     df['Rayon_court'] = df['Rayon'].str.extract(r'- (.+)')[0]
@@ -288,11 +362,13 @@ def load_extraction(file_bytes: bytes, filename: str, ref_bytes=None):
     df['Segment']     = _segment_vec(df['SF_court'], df['Rayon_court'])
     df['Plancher']    = df['Segment'].map(PLANCHERS)
 
-    valid_n1   = df['%Vs N-1.1'].notna() & (df['%Vs N-1.1'] != -1) & (df['CA N-1'] > 0)
+    # N-1 vectorisé
+    valid_n1       = df['%Vs N-1.1'].notna() & (df['%Vs N-1.1'] != -1) & (df['CA N-1'] > 0)
     df['Marge_N1'] = np.where(valid_n1, df['Marge'] / (1 + df['%Vs N-1.1']), np.nan)
     df['CA_N1']    = df['CA N-1']
     df['Tx_N1']    = np.where(valid_n1 & (df['CA_N1'] > 0), df['Marge_N1'] / df['CA_N1'], np.nan)
 
+    # Cibles
     ref = load_referentiel(ref_bytes)
     if ref is not None and 'Cible' in ref.columns:
         df = df.merge(
@@ -303,83 +379,70 @@ def load_extraction(file_bytes: bytes, filename: str, ref_bytes=None):
         df['Cible']    = df['Cible_ref'].fillna(df['Plancher'])
         df['Plancher'] = df['Plancher_ref'].fillna(df['Plancher'])
     else:
-        cible_base = np.where(
-            df['Tx_N1'].notna(),
-            np.maximum(df['Tx_N1'] * 1.02, df['Plancher']),
-            df['Plancher']
-        )
+        cible_base    = np.where(df['Tx_N1'].notna(),
+                                  np.maximum(df['Tx_N1'] * 1.02, df['Plancher']),
+                                  df['Plancher'])
         plafond_appel = df['Plancher'] + 0.02
-        df['Cible'] = np.where(
-            df['Segment'] == 'Produit d appel',
-            np.minimum(cible_base, plafond_appel),
-            cible_base
-        )
+        df['Cible']   = np.where(df['Segment'] == 'Produit d appel',
+                                  np.minimum(cible_base, plafond_appel), cible_base)
 
-    df['Source_cible']   = np.where(df['Tx_N1'].notna(), 'N-1 × 1,02', 'Plancher segment (nouveauté)')
+    # Déviations
+    df = df[df['%Marge'].between(-0.4, 0.8)].copy()
     df['Dev_N1_pts']     = df['%Marge'] - df['Tx_N1']
     df['Dev_N1_FCFA']    = df['Dev_N1_pts'] * df['CA']
     df['Dev_Cible_pts']  = df['%Marge'] - df['Cible']
     df['Dev_Cible_FCFA'] = df['Dev_Cible_pts'] * df['CA']
-    # Nettoyage outliers — exclure les taux aberrants AVANT les calculs
-    df = df[df['%Marge'].between(-0.4, 0.8)].copy()
 
-    df['Statut']         = _statut_vec(df['Dev_N1_pts'])
-    df['Impact_Score']   = _impact_score_vec(df)
-    df['Cause_Probable'] = _cause_probable_vec(df)
-    df['Que_faire']      = _que_faire_vec(df)
-
-    _ord = {'🔴 Action requise':0,'🟡 Vigilance':1,'✅ OK':2,'⚪ N/A':3}
-    df['_ord_statut'] = df['Statut'].map(_ord)
-    df['_ord_rayon']  = df['Rayon_court'].map({r:i for i,r in enumerate(ORDRE_RAYONS)})
-    df['Priorite'] = pd.cut(
-        df['Impact_Score'].fillna(0),
-        bins=[-1, 100000, 500000, float('inf')],
-        labels=['Surveillance', 'Priorite', 'Urgence']
-    ).astype(str)
-
-    # Remise compensatrice
-    df['Remise_Necessaire_FCFA'] = np.where(
-        df['Dev_Cible_pts'] < 0,
-        df['Dev_Cible_pts'].abs() * df['CA'],
-        0
-    )
-    # Amelioration 3 : taux marge net casse + alerte casse par famille
+    # Casse
     if 'Casse (Valeur)' in df.columns:
-        df['Casse_val']       = df['Casse (Valeur)'].fillna(0)
-        df['Marge_Net_Casse'] = df['Marge'] + df['Casse_val']
-        df['Tx_Marge_Net']    = df['Marge_Net_Casse'] / df['CA'].replace(0,1)
-        df['Tx_Casse_Fam']    = df['Casse_val'].abs() / df['CA'].replace(0,1)
-        df['Alerte_Casse']    = df['Tx_Casse_Fam'] > 0.005
+        df['Casse_val']    = df['Casse (Valeur)'].fillna(0)
+        df['Tx_Casse_Fam'] = df['Casse_val'].abs() / df['CA'].replace(0, 1)
+        df['Marge_Nette']  = (df['Marge'] + df['Casse_val']) / df['CA'].replace(0, 1)
+        df['Alerte_Casse'] = df['Tx_Casse_Fam'] > 0.005
     else:
-        df['Marge_Net_Casse'] = df['Marge']
-        df['Tx_Marge_Net']    = df['%Marge']
-        df['Tx_Casse_Fam']    = 0.0
-        df['Alerte_Casse']    = False
+        df['Casse_val']    = 0.0
+        df['Tx_Casse_Fam'] = 0.0
+        df['Marge_Nette']  = df['%Marge']
+        df['Alerte_Casse'] = False
 
-    # Alerte Mix — famille dont le CA progresse fort mais la marge décroche
-    # PBI exporte parfois %Vs N-1 en décimal (0.15) parfois en entier (15.0)
-    # On normalise : si médiane > 1 → format entier → diviser par 100
+    # Alerte mix (CA progresse mais marge décroche)
     _evo_ca = df['%Vs N-1'].dropna()
-    _evo_ca_norm = _evo_ca / 100 if _evo_ca.abs().median() > 1 else _evo_ca
-    df['_evo_ca_norm'] = np.where(
-        df['%Vs N-1'].notna(),
-        df['%Vs N-1'] / (100 if _evo_ca.abs().median() > 1 else 1),
-        np.nan
-    )
+    _factor = 100 if _evo_ca.abs().median() > 1 else 1
+    df['_evo_norm'] = np.where(df['%Vs N-1'].notna(), df['%Vs N-1'] / _factor, np.nan)
     df['Alerte_Mix'] = (
-        df['_evo_ca_norm'].notna() & (df['_evo_ca_norm'] > 0.15) &
+        df['_evo_norm'].notna() & (df['_evo_norm'] > 0.15) &
         df['Dev_N1_pts'].notna() & (df['Dev_N1_pts'] < -0.02)
     )
-    df.drop(columns=['_evo_ca_norm'], inplace=True)
+    df.drop(columns=['_evo_norm'], inplace=True)
 
-    df['Periode']  = periode
-    df['Fichier']  = filename
+    # Scores et diagnostics
+    df['Statut']   = _statut_vec(df['Dev_N1_pts'])
+    df['Cause']    = _cause_vec(df)
+    df['Action']   = _action_vec(df)
+
+    # Score Impact (pour tri interne)
+    ca_med = df.groupby('Rayon_court')['CA'].transform('median').replace(0, 1)
+    df['Impact_Score'] = (df['Dev_N1_FCFA'].abs() * (df['CA'] / ca_med).clip(0.5, 3.0)).round(0)
+
+    # Score santé 0-100
+    df['Score_Sante'] = _score_sante_vec(df)
+
+    # Remise nécessaire pour atteindre la cible
+    df['Remise_Necessaire'] = np.where(df['Dev_Cible_pts'] < 0,
+                                        df['Dev_Cible_pts'].abs() * df['CA'], 0)
+
+    # Tri
+    _ord = {'Action': 0, 'Vigilance': 1, 'OK': 2, 'N/A': 3}
+    df['_ord_statut'] = df['Statut'].map(_ord)
+    df['_ord_rayon']  = df['Rayon_court'].map({r: i for i, r in enumerate(ORDRE_RAYONS)})
+    df['Periode']     = periode
+    df['Fichier']     = filename
     return df
 
 # ─── EXPORT EXCEL ─────────────────────────────────────────────────────────────
 def export_excel(df_all, periodes):
-    wb = Workbook()
-    C_HDR='1B2A4A'; C_SUB='2E4B7A'; C_WH='FFFFFF'; C_DK='1A1A2E'
+    wb  = Workbook()
+    C_HDR = '1B2A4A'; C_SUB = '2E4B7A'; C_WH = 'FFFFFF'; C_DK = '1A1A2E'
 
     def xfill(h): return PatternFill('solid', fgColor=h)
     def xbdr():
@@ -389,535 +452,357 @@ def export_excel(df_all, periodes):
     def xrgt(): return Alignment(horizontal='right',  vertical='center')
     def xlft(w=False): return Alignment(horizontal='left', vertical='center', wrap_text=w)
 
-    def title_block(ws, txt, span=15):
-        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=span)
-        c = ws.cell(row=1, column=1, value=txt)
-        c.font = Font('Calibri', size=13, bold=True, color=C_WH)
-        c.fill = xfill(C_HDR); c.alignment = xctr()
-        ws.row_dimensions[1].height = 30
-
-    def write_header_row(ws, row_num, headers, widths):
-        for i, (h, w) in enumerate(zip(headers, widths)):
-            c = ws.cell(row=row_num, column=i+1, value=h)
-            c.font = Font('Calibri', size=9, bold=True, color=C_WH)
-            c.fill = xfill(C_SUB); c.alignment = xctr(); c.border = xbdr()
-            ws.column_dimensions[get_column_letter(i+1)].width = w
-        ws.row_dimensions[row_num].height = 28
-
+    # ── Onglets par période ────────────────────────────────────────────────────
     for i_p, periode in enumerate(periodes):
         df = df_all[df_all['Periode'] == periode].copy()
-        df = df.sort_values(['_ord_statut','Impact_Score'], ascending=[True, False])
-        safe = periode.replace('/','').replace('→','_').replace(' ','')[:28]
+        df = df.sort_values(['_ord_statut', 'Impact_Score'], ascending=[True, False])
+        safe = periode.replace('/', '').replace('→', '_').replace(' ', '')[:28]
         ws   = wb.active if i_p == 0 else wb.create_sheet(safe)
         ws.title = safe; ws.sheet_view.showGridLines = False
 
-        title_block(ws, f'SUIVI RENTABILITÉ — DÉVIATION MARGE vs N-1 · {periode}', span=15)
+        # Titre
+        has_s = 'Site nom long' in df.columns and df['Site nom long'].notna().any()
+        HDRS  = ['Rayon', 'Famille']
+        if has_s: HDRS.append('Magasin')
+        HDRS += ['Segment', 'Acheteur', 'CA (FCFA)', 'Marge brute (FCFA)',
+                 'Taux brut', 'Tx marge nette (casse)', 'Taux N-1', 'Cible',
+                 'Marge perdue FCFA', 'Score santé', 'Cause', 'Statut', 'Action']
+        WS = [20, 30]
+        if has_s: WS.append(24)
+        WS += [16, 18, 14, 14, 11, 14, 11, 11, 16, 11, 22, 14, 38]
 
-        # Sous-titre
-        ws.merge_cells('A2:O2')
-        c2 = ws.cell(row=2, column=1,
-            value=f'  Cible = MAX(Taux N-1 × 1,02 ; Plancher segment) · Tolérance ±1,5 pt · Trié par score d\'impact financier')
-        c2.font = Font('Calibri', size=9, italic=True, color='AABBCC')
-        c2.fill = xfill(C_HDR); c2.alignment = xlft()
+        ws.merge_cells(f'A1:{get_column_letter(len(HDRS))}1')
+        t = ws.cell(row=1, column=1, value=f'SUIVI RENTABILITE — {periode}')
+        t.font = Font('Calibri', size=13, bold=True, color=C_WH)
+        t.fill = xfill(C_HDR); t.alignment = xctr()
+        ws.row_dimensions[1].height = 30
+
+        ws.merge_cells(f'A2:{get_column_letter(len(HDRS))}2')
+        t2 = ws.cell(row=2, column=1,
+            value=f'  Cible = MAX(N-1 x 1,02 ; Plancher segment) · Score sante = déviation + cible + casse · Trie par marge perdue')
+        t2.font = Font('Calibri', size=9, italic=True, color='AABBCC')
+        t2.fill = xfill(C_HDR); t2.alignment = xlft()
         ws.row_dimensions[2].height = 16
 
-        has_site_export = 'Site nom long' in df.columns and df['Site nom long'].notna().any()
-        HDRS = ['Rayon','Famille']
-        if has_site_export: HDRS.append('Magasin')
-        HDRS += ['Segment','Source cible','Acheteur',
-                 'CA (FCFA)','Marge (FCFA)','Taux actuel','Taux N-1','Cible','Plancher',
-                 'Dév. N-1 (pts)','Dév. Cible (pts)','Marge Δ FCFA','Score Impact',
-                 'Priorité','Statut','Que faire ?']
-        _w = [20,30]
-        if has_site_export: _w.append(24)
-        _w += [16,18,18,14,14,12,12,12,12,14,14,16,13,14,18,16,46]
-        WIDTHS = _w
-        write_header_row(ws, 3, HDRS, WIDTHS)
+        for j, (h, w) in enumerate(zip(HDRS, WS), 1):
+            c = ws.cell(row=3, column=j, value=h)
+            c.font = Font('Calibri', size=9, bold=True, color=C_WH)
+            c.fill = xfill(C_SUB); c.alignment = xctr(); c.border = xbdr()
+            ws.column_dimensions[get_column_letter(j)].width = w
+        ws.row_dimensions[3].height = 28
 
         C_R='FFD6D6'; C_O='FFF3CC'; C_G='D6F5D6'; C_L='F7F7F7'; C_W='FFFFFF'
         for i, (_, r) in enumerate(df.iterrows(), 4):
-            stat = r.get('Statut','')
-            bg = C_R if '🔴' in str(stat) else (C_O if '🟡' in str(stat)
-                 else (C_G if '✅' in str(stat) else (C_L if i%2==0 else C_W)))
-            _site_val = r.get('Site nom long','—') if has_site_export and 'Site nom long' in r.index else None
-            vals = [
-                r.get('Rayon_court',''),
-                r.get('SF_court',''),
-            ]
-            if has_site_export: vals.append(_site_val or '—')
+            stat = r.get('Statut', '')
+            bg = C_R if stat=='Action' else (C_O if stat=='Vigilance' else (C_G if stat=='OK' else (C_L if i%2==0 else C_W)))
+            vals = [r.get('Rayon_court',''), r.get('SF_court','')]
+            if has_s: vals.append(r.get('Site nom long','—') if 'Site nom long' in r.index else '—')
             vals += [
                 SEG_LABELS.get(r.get('Segment',''), r.get('Segment','')),
-                r.get('Source_cible',''),
                 r.get('Acheteur',''),
                 r.get('CA', None),
                 r.get('Marge', None),
                 r.get('%Marge', None),
+                r.get('Marge_Nette', None),
                 r.get('Tx_N1', None),
                 r.get('Cible', None),
-                r.get('Plancher', None),
-                r.get('Dev_N1_pts', None),
-                r.get('Dev_Cible_pts', None),
                 r.get('Dev_N1_FCFA', None),
-                r.get('Impact_Score', None),
-                ('🔴 Urgence'    if (r.get('Impact_Score') or 0) > 500000 else
-                 '🟡 Priorité'  if (r.get('Impact_Score') or 0) > 100000 else
-                 '🔵 Surveillance'),
+                r.get('Score_Sante', None),
+                r.get('Cause', ''),
                 stat,
-                r.get('Cause_Probable',''),
-                r.get('Que_faire',''),
+                r.get('Action', ''),
             ]
-            base_fmts = [None,None]  # Rayon, Famille
-            if has_site_export: base_fmts.append(None)  # Magasin
-            base_fmts += [None,None,None,'#,##0','#,##0','0.0%','0.0%','0.0%','0.0%',
-                          '+0.0%;-0.0%;-','+0.0%;-0.0%;-','+#,##0;-#,##0;-','#,##0',None,None,None,None]
-            FMTS = base_fmts
+            _off  = 1 if has_s else 0
+            FMTS  = [None, None]
+            if has_s: FMTS.append(None)
+            FMTS += [None, None, '#,##0', '#,##0', '0.0%', '0.0%', '0.0%', '0.0%',
+                     '+#,##0;-#,##0;-', '0', None, None, None]
             for j, (v, f) in enumerate(zip(vals, FMTS), 1):
                 c = ws.cell(row=i, column=j, value=v)
                 c.fill = xfill(bg); c.border = xbdr()
-                c.font = Font('Calibri', size=10 if j < 15 else 9, color=C_DK)
+                c.font = Font('Calibri', size=9, color=C_DK)
+                c.alignment = xctr() if j in range(7+_off, 13+_off) else xrgt() if j in (5+_off, 6+_off, 11+_off) else xlft(w=(j==len(HDRS)))
                 if f: c.number_format = f
-                _off = 1 if has_site_export else 0
-                _j_prio = 17 + _off; _j_stat = 18 + _off; _j_action = 19 + _off
-                _j_num = {6+_off, 7+_off}; _j_pct = {8+_off,9+_off,10+_off,11+_off,12+_off,13+_off,_j_stat}
-                if j == _j_prio:  # Priorité
-                    prio_bg = {'🔴 Urgence':'FFD6D6','🟡 Priorité':'FFF3CC','🔵 Surveillance':'D6EAF8'}.get(str(v),'FFFFFF')
-                    prio_fg = {'🔴 Urgence':'991B1B','🟡 Priorité':'854D0E','🔵 Surveillance':'1A4A7A'}.get(str(v),'1A1A2E')
-                    c.fill = xfill(prio_bg)
-                    c.font = Font('Calibri', size=9, bold=True, color=prio_fg)
-                    c.alignment = xctr()
-                else:
-                    c.alignment = xctr() if j in _j_pct else xrgt() if j in _j_num|{14+_off,15+_off} else xlft(w=(j==_j_action))
             ws.row_dimensions[i].height = 16
 
         ws.freeze_panes = 'A4'
         ws.auto_filter.ref = f'A3:{get_column_letter(len(HDRS))}{3+len(df)}'
 
-    # ── Onglet Synthèse Magasins ────────────────────────────────────────────────
-    has_site_col = 'Site nom long' in df_all.columns and df_all['Site nom long'].notna().any()
-    if has_site_col:
-        ws_mag = wb.create_sheet("Synthese Magasins")
-        ws_mag.sheet_view.showGridLines = False
-
-        # Colonnes
-        ws_mag.column_dimensions['A'].width = 28  # Magasin
-        ws_mag.column_dimensions['B'].width = 14  # CA
-        ws_mag.column_dimensions['C'].width = 12  # Marge
-        ws_mag.column_dimensions['D'].width = 11  # Taux actuel
-        ws_mag.column_dimensions['E'].width = 11  # Taux N-1
-        ws_mag.column_dimensions['F'].width = 13  # Dev N-1
-        ws_mag.column_dimensions['G'].width = 13  # Marge delta
-        ws_mag.column_dimensions['H'].width = 11  # Priorite
-        ws_mag.column_dimensions['I'].width = 11  # Statut
-        ws_mag.column_dimensions['J'].width = 10  # Fam rouges
-        ws_mag.column_dimensions['K'].width = 10  # Fam orange
-        ws_mag.column_dimensions['L'].width = 10  # Fam vertes
-        ws_mag.column_dimensions['M'].width = 42  # Top famille
-        ws_mag.column_dimensions['N'].width = 42  # Action magasin
-
-        # Titre
-        ws_mag.merge_cells('A1:N1')
-        ct = ws_mag.cell(row=1, column=1, value='SYNTHESE PAR MAGASIN  --  DEVIATION MARGE vs N-1')
-        ct.font = Font('Calibri', size=13, bold=True, color=C_WH)
-        ct.fill = xfill(C_HDR); ct.alignment = xctr()
-        ws_mag.row_dimensions[1].height = 30
-
-        # Sous-titre periode
-        ws_mag.merge_cells('A2:N2')
-        ct2 = ws_mag.cell(row=2, column=1,
-            value=f'  Periode : {", ".join(periodes)}  --  Classe par deviation N-1 croissante (pires magasins en tete)')
-        ct2.font = Font('Calibri', size=9, italic=True, color='AABBCC')
-        ct2.fill = xfill(C_HDR); ct2.alignment = xlft()
-        ws_mag.row_dimensions[2].height = 16
-
-        # En-tetes
-        MAG_HDRS = ['Magasin','CA (FCFA)','Marge (FCFA)','Taux actuel','Taux N-1',
-                    'Dev. N-1 (pts)','Marge delta FCFA','Priorite','Statut',
-                    'Fam. Rouges','Fam. Orange','Fam. Vertes',
-                    'Famille la plus impactee','Action recommandee']
-        for j, h in enumerate(MAG_HDRS, 1):
-            c = ws_mag.cell(row=3, column=j, value=h)
-            c.font = Font('Calibri', size=9, bold=True, color=C_WH)
-            c.fill = xfill(C_SUB); c.alignment = xctr(); c.border = xbdr()
-        ws_mag.row_dimensions[3].height = 28
-
-        # Calcul par magasin
-        df_sites = df_all[df_all['Periode'].isin(periodes)].copy()
-        df_sites = df_sites[
-            df_sites['Site nom long'].notna() &
-            ~df_sites['Site nom long'].isin(['Total','']) &
-            df_sites['CA'].notna() & (df_sites['CA'] > 0)
-        ].copy()
-
-        # Agréger par magasin
-        site_rows = []
-        for site in sorted(df_sites['Site nom long'].unique()):
-            sub = df_sites[df_sites['Site nom long'] == site]
-            ca_s   = sub['CA'].sum()
-            mg_s   = sub['Marge'].sum()
-            tx_s   = mg_s / ca_s if ca_s > 0 else 0
-            mn1_s  = sub['Marge_N1'].sum()
-            cn1_s  = sub['CA_N1'].sum()
-            tn1_s  = mn1_s / cn1_s if cn1_s > 0 else 0
-            dev_s  = tx_s - tn1_s
-            dmg_s  = sub['Dev_N1_FCFA'].sum()
-            n_r    = (sub['Statut'] == '🔴 Action requise').sum()
-            n_o    = (sub['Statut'] == '🟡 Vigilance').sum()
-            n_v    = (sub['Statut'] == '✅ OK').sum()
-
-            # Famille la plus impactée (pire Score Impact)
-            top_fam_row = sub.nlargest(1, 'Impact_Score')
-            top_fam = top_fam_row['SF_court'].values[0] if len(top_fam_row) else '—'
-            top_dev = top_fam_row['Dev_N1_pts'].values[0] if len(top_fam_row) else None
-
-            # Statut global magasin
-            if dev_s < -0.030:   stat_s = 'ACTION'
-            elif dev_s < -0.015: stat_s = 'VIGILANCE'
-            else:                stat_s = 'OK'
-
-            # Priorité magasin
-            score_s = sub['Impact_Score'].sum()
-            if score_s > 2000000:   prio_s = 'Urgence'
-            elif score_s > 500000:  prio_s = 'Priorite'
-            else:                   prio_s = 'Surveillance'
-
-            # Action recommandée
-            if n_r >= 5:
-                action = f'{n_r} familles en alerte -- Reunion acheteur + revue conditions fournisseurs'
-            elif n_r >= 2:
-                action = f'{n_r} familles en alerte -- Priorite sur {top_fam} ({top_dev:+.1f} pts vs N-1)' if pd.notna(top_dev) else f'{n_r} familles en alerte -- Traiter cette semaine'
-            elif n_r == 1:
-                action = f'1 famille en alerte -- Traiter {top_fam} cette semaine'
-            elif n_o >= 3:
-                action = f'{n_o} familles en vigilance -- Surveiller la tendance'
-            else:
-                action = 'RAS -- Maintenir les conditions actuelles'
-
-            site_rows.append({
-                'Magasin': site,
-                'CA': ca_s, 'Marge': mg_s,
-                'Tx': tx_s, 'Tn1': tn1_s, 'Dev': dev_s, 'DMg': dmg_s,
-                'Prio': prio_s, 'Stat': stat_s,
-                'NR': n_r, 'NO': n_o, 'NV': n_v,
-                'TopFam': top_fam, 'Action': action,
-            })
-
-        # Trier par déviation croissante (pires en tête)
-        site_rows.sort(key=lambda x: x['Dev'])
-
-        STAT_COLORS = {
-            'ACTION':     ('FFD6D6', '991B1B'),
-            'VIGILANCE':  ('FFF3CC', '854D0E'),
-            'OK':         ('D6F5D6', '145A32'),
-        }
-        PRIO_COLORS = {
-            'Urgence':     ('FFD6D6', '991B1B'),
-            'Priorite':    ('FFF3CC', '854D0E'),
-            'Surveillance':('D6EAF8', '1A4A7A'),
-        }
-
-        for i, row in enumerate(site_rows, 4):
-            bg_base = 'F7F7F7' if i % 2 == 0 else 'FFFFFF'
-            stat_bg, stat_fg = STAT_COLORS.get(row['Stat'], ('FFFFFF', '1A1A2E'))
-            prio_bg, prio_fg = PRIO_COLORS.get(row['Prio'], ('FFFFFF', '1A1A2E'))
-
-            data = [
-                (row['Magasin'],  bg_base,  '1A1A2E', True,  'left',   None),
-                (row['CA'],       bg_base,  '1A1A2E', False, 'right',  '#,##0'),
-                (row['Marge'],    bg_base,  '1A1A2E', False, 'right',  '#,##0'),
-                (row['Tx'],       bg_base,  '1A1A2E', False, 'center', '0.0%'),
-                (row['Tn1'],      bg_base,  '1A1A2E', False, 'center', '0.0%'),
-                (row['Dev'],      bg_base,  stat_fg,  True,  'center', '+0.0%;-0.0%;-'),
-                (row['DMg'],      bg_base,  stat_fg,  True,  'right',  '+#,##0;-#,##0;-'),
-                (row['Prio'],     prio_bg,  prio_fg,  True,  'center', None),
-                (row['Stat'],     stat_bg,  stat_fg,  True,  'center', None),
-                (row['NR'],       'FFD6D6' if row['NR'] > 0 else bg_base, '991B1B' if row['NR'] > 0 else '1A1A2E', True, 'center', None),
-                (row['NO'],       'FFF3CC' if row['NO'] > 0 else bg_base, '854D0E' if row['NO'] > 0 else '1A1A2E', True, 'center', None),
-                (row['NV'],       'D6F5D6' if row['NV'] > 0 else bg_base, '145A32' if row['NV'] > 0 else '1A1A2E', True, 'center', None),
-                (row['TopFam'],   bg_base,  '1A1A2E', False, 'left',   None),
-                (row['Action'],   bg_base,  '1A1A2E', False, 'left',   None),
-            ]
-
-            for j, (val, bg, fg, bold, align, fmt) in enumerate(data, 1):
-                c = ws_mag.cell(row=i, column=j, value=val)
-                c.fill      = xfill(bg)
-                c.font      = Font('Calibri', size=9, bold=bold, color=fg)
-                c.alignment = Alignment(horizontal=align, vertical='center', wrap_text=(j >= 13))
-                c.border    = xbdr()
-                if fmt: c.number_format = fmt
-            ws_mag.row_dimensions[i].height = 20 if i < len(site_rows) + 4 else 20
-
-        # Ligne totaux réseau
-        r_tot = len(site_rows) + 4
-        ws_mag.merge_cells(f'A{r_tot}:A{r_tot}')
-        tot_data = [
-            ('TOTAL RESEAU', C_HDR, C_WH, True, 'left', None),
-            (df_sites['CA'].sum(), C_SUB, C_WH, True, 'right', '#,##0'),
-            (df_sites['Marge'].sum(), C_SUB, C_WH, True, 'right', '#,##0'),
-            (df_sites['Marge'].sum()/df_sites['CA'].sum() if df_sites['CA'].sum()>0 else 0, C_SUB, C_WH, True, 'center', '0.0%'),
-            (df_sites['Marge_N1'].sum()/df_sites['CA_N1'].sum() if df_sites['CA_N1'].sum()>0 else 0, C_SUB, C_WH, True, 'center', '0.0%'),
-            (df_sites['Marge'].sum()/df_sites['CA'].sum() - df_sites['Marge_N1'].sum()/df_sites['CA_N1'].sum() if df_sites['CA_N1'].sum()>0 else 0, C_SUB, C_WH, True, 'center', '+0.0%;-0.0%;-'),
-            (df_sites['Dev_N1_FCFA'].sum(), C_SUB, C_WH, True, 'right', '+#,##0;-#,##0;-'),
-            ('', C_SUB, C_WH, False, 'center', None),
-            ('', C_SUB, C_WH, False, 'center', None),
-            ((df_sites['Statut']=='🔴 Action requise').sum(), C_SUB, C_WH, True, 'center', None),
-            ((df_sites['Statut']=='🟡 Vigilance').sum(), C_SUB, C_WH, True, 'center', None),
-            ((df_sites['Statut']=='✅ OK').sum(), C_SUB, C_WH, True, 'center', None),
-            ('', C_SUB, C_WH, False, 'center', None),
-            ('', C_SUB, C_WH, False, 'center', None),
-        ]
-        for j, (val, bg, fg, bold, align, fmt) in enumerate(tot_data, 1):
-            c = ws_mag.cell(row=r_tot, column=j, value=val)
-            c.fill = xfill(bg); c.font = Font('Calibri', size=10, bold=bold, color=fg)
-            c.alignment = Alignment(horizontal=align, vertical='center')
-            c.border = xbdr()
-            if fmt: c.number_format = fmt
-        ws_mag.row_dimensions[r_tot].height = 22
-
-        ws_mag.freeze_panes = 'A4'
-        ws_mag.auto_filter.ref = f'A3:N{r_tot - 1}'
-
-    # ── Onglet Plan de Négociation ───────────────────────────────────────────────
+    # ── Onglet Plan de Négociation ─────────────────────────────────────────────
     ws_neg = wb.create_sheet("Plan de Negociation")
     ws_neg.sheet_view.showGridLines = False
-    ws_neg.column_dimensions['A'].width = 20
-    ws_neg.column_dimensions['B'].width = 30
-    ws_neg.column_dimensions['C'].width = 20
-    ws_neg.column_dimensions['D'].width = 14
-    ws_neg.column_dimensions['E'].width = 16
-    ws_neg.column_dimensions['F'].width = 14
-    ws_neg.column_dimensions['G'].width = 14
-    ws_neg.column_dimensions['H'].width = 14
-    ws_neg.column_dimensions['I'].width = 14
-    ws_neg.column_dimensions['J'].width = 44
-
-    # Titre
-    ws_neg.merge_cells('A1:K1')
-    cn1 = ws_neg.cell(row=1, column=1, value='PLAN DE NEGOCIATION  --  FAMILLES EN ACTION REQUISE')
-    cn1.font = Font('Calibri', size=13, bold=True, color=C_WH)
-    cn1.fill = xfill(C_HDR); cn1.alignment = xctr()
-    ws_neg.row_dimensions[1].height = 30
-
-    ws_neg.merge_cells('A2:K2')
     periode_latest = sorted(periodes)[-1]
-    cn2 = ws_neg.cell(row=2, column=1,
-        value=f'  Periode : {periode_latest}  --  Trie par remise necessaire decroissante  --  Utiliser ce tableau en preparation des rendez-vous fournisseurs')
-    cn2.font = Font('Calibri', size=9, italic=True, color='AABBCC')
-    cn2.fill = xfill(C_HDR); cn2.alignment = xlft()
-    ws_neg.row_dimensions[2].height = 16
+    df_neg = df_all[(df_all['Periode']==periode_latest) & (df_all['Statut']=='Action')].copy()
+    df_neg = df_neg.sort_values('Remise_Necessaire', ascending=False)
 
-    # En-têtes
-    NEG_HDRS = ['Rayon','Famille','Magasin','Acheteur','CA (FCFA)','Marge (FCFA)',
-                'Taux actuel','Cible','Dev. N-1 (pts)',
-                'Remise necessaire FCFA','Action a mener']
-    NEG_W    = [20, 30, 24, 20, 14, 14, 12, 12, 13, 18, 44]
-    for j, (h, w) in enumerate(zip(NEG_HDRS, NEG_W), 1):
-        c = ws_neg.cell(row=3, column=j, value=h)
-        c.font = Font('Calibri', size=9, bold=True, color=C_WH)
-        c.fill = xfill('CC2200' if j == 10 else C_SUB)
-        c.alignment = xctr(); c.border = xbdr()
-        ws_neg.column_dimensions[get_column_letter(j)].width = w
-    ws_neg.row_dimensions[3].height = 28
+    NEG_H = ['Rayon','Famille','Magasin','Acheteur','CA (FCFA)','Marge brute (FCFA)',
+             'Taux actuel','Cible','Marge perdue FCFA','Remise nécessaire FCFA','Cause','Action']
+    NEG_W = [20,30,24,20,14,14,11,11,16,18,22,40]
 
-    # Données — période la plus récente uniquement, statut rouge
-    df_neg = df_all[
-        (df_all['Periode'] == periode_latest) &
-        (df_all['Statut'] == '🔴 Action requise')
-    ].copy()
-    df_neg = df_neg.sort_values('Remise_Necessaire_FCFA', ascending=False)
+    ws_neg.merge_cells(f'A1:{get_column_letter(len(NEG_H))}1')
+    n1 = ws_neg.cell(row=1,column=1,value='PLAN DE NEGOCIATION — FAMILLES EN ACTION REQUISE')
+    n1.font=Font('Calibri',size=13,bold=True,color=C_WH); n1.fill=xfill(C_HDR); n1.alignment=xctr()
+    ws_neg.row_dimensions[1].height=30
+    ws_neg.merge_cells(f'A2:{get_column_letter(len(NEG_H))}2')
+    n2 = ws_neg.cell(row=2,column=1,
+        value=f'  Periode : {periode_latest}  —  Trie par remise necessaire decroissante  —  Utiliser en preparation RDV fournisseurs')
+    n2.font=Font('Calibri',size=9,italic=True,color='AABBCC'); n2.fill=xfill(C_HDR); n2.alignment=xlft()
+    ws_neg.row_dimensions[2].height=16
 
-    for i, (_, r) in enumerate(df_neg.iterrows(), 4):
-        bg = 'F7F7F7' if i % 2 == 0 else 'FFFFFF'
-        neg_vals = [
-            r.get('Rayon_court', ''),
-            r.get('SF_court', ''),
-            r.get('Site nom long', '—') if 'Site nom long' in r.index else '—',
-            r.get('Acheteur', ''),
-            r.get('CA', None),
-            r.get('Marge', None),
-            r.get('%Marge', None),
-            r.get('Cible', None),
-            r.get('Dev_N1_pts', None),
-            r.get('Remise_Necessaire_FCFA', None),
-            r.get('Que_faire', ''),
-        ]
-        NEG_FMTS = [None, None, None, None, '#,##0', '#,##0', '0.0%', '0.0%',
-                    '+0.0%;-0.0%;-', '#,##0', None]
-        for j, (v, f) in enumerate(zip(neg_vals, NEG_FMTS), 1):
-            c = ws_neg.cell(row=i, column=j, value=v)
-            c.fill = xfill('FFE8E8' if j == 10 and (v or 0) > 500000 else bg)
-            c.font = Font('Calibri', size=9,
-                          bold=(j == 10 and (v or 0) > 500000),
-                          color='CC2200' if j == 10 and (v or 0) > 500000 else '1A1A2E')
-            c.alignment = Alignment(
-                horizontal='right' if j in (5, 6, 10) else 'center' if j in (7, 8, 9) else 'left',
-                vertical='center', wrap_text=(j == 11))
-            c.border = xbdr()
-            if f: c.number_format = f
-        ws_neg.row_dimensions[i].height = 18
+    for j,(h,w) in enumerate(zip(NEG_H,NEG_W),1):
+        c=ws_neg.cell(row=3,column=j,value=h)
+        c.font=Font('Calibri',size=9,bold=True,color=C_WH)
+        c.fill=xfill('CC2200' if j==10 else C_SUB)
+        c.alignment=xctr(); c.border=xbdr()
+        ws_neg.column_dimensions[get_column_letter(j)].width=w
+    ws_neg.row_dimensions[3].height=28
 
-    # Ligne de total remise
-    r_tot_neg = len(df_neg) + 4
-    ws_neg.merge_cells(f'A{r_tot_neg}:H{r_tot_neg}')
-    ct = ws_neg.cell(row=r_tot_neg, column=1, value='TOTAL REMISE NECESSAIRE POUR ATTEINDRE LES CIBLES')
-    ct.font = Font('Calibri', size=10, bold=True, color=C_WH)
-    ct.fill = xfill(C_HDR); ct.alignment = xlft()
-    cv = ws_neg.cell(row=r_tot_neg, column=10,
-                     value=df_neg['Remise_Necessaire_FCFA'].sum())
-    cv.font      = Font('Calibri', size=11, bold=True, color=C_WH)
-    cv.fill      = xfill('CC2200')
-    cv.number_format = '#,##0'
-    cv.alignment = xctr(); cv.border = xbdr()
-    ws_neg.row_dimensions[r_tot_neg].height = 24
-    ws_neg.freeze_panes = 'A4'
-    ws_neg.auto_filter.ref = f'A3:K{r_tot_neg - 1}'
+    for i,(_, r) in enumerate(df_neg.iterrows(),4):
+        bg='F7F7F7' if i%2==0 else 'FFFFFF'
+        has_s_neg = 'Site nom long' in r.index
+        nv=[r.get('Rayon_court',''), r.get('SF_court',''),
+            r.get('Site nom long','—') if has_s_neg else '—',
+            r.get('Acheteur',''), r.get('CA',None), r.get('Marge',None),
+            r.get('%Marge',None), r.get('Cible',None),
+            r.get('Dev_N1_FCFA',None), r.get('Remise_Necessaire',None),
+            r.get('Cause',''), r.get('Action','')]
+        NF=[None,None,None,None,'#,##0','#,##0','0.0%','0.0%','+#,##0;-#,##0;-','#,##0',None,None]
+        for j,(v,f) in enumerate(zip(nv,NF),1):
+            c=ws_neg.cell(row=i,column=j,value=v)
+            c.fill=xfill('FFE8E8' if j==10 and (v or 0)>500000 else bg)
+            c.font=Font('Calibri',size=9,bold=(j==10 and (v or 0)>500000),
+                        color='CC2200' if j==10 and (v or 0)>500000 else '1A1A2E')
+            c.alignment=Alignment(horizontal='right' if j in(5,6,9,10) else 'center' if j in(7,8) else 'left',
+                                  vertical='center',wrap_text=(j==12))
+            c.border=xbdr()
+            if f: c.number_format=f
+        ws_neg.row_dimensions[i].height=18
+
+    # Total remise
+    r_tot=len(df_neg)+4
+    ws_neg.merge_cells(f'A{r_tot}:I{r_tot}')
+    ct=ws_neg.cell(row=r_tot,column=1,value='TOTAL REMISE NECESSAIRE POUR ATTEINDRE LES CIBLES')
+    ct.font=Font('Calibri',size=10,bold=True,color=C_WH); ct.fill=xfill(C_HDR); ct.alignment=xlft()
+    cv=ws_neg.cell(row=r_tot,column=10,value=df_neg['Remise_Necessaire'].sum())
+    cv.font=Font('Calibri',size=11,bold=True,color=C_WH); cv.fill=xfill('CC2200')
+    cv.number_format='#,##0'; cv.alignment=xctr(); cv.border=xbdr()
+    ws_neg.row_dimensions[r_tot].height=24
+    ws_neg.freeze_panes='A4'
+    ws_neg.auto_filter.ref=f'A3:{get_column_letter(len(NEG_H))}{r_tot-1}'
+
+    # ── Onglet Synthèse Magasins ───────────────────────────────────────────────
+    has_site_all = 'Site nom long' in df_all.columns and df_all['Site nom long'].notna().any()
+    if has_site_all:
+        ws_mag = wb.create_sheet("Synthese Magasins")
+        ws_mag.sheet_view.showGridLines = False
+        MAG_H = ['Magasin','CA (FCFA)','Marge (FCFA)','Taux actuel','Taux N-1',
+                 'Deviation N-1','Marge perdue FCFA','Score sante moy.','Statut',
+                 'Fam. en Action','Fam. Vigilance','Famille la plus impactee','Action magasin']
+        MAG_W = [28,14,14,11,11,14,16,14,12,12,14,38,44]
+
+        ws_mag.merge_cells(f'A1:{get_column_letter(len(MAG_H))}1')
+        cm=ws_mag.cell(row=1,column=1,value='SYNTHESE PAR MAGASIN — DEVIATION MARGE vs N-1')
+        cm.font=Font('Calibri',size=13,bold=True,color=C_WH); cm.fill=xfill(C_HDR); cm.alignment=xctr()
+        ws_mag.row_dimensions[1].height=30
+        ws_mag.merge_cells(f'A2:{get_column_letter(len(MAG_H))}2')
+        cm2=ws_mag.cell(row=2,column=1,value=f'  Periodes : {", ".join(periodes)}  —  Classe par deviation croissante')
+        cm2.font=Font('Calibri',size=9,italic=True,color='AABBCC'); cm2.fill=xfill(C_HDR); cm2.alignment=xlft()
+        ws_mag.row_dimensions[2].height=16
+
+        for j,(h,w) in enumerate(zip(MAG_H,MAG_W),1):
+            c=ws_mag.cell(row=3,column=j,value=h)
+            c.font=Font('Calibri',size=9,bold=True,color=C_WH)
+            c.fill=xfill(C_SUB); c.alignment=xctr(); c.border=xbdr()
+            ws_mag.column_dimensions[get_column_letter(j)].width=w
+        ws_mag.row_dimensions[3].height=28
+
+        df_sites = df_all[df_all['Periode'].isin(periodes)].copy()
+        df_sites = df_sites[df_sites['Site nom long'].notna() &
+                            ~df_sites['Site nom long'].isin(['Total','']) &
+                            (df_sites['CA']>0)].copy()
+        site_rows=[]
+        for site in sorted(df_sites['Site nom long'].unique()):
+            sub=df_sites[df_sites['Site nom long']==site]
+            ca_s=sub['CA'].sum(); mg_s=sub['Marge'].sum()
+            tx_s=mg_s/ca_s if ca_s>0 else 0
+            mn1_s=sub['Marge_N1'].sum(); cn1_s=sub['CA_N1'].sum()
+            tn1_s=mn1_s/cn1_s if cn1_s>0 else 0
+            dev_s=tx_s-tn1_s
+            n_act=(sub['Statut']=='Action').sum()
+            n_vig=(sub['Statut']=='Vigilance').sum()
+            top_f=sub.nlargest(1,'Impact_Score')
+            top_fam=top_f['SF_court'].values[0] if len(top_f) else '—'
+            top_dev=top_f['Dev_N1_pts'].values[0] if len(top_f) else None
+            score_moy=sub['Score_Sante'].mean() if 'Score_Sante' in sub.columns else 50
+            if dev_s < -0.030:   stat_s='Action'
+            elif dev_s < -0.015: stat_s='Vigilance'
+            else:                stat_s='OK'
+            if n_act>=5:      action_m=f'{n_act} alertes — reunion acheteur + revue fournisseurs'
+            elif n_act>=2:    action_m=f'{n_act} alertes — priorite {top_fam} ({top_dev:+.1f} pts)' if pd.notna(top_dev) else f'{n_act} alertes'
+            elif n_act==1:    action_m=f'Traiter {top_fam} cette semaine'
+            elif n_vig>=3:    action_m=f'{n_vig} en vigilance — surveiller la tendance'
+            else:             action_m='RAS — maintenir les conditions'
+            site_rows.append({'site':site,'ca':ca_s,'mg':mg_s,'tx':tx_s,'tn1':tn1_s,
+                              'dev':dev_s,'dmg':sub['Dev_N1_FCFA'].sum(),
+                              'score':round(score_moy),'stat':stat_s,
+                              'n_act':n_act,'n_vig':n_vig,'top':top_fam,'action':action_m})
+        site_rows.sort(key=lambda x: x['dev'])
+
+        STAT_C={'Action':('FFD6D6','991B1B'),'Vigilance':('FFF3CC','854D0E'),'OK':('D6F5D6','145A32')}
+        for i,row in enumerate(site_rows,4):
+            bg='F7F7F7' if i%2==0 else 'FFFFFF'
+            s_bg,s_fg=STAT_C.get(row['stat'],('FFFFFF','1A1A2E'))
+            data=[(row['site'],bg,'1A1A2E',True,'left',None),
+                  (row['ca'],bg,'1A1A2E',False,'right','#,##0'),
+                  (row['mg'],bg,'1A1A2E',False,'right','#,##0'),
+                  (row['tx'],bg,'1A1A2E',False,'center','0.0%'),
+                  (row['tn1'],bg,'1A1A2E',False,'center','0.0%'),
+                  (row['dev'],bg,s_fg,True,'center','+0.0%;-0.0%;-'),
+                  (row['dmg'],bg,s_fg,True,'right','+#,##0;-#,##0;-'),
+                  (row['score'],bg,'1A1A2E',False,'center','0'),
+                  (row['stat'],s_bg,s_fg,True,'center',None),
+                  (row['n_act'],'FFD6D6' if row['n_act']>0 else bg,'991B1B' if row['n_act']>0 else '1A1A2E',True,'center',None),
+                  (row['n_vig'],'FFF3CC' if row['n_vig']>0 else bg,'854D0E' if row['n_vig']>0 else '1A1A2E',True,'center',None),
+                  (row['top'],bg,'1A1A2E',False,'left',None),
+                  (row['action'],bg,'1A1A2E',False,'left',None)]
+            for j,(v,bg_c,fg,bold,align,fmt) in enumerate(data,1):
+                c=ws_mag.cell(row=i,column=j,value=v)
+                c.fill=xfill(bg_c); c.font=Font('Calibri',size=9,bold=bold,color=fg)
+                c.alignment=Alignment(horizontal=align,vertical='center',wrap_text=(j>=12))
+                c.border=xbdr()
+                if fmt: c.number_format=fmt
+            ws_mag.row_dimensions[i].height=20
+
+        # Ligne totale
+        r_t=len(site_rows)+4
+        ws_mag.merge_cells(f'A{r_t}:A{r_t}')
+        tt=ws_mag.cell(row=r_t,column=1,value='TOTAL RESEAU')
+        tt.font=Font('Calibri',size=10,bold=True,color=C_WH); tt.fill=xfill(C_HDR)
+        tt.alignment=xlft(); tt.border=xbdr()
+        totals=[(df_sites['CA'].sum(),'right','#,##0'),(df_sites['Marge'].sum(),'right','#,##0'),
+                (df_sites['Marge'].sum()/df_sites['CA'].sum() if df_sites['CA'].sum()>0 else 0,'center','0.0%'),
+                (df_sites['Marge_N1'].sum()/df_sites['CA_N1'].sum() if df_sites['CA_N1'].sum()>0 else 0,'center','0.0%'),
+                (df_sites['Marge'].sum()/df_sites['CA'].sum()-(df_sites['Marge_N1'].sum()/df_sites['CA_N1'].sum() if df_sites['CA_N1'].sum()>0 else 0),'center','+0.0%;-0.0%;-'),
+                (df_sites['Dev_N1_FCFA'].sum(),'right','+#,##0;-#,##0;-'),
+                (df_sites['Score_Sante'].mean() if 'Score_Sante' in df_sites.columns else 50,'center','0')]
+        for j,(v,align,fmt) in enumerate(totals,2):
+            c=ws_mag.cell(row=r_t,column=j,value=v)
+            c.font=Font('Calibri',size=10,bold=True,color=C_WH); c.fill=xfill(C_SUB)
+            c.alignment=Alignment(horizontal=align,vertical='center'); c.border=xbdr()
+            c.number_format=fmt
+        ws_mag.row_dimensions[r_t].height=22
+        ws_mag.freeze_panes='A4'
+        ws_mag.auto_filter.ref=f'A3:{get_column_letter(len(MAG_H))}{r_t-1}'
 
     # ── Onglet Lexique ─────────────────────────────────────────────────────────
-    ws_lex = wb.create_sheet("Lexique et Statuts")
+    ws_lex = wb.create_sheet("Guide de lecture")
     ws_lex.sheet_view.showGridLines = False
-    ws_lex.column_dimensions['A'].width = 26
-    ws_lex.column_dimensions['B'].width = 50
-    ws_lex.column_dimensions['C'].width = 54
+    ws_lex.column_dimensions['A'].width = 24
+    ws_lex.column_dimensions['B'].width = 48
+    ws_lex.column_dimensions['C'].width = 52
 
-    def lex_title(ws, row, txt):
-        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=3)
-        c = ws.cell(row=row, column=1, value=txt)
-        c.font = Font('Calibri', size=13, bold=True, color=C_WH)
-        c.fill = xfill(C_HDR); c.alignment = xctr()
-        ws.row_dimensions[row].height = 30
+    ws_lex.merge_cells('A1:C1')
+    tl=ws_lex.cell(row=1,column=1,value='GUIDE DE LECTURE — MODULE RENTABILITE SMARTBUYER v2.3')
+    tl.font=Font('Calibri',size=13,bold=True,color=C_WH); tl.fill=xfill(C_HDR); tl.alignment=xctr()
+    ws_lex.row_dimensions[1].height=30
 
-    def lex_section(ws, row, txt):
-        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=3)
-        c = ws.cell(row=row, column=1, value=txt)
-        c.font = Font('Calibri', size=10, bold=True, color=C_WH)
-        c.fill = xfill(C_SUB); c.alignment = xlft()
-        ws.row_dimensions[row].height = 22
+    def lex_sec(ws,row,txt):
+        ws.merge_cells(f'A{row}:C{row}')
+        c=ws.cell(row=row,column=1,value=txt)
+        c.font=Font('Calibri',size=10,bold=True,color=C_WH); c.fill=xfill(C_SUB); c.alignment=xlft()
+        ws.row_dimensions[row].height=22
 
-    def lex_hdr(ws, row, cols):
-        for j, t in enumerate(cols, 1):
-            c = ws.cell(row=row, column=j, value=t)
-            c.font = Font('Calibri', size=9, bold=True, color='3A3A3C')
-            c.fill = xfill('F2F2F7'); c.alignment = xctr(); c.border = xbdr()
-        ws.row_dimensions[row].height = 20
+    def lex_row(ws,row,vals,bg='FFFFFF',h=42):
+        for j,v in enumerate(vals,1):
+            c=ws.cell(row=row,column=j,value=v)
+            c.font=Font('Calibri',size=9,color='1A1A2E',bold=(j==1))
+            c.fill=PatternFill('solid',fgColor=bg)
+            c.alignment=Alignment(horizontal='left',vertical='center',wrap_text=True)
+            c.border=xbdr()
+        ws.row_dimensions[row].height=h
 
-    def lex_row(ws, row, vals, bg='FFFFFF', h=45, bold1=False):
-        for j, v in enumerate(vals, 1):
-            c = ws.cell(row=row, column=j, value=v)
-            c.font = Font('Calibri', size=9, bold=(bold1 and j == 1), color='1A1A2E')
-            c.fill = xfill(bg)
-            c.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
-            c.border = xbdr()
-        ws.row_dimensions[row].height = h
+    lex_sec(ws_lex,2,'  1. COLONNES CLES')
+    for j,h in enumerate(['Colonne','Ce que ca mesure','Comment lire'],1):
+        c=ws_lex.cell(row=3,column=j,value=h)
+        c.font=Font('Calibri',size=9,bold=True,color='3A3A3C')
+        c.fill=PatternFill('solid',fgColor='F2F2F7'); c.alignment=xctr(); c.border=xbdr()
+    ws_lex.row_dimensions[3].height=20
 
-    lex_title(ws_lex, 1, "GUIDE DE LECTURE ET LEXIQUE  --  MODULE RENTABILITE SMARTBUYER v2.2")
-
-    # BLOC 1 : Colonnes cles
-    lex_section(ws_lex, 2, "  1.  DEFINITION DES COLONNES CLES")
-    lex_hdr(ws_lex, 3, ["Colonne", "Ce que ca mesure", "Comment le lire"])
-
-    COLS_DEF = [
-        ("Taux actuel",
-         "Taux de marge brute realise sur la periode chargee.\nFormule : Marge / CA x 100",
-         "Ex : 18,5 %  ->  sur 100 FCFA vendus, 18,5 FCFA restent en marge avant charges."),
-        ("Taux N-1",
-         "Taux de marge de la meme periode l'annee precedente.\nSert de reference historique.",
-         "Ex : 22,0 % en N-1 vs 18,5 % aujourd'hui  ->  la famille a perdu 3,5 pts en un an."),
-        ("Cible",
-         "Objectif de taux fixe avec la direction.\nFormule : MAX(Taux N-1 x 1,02 ; Plancher segment)",
-         "Ex : N-1 = 22 %  ->  Cible = 22,44 %.\nSi pas d'historique N-1 (nouveaute)  ->  Cible = Plancher segment."),
-        ("Plancher",
-         "Taux de marge minimum absolu selon la nature de la famille.\nEn dessous = non rentable.",
-         "Produit d'appel : 10 %   Coeur de gamme : 18 %\nValeur ajoutee : 25 %   PH / Droguerie : 22 %"),
-        ("Dev. N-1 (pts)",
-         "Ecart en points entre le taux actuel et le taux N-1.\nMesure la progression ou regression vs l'an dernier.",
-         "Ex : -3,5 pts  ->  la marge a recule de 3,5 points vs N-1.\nEx : +2,1 pts  ->  la marge a progresse."),
-        ("Dev. Cible (pts)",
-         "Ecart en points entre le taux actuel et la cible fixee.\nMesure l'atteinte de l'objectif.",
-         "Ex : -4,0 pts  ->  l'acheteur est 4 points sous son objectif.\nAction requise si ecart > 3 pts."),
-        ("Marge delta FCFA",
-         "Marge gagnee ou perdue en valeur vs N-1 sur la periode.\nFormule : Dev. N-1 (pts) x CA",
-         "Ex : -432 000 FCFA  ->  sur cette semaine, 432 000 FCFA de marge en moins vs N-1.\nIndicateur de l'impact financier reel."),
-        ("Score Impact",
-         "Indicateur de priorite : marge perdue ponderee par le volume de la famille.",
-         "Ex : Riz Long score 850 000  vs  Chips score 48 000.\nRiz Long est prioritaire meme si son ecart en % est plus faible car il pese plus en volume."),
-        ("Priorite",
-         "Niveau d action derive automatiquement du Score Impact.\nTrois niveaux : Urgence / Priorite / Surveillance.",
-         "Score > 500 000  ->  Urgence : appel fournisseur cette semaine.\nScore 100 000 a 500 000  ->  Priorite : traiter cette semaine.\nScore < 100 000  ->  Surveillance : monitorer."),
-        ("Source cible",
-         "Indique comment la cible a ete calculee pour cette famille.",
-         '"N-1 x 1,02"  ->  calcule depuis l historique N-1.\n"Plancher segment (nouveaute)"  ->  article sans historique, compare uniquement vs plancher.'),
+    COLS=[
+        ("Taux brut","Taux de marge brute realise. Formule : Marge / CA x 100",
+         "Ex 18,5% = sur 100 FCFA vendus, 18,5 FCFA restent en marge avant charges"),
+        ("Tx marge nette (casse)","Taux apres deduction de la casse. Mesure l'impact operationnel.",
+         "Ex 18,5% brut -> 17,0% net = la casse greve 1,5 pt de marge. Levier magasin, pas acheteur."),
+        ("Marge perdue FCFA","Marge absolue perdue vs N-1 sur la periode. Clé pour prioriser.",
+         "Ex -920 K FCFA = si rien ne change cette semaine, 920 K de moins vs l'annee derniere."),
+        ("Score sante (0-100)","Score unique : déviation N-1 (50%) + atteinte cible (30%) + impact casse (20%).",
+         "100 = parfait. 70+ = satisfaisant. 50-70 = vigilance. <50 = action requise."),
+        ("Cause","Diagnostic automatique de la cause de la deviation.",
+         "Promo deficitaire / Conditions achat / Effet mix / Produit appel / Chute severe PA"),
+        ("Action","1 action concrete recommandee pour cette famille cette semaine.",
+         "Toujours 1 phrase directe et actionnable. Pas d'analyse supplementaire necessaire."),
+        ("Remise necessaire FCFA","Montant a recuperer en conditions achat pour atteindre la cible.",
+         "Ex 400 K FCFA = argument chiffre a presenter au fournisseur en negociation."),
     ]
+    for i,(col,mesure,lecture) in enumerate(COLS):
+        lex_row(ws_lex,4+i,[col,mesure,lecture],bg='FFFFFF' if i%2==0 else 'F7F7F7')
 
-    for i, row_data in enumerate(COLS_DEF):
-        bg = 'FFFFFF' if i % 2 == 0 else 'F7F7F7'
-        lex_row(ws_lex, 4 + i, list(row_data), bg=bg, h=45, bold1=True)
+    r2=4+len(COLS)+1
+    lex_sec(ws_lex,r2,'  2. STATUTS ET SCORE SANTE')
+    for j,h in enumerate(['Statut','Seuil','Exemple + action'],1):
+        c=ws_lex.cell(row=r2+1,column=j,value=h)
+        c.font=Font('Calibri',size=9,bold=True,color='3A3A3C')
+        c.fill=PatternFill('solid',fgColor='F2F2F7'); c.alignment=xctr(); c.border=xbdr()
+    ws_lex.row_dimensions[r2+1].height=20
 
-    # BLOC 2 : Statuts
-    r2 = 4 + len(COLS_DEF) + 1
-    lex_section(ws_lex, r2, "  2.  GUIDE DES STATUTS  --  QUE FAIRE SELON L'ALERTE")
-    lex_hdr(ws_lex, r2 + 1, ["Statut", "Signification et seuil", "Exemple concret + action recommandee"])
-
-    STATUTS = [
-        ("OK",            "D8F5D8", "145A32",
-         "Taux actuel >= Cible - 1,5 pt.\nLa famille tient son objectif de marge.",
-         "Cafe Soluble : Taux 21,8 %  Cible 21,0 %  Dev. +0,8 pt\n-> RAS. Surveiller que la tendance se maintienne la semaine suivante."),
-        ("VIGILANCE",     "FEF9C3", "854D0E",
-         "Taux actuel entre Cible - 1,5 pt et Cible - 3 pts.\nDegradation en cours, pas encore critique.",
-         "Biscuits : Taux 19,2 %  Cible 21,5 %  Dev. -2,3 pts\n-> Verifier si une promo en cours erode la marge. A surveiller cette semaine."),
-        ("ACTION REQUISE","FFD6D6", "991B1B",
-         "Taux actuel < Cible - 3 pts.\nDegradation significative. Intervention acheteur necessaire cette semaine.",
-         "Huile : Taux 8,1 %  Cible 12,0 %  Dev. -3,9 pts  Marge delta -680 000 FCFA\n-> Contacter le fournisseur cette semaine. Verifier le prix d'achat et suspendre toute promo deficitaire."),
-        ("N/A",           "F3F4F6", "6B7280",
-         "Pas de donnees N-1 disponibles.\nComparaison historique impossible.",
-         "Nouveau referencement lance ce mois-ci : pas d'historique N-1.\n-> Comparer uniquement vs la Cible Plancher segment. Surveiller des la periode suivante."),
+    STATS=[
+        ('OK','D8F5D8','145A32','Taux actuel >= Cible - 1,5 pt et score > 65',
+         'Cafe Soluble 21,8% / cible 21,0% / score 72 -> RAS. Surveiller la semaine suivante.'),
+        ('Vigilance','FEF9C3','854D0E','Taux entre Cible - 1,5 pt et Cible - 3 pts / score 50-65',
+         'Biscuits 19,2% / cible 21,5% -> Surveiller. Pas d urgence mais a confirmer cette semaine.'),
+        ('Action','FFD6D6','991B1B','Taux < Cible - 3 pts OU score < 50',
+         'Huile 8,1% / cible 12,0% / score 32 -> Revoir PA fournisseur. Action cette semaine.'),
     ]
+    for i,(stat,bg,fg,seuil,ex) in enumerate(STATS):
+        r=r2+2+i
+        for j,v in enumerate([stat,seuil,ex],1):
+            c=ws_lex.cell(row=r,column=j,value=v)
+            c.fill=PatternFill('solid',fgColor=bg)
+            c.font=Font('Calibri',size=9,bold=(j==1),color=fg if j==1 else '1A1A2E')
+            c.alignment=Alignment(horizontal='left',vertical='center',wrap_text=True)
+            c.border=xbdr()
+        ws_lex.row_dimensions[r].height=52
 
-    for i, (stat, bg, fg, seuil, exemple) in enumerate(STATUTS):
-        r = r2 + 2 + i
-        for j, v in enumerate([stat, seuil, exemple], 1):
-            c = ws_lex.cell(row=r, column=j, value=v)
-            c.fill = xfill(bg)
-            c.font = Font('Calibri', size=9, bold=(j == 1), color=fg if j == 1 else '1A1A2E')
-            c.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
-            c.border = xbdr()
-        ws_lex.row_dimensions[r].height = 60
-
-    # BLOC 3 : Segments
-    r3 = r2 + 2 + len(STATUTS) + 1
-    lex_section(ws_lex, r3, "  3.  SEGMENTATION DES FAMILLES  --  PLANCHERS DE MARGE")
-    lex_hdr(ws_lex, r3 + 1, ["Segment", "Plancher P&L", "Familles concernees"])
-
-    SEGMENTS = [
-        ("Produit d'appel",  "FFF3E0", "B25000", "10 %",
-         "Riz Long, Huiles, Laits, Eaux, Sucres, Farines, Pates, Semoules, Bouillon, Legumes secs\n-> Prix contraints par le marche. Ne pas viser 21 % : structurellement impossible."),
-        ("Coeur de gamme",   "E3F2FD", "0D47A1", "18 %",
-         "PGC standard Epicerie et Boissons non classes ailleurs.\n-> Objectif atteignable via negociation fournisseur et calibrage promo."),
-        ("Valeur ajoutee",   "E8F5E9", "1B5E20", "25 %",
-         "BIO, Chips, Snacking, Soins visage/corps, Complements, Produits du monde, Diet.\n-> Moins de concurrence prix. Marge < 25 % doit alerter l'acheteur."),
-        ("PH / Droguerie",   "FCE4EC", "880E4F", "22 %",
-         "Tout le rayon Parfumerie Hygiene et Droguerie.\n-> Structurellement plus riche. En dessous de 22 % : investiguer la pression promo."),
+    r3=r2+2+len(STATS)+1
+    lex_sec(ws_lex,r3,'  3. SEGMENTATION — PLANCHERS DE MARGE')
+    SEGS=[
+        ("Produit d appel","FFF3E0","B25000","10%","Riz, Huile, Lait, Eau, Sucre, Farine, Pates, Semoules — prix contraints par le marche"),
+        ("Coeur de gamme","E3F2FD","0D47A1","18%","PGC standard Epicerie et Boissons — objectif atteignable via negociation fournisseur"),
+        ("Valeur ajoutee","E8F5E9","1B5E20","25%","BIO, Chips, Snacking, Cosmetique — moins de concurrence prix"),
+        ("PH / Droguerie","FCE4EC","880E4F","22%","Parfumerie, Hygiene, Droguerie — structurellement plus riche"),
     ]
+    for j,h in enumerate(['Segment','Plancher','Familles concernees'],1):
+        c=ws_lex.cell(row=r3+1,column=j,value=h)
+        c.font=Font('Calibri',size=9,bold=True,color='3A3A3C')
+        c.fill=PatternFill('solid',fgColor='F2F2F7'); c.alignment=xctr(); c.border=xbdr()
+    for i,(seg,bg,fg,plancher,fam) in enumerate(SEGS):
+        r=r3+2+i
+        for j,v in enumerate([seg,plancher,fam],1):
+            c=ws_lex.cell(row=r,column=j,value=v)
+            c.fill=PatternFill('solid',fgColor=bg)
+            c.font=Font('Calibri',size=9,bold=(j in(1,2)),color=fg if j in(1,2) else '1A1A2E')
+            c.alignment=Alignment(horizontal='center' if j==2 else 'left',vertical='center',wrap_text=True)
+            c.border=xbdr()
+        ws_lex.row_dimensions[r].height=46
 
-    for i, (seg, bg, fg, plancher, fam) in enumerate(SEGMENTS):
-        r = r3 + 2 + i
-        for j, v in enumerate([seg, plancher, fam], 1):
-            c = ws_lex.cell(row=r, column=j, value=v)
-            c.fill = xfill(bg)
-            c.font = Font('Calibri', size=9, bold=(j in (1, 2)), color=fg if j in (1, 2) else '1A1A2E')
-            c.alignment = Alignment(horizontal='center' if j == 2 else 'left',
-                                    vertical='center', wrap_text=True)
-            c.border = xbdr()
-        ws_lex.row_dimensions[r].height = 50
-
-    # Note bas de page
-    r_note = r3 + 2 + len(SEGMENTS) + 1
-    ws_lex.merge_cells(start_row=r_note, start_column=1, end_row=r_note, end_column=3)
-    c = ws_lex.cell(row=r_note, column=1,
-        value="SmartBuyer Hub v2.2  --  NovaRetail Solutions  --  "
-              "Les cibles sont revisables chaque debut d'exercice via le referentiel embarque.")
-    c.font = Font('Calibri', size=8, italic=True, color='8E8E93')
-    c.fill = xfill('F9F9FB')
-    c.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-    ws_lex.row_dimensions[r_note].height = 20
+    r_note=r3+2+len(SEGS)+1
+    ws_lex.merge_cells(f'A{r_note}:C{r_note}')
+    cn=ws_lex.cell(row=r_note,column=1,
+        value="SmartBuyer Hub v2.3 — NovaRetail Solutions — Cibles revisables chaque debut d'exercice via le referentiel embarque.")
+    cn.font=Font('Calibri',size=8,italic=True,color='8E8E93')
+    cn.fill=PatternFill('solid',fgColor='F9F9FB')
+    cn.alignment=Alignment(horizontal='center',vertical='center',wrap_text=True)
+    ws_lex.row_dimensions[r_note].height=20
 
     buf = BytesIO(); wb.save(buf); buf.seek(0)
     return buf
@@ -926,375 +811,239 @@ def export_excel(df_all, periodes):
 with st.sidebar:
     st.markdown("""
 <div style='margin-bottom:18px'>
-  <div style='font-size:20px;font-weight:700;color:#1C1C1E;letter-spacing:-0.02em'>🛍️ SmartBuyer</div>
+  <div style='font-size:20px;font-weight:700;color:#1C1C1E;letter-spacing:-0.02em'>SmartBuyer</div>
   <div style='font-size:11px;color:#8E8E93;margin-top:1px'>Hub analytique · Équipe Achats</div>
 </div>""", unsafe_allow_html=True)
     st.markdown("---")
-
     st.markdown("<div style='font-size:11px;font-weight:600;color:#8E8E93;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px'>Navigation</div>", unsafe_allow_html=True)
-    st.page_link("pages/home.py",                                     label="🏠  Accueil")
-    st.page_link("pages/01_📊_Analyse_Scoring_ABC.py",                label="📊  Scoring ABC")
-    st.page_link("pages/02_📈_Ventes_PBI.py",                         label="📈  Ventes PBI")
-    st.page_link("pages/03_📦_Detention_Top_CA.py",                   label="📦  Détention Top CA")
-    st.page_link("pages/04_💸_Performance_Promo.py",                  label="💸  Performance Promo")
-    st.page_link("pages/05_🏪_Suivi_Implantation.py",                label="🏗️  Suivi Implantation")
-    st.page_link("pages/06_💸_Marges_Negatives.py",                   label="💸  Marges Négatives")
-    st.page_link("pages/07_📈_OTIF.py",                               label="📈  OTIF")
-    st.page_link("pages/08_📦_OOS.py",                                label="📦  OOS Ruptures")
-    st.page_link("pages/09_✅_Tasks_Trackers.py",                     label="✅  Tasks Tracker")
-    st.page_link("pages/10_📊_Perf_Hebdo.py",                         label="📊  Perf Hebdo")
-    st.page_link("pages/11_📊_Rentabilite.py",                        label="📊  Rentabilité")
+    st.page_link("pages/home.py",                               label="🏠  Accueil")
+    st.page_link("pages/01_📊_Analyse_Scoring_ABC.py",          label="📊  Scoring ABC")
+    st.page_link("pages/02_📈_Ventes_PBI.py",                   label="📈  Ventes PBI")
+    st.page_link("pages/03_📦_Detention_Top_CA.py",             label="📦  Détention Top CA")
+    st.page_link("pages/04_💸_Performance_Promo.py",            label="💸  Performance Promo")
+    st.page_link("pages/05_🏪_Suivi_Implantation.py",           label="🏪  Suivi Implantation")
+    st.page_link("pages/06_💸_Marges_Negatives.py",             label="💸  Marges Négatives")
+    st.page_link("pages/07_📈_OTIF.py",                         label="📈  OTIF")
+    st.page_link("pages/08_📦_OOS.py",                          label="📦  OOS Ruptures")
+    st.page_link("pages/09_✅_Tasks_Trackers.py",               label="✅  Tasks Tracker")
+    st.page_link("pages/10_📊_Perf_Hebdo.py",                   label="📊  Perf Hebdo")
+    st.page_link("pages/11_📊_Rentabilite.py",                  label="📊  Rentabilité")
     st.markdown("---")
-
-    st.markdown("<div style='font-size:11px;font-weight:600;color:#8E8E93;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px'>Import fichiers</div>", unsafe_allow_html=True)
+    st.markdown("<div style='font-size:11px;font-weight:600;color:#8E8E93;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px'>Import</div>", unsafe_allow_html=True)
     uploaded_files = st.file_uploader(
-        "Extraction(s) PBI", type=['xlsx'],
-        accept_multiple_files=True,
-        help=f"Colonnes requises : {', '.join(COLS_REQUIRED)}"
+        "Extraction(s) PBI", type=['xlsx'], accept_multiple_files=True,
+        help=f"Semaine ou journée — période détectée automatiquement.\nColonnes : {', '.join(COLS_REQUIRED)}"
     )
-    ref_override = st.file_uploader(
-        "Référentiel cibles (optionnel)", type=['xlsx'],
-        help="Laissez vide → référentiel embarqué. Uploadez pour écraser."
-    )
+    ref_override = st.file_uploader("Référentiel cibles (optionnel)", type=['xlsx'],
+                                     help="Laissez vide → référentiel embarqué.")
     st.markdown("---")
-    st.markdown("<div style='font-size:11px;font-weight:600;color:#8E8E93;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px'>Filtres</div>", unsafe_allow_html=True)
-    seuil_fcfa = st.slider("Impact min (K FCFA)", 0, 2000, 0, 50,
-                           help="Masquer les familles sous ce seuil de marge perdue")
-    st.markdown("---")
-    st.markdown("""
-<div style='font-size:11px;color:#8E8E93;line-height:2.2'>
-  <span style='color:#FF3B30'>●</span> &lt; −3 pts vs N-1 : Action requise<br>
-  <span style='color:#FF9500'>●</span> −1,5 à −3 pts : Vigilance<br>
-  <span style='color:#34C759'>●</span> &gt; −1,5 pt : OK
-</div>""", unsafe_allow_html=True)
-    st.markdown("---")
-    st.caption("NovaRetail Solutions · SmartBuyer v2.2")
+    st.caption("NovaRetail Solutions · SmartBuyer v2.3")
 
-# ─── PAGE VIDE ────────────────────────────────────────────────────────────────
+# ─── ÉCRAN VIDE ───────────────────────────────────────────────────────────────
 if not uploaded_files:
-    st.markdown("<div class='page-title'>📊 Rentabilité — Suivi Déviation Marge</div>", unsafe_allow_html=True)
-    st.markdown("<div class='page-caption'>Pilotage hebdomadaire des taux de marge · Déviation vs N-1 · Cibles acheteurs · Score d'impact financier</div>", unsafe_allow_html=True)
+    st.markdown("<div class='page-title'>📊 Rentabilité</div>", unsafe_allow_html=True)
+    st.markdown("<div class='page-caption'>Cockpit Direction · Briefing Acheteur · Analyse Approfondie</div>", unsafe_allow_html=True)
     st.markdown("---")
-
     st.markdown("""
 <div class='alert-card alert-blue'>
-  <strong>ℹ️ À quoi sert ce module ?</strong><br>
-  Ce module pilote la <strong>déviation du taux de marge vs N-1</strong> famille par famille, en croisant trois dimensions :
-  acheteur, rayon et magasin. Il répond à la question : <em>où ça coince, pourquoi, et que faire ?</em>
-  <br><br>
-  <strong>1. Vue Réseau</strong> — KPIs globaux, synthèse par rayon, top familles en alerte triées par impact financier<br>
-  <strong>2. Vue Acheteur</strong> — briefing personnalisé, familles prioritaires, colonne "Que faire ?"<br>
-  <strong>3. Vue Magasin</strong> — comparaison site par site (nécessite extraction avec dimension Site)<br>
-  <strong>4. Tendance</strong> — évolution multi-périodes, détection des dégradations persistantes
+  <strong>Chargez une extraction PBI</strong> dans la sidebar pour démarrer.<br>
+  Fonctionne avec une extraction journalière ou hebdomadaire. La période est détectée automatiquement.
 </div>""", unsafe_allow_html=True)
 
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown("<div class='section-label'>Indicateurs calculés automatiquement</div>", unsafe_allow_html=True)
-
-    c1, c2 = st.columns(2)
-    indics = [
-        ("📉", "Déviation vs N-1", "#FF3B30",
-         "Écart entre le taux de marge actuel et le taux de la même période N-1",
-         "Δ = Tx marge actuel − Tx marge N-1",
-         "Signal principal : la marge progresse ou régresse par rapport à l'année dernière."),
-        ("🎯", "Déviation vs Cible", "#007AFF",
-         "Écart entre le taux réalisé et la cible fixée avec la direction",
-         "Cible = MAX(Taux N-1 × 1,02 ; Plancher segment)",
-         "Mesure l'atteinte de l'objectif de progression défini en début d'exercice."),
-        ("💰", "Score d'impact financier", "#FF9500",
-         "Marge perdue pondérée par le poids volume de la famille",
-         "Score = |Marge Δ FCFA| × Poids volume (0,5→3,0)",
-         "Priorise les actions : une petite déviation sur le Riz > grosse déviation sur une petite famille."),
-        ("🏷️", "Segmentation automatique", "#34C759",
-         "Classification de chaque famille selon sa nature commerciale",
-         "Appel (10%) · Cœur (18%) · Val. aj. (25%) · PH/Drog (22%)",
-         "Applique le plancher P&L adapté : évite de pénaliser les produits d'appel structurellement bas."),
-        ("🆕", "Gestion des nouveautés", "#AF52DE",
-         "Familles sans historique N-1 traitées séparément",
-         "Si Tx N-1 = N/A → Cible = Plancher segment uniquement",
-         "Pas de faux écart sur les articles lancés après la période N-1."),
-    ]
-    for i, (ico, titre, color, desc, formule, interp) in enumerate(indics):
-        with (c1 if i % 2 == 0 else c2):
-            st.markdown(f"""
-<div style='background:#FFFFFF;border:0.5px solid #E5E5EA;border-radius:12px;
-            padding:16px;border-left:3px solid {color};margin-bottom:10px'>
-  <div style='display:flex;align-items:center;gap:8px;margin-bottom:8px'>
-    <span style='font-size:18px'>{ico}</span>
-    <span style='font-size:14px;font-weight:600;color:#1C1C1E'>{titre}</span>
-  </div>
-  <div style='font-size:12px;color:#3A3A3C;margin-bottom:4px'>{desc}</div>
-  <div style='font-size:11px;color:{color};font-family:monospace;background:#F9F9FB;
-              padding:4px 8px;border-radius:6px;margin-bottom:6px'>{formule}</div>
-  <div style='font-size:11px;color:#8E8E93;font-style:italic'>{interp}</div>
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.markdown("""
+<div class='verdict-box'>
+  <div class='verdict-title'>Zone 1 — Cockpit Direction</div>
+  <div style='font-size:13px;color:#3A3A3C'>Le réseau est-il en bonne santé ?<br>
+  4 KPIs · Tableau par rayon · Phrase de verdict · Tendance</div>
 </div>""", unsafe_allow_html=True)
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown("<div class='section-label'>Fichier attendu</div>", unsafe_allow_html=True)
-    st.markdown(f"""
-<div style='background:#F0F8FF;border:0.5px solid #B3D9FF;border-radius:10px;padding:12px 16px;margin-bottom:8px'>
-  <div style='font-size:13px;font-weight:600;color:#0066CC;font-family:monospace;margin-bottom:4px'>Export PBI ventes — format hebdomadaire ou journalier</div>
-  <div style='font-size:12px;color:#3A3A3C'>Axes : Rayon / Sous Famille · Colonnes obligatoires : {', '.join(COLS_REQUIRED)}</div>
-  <div style='font-size:12px;color:#8E8E93;margin-top:4px'>La période est détectée automatiquement depuis la dernière cellule de la colonne A.</div>
+    with c2:
+        st.markdown("""
+<div class='verdict-box'>
+  <div class='verdict-title'>Zone 2 — Briefing Acheteur</div>
+  <div style='font-size:13px;color:#3A3A3C'>Que faire cette semaine ?<br>
+  3 actions prioritaires · Tableau condensé · Casse séparée</div>
 </div>""", unsafe_allow_html=True)
-    st.info("⬆️ Charge le(s) fichier(s) extraction PBI dans la sidebar pour lancer l'analyse.")
+    with c3:
+        st.markdown("""
+<div class='verdict-box'>
+  <div class='verdict-title'>Zone 3 — Analyse</div>
+  <div style='font-size:13px;color:#3A3A3C'>Pourquoi ? Sur quel magasin ?<br>
+  Fiche famille · Vue magasin · Vue promo</div>
+</div>""", unsafe_allow_html=True)
     st.stop()
 
 # ─── CHARGEMENT ───────────────────────────────────────────────────────────────
-ref_bytes = ref_override.read() if ref_override else None
+ref_bytes  = ref_override.read() if ref_override else None
 all_dfs, errors = [], []
-
 for f in uploaded_files:
     raw = f.read()
     try:    all_dfs.append(load_extraction(raw, f.name, ref_bytes))
     except ValueError as e: errors.append(str(e))
-    except Exception as e:  errors.append(f"Erreur inattendue **{f.name}** : {e}")
-
-for err in errors:
-    st.sidebar.error(err)
-
+    except Exception  as e: errors.append(f"Erreur **{f.name}** : {e}")
+for err in errors: st.sidebar.error(err)
 if not all_dfs:
-    st.error("Aucun fichier valide chargé. Vérifiez les colonnes obligatoires.")
+    st.error("Aucun fichier valide. Vérifiez les colonnes obligatoires.")
     st.stop()
 
 df_all = pd.concat(all_dfs, ignore_index=True)
 periodes_dispo = sorted(df_all['Periode'].unique(), reverse=True)
 
 with st.sidebar:
-    st.markdown("<div style='font-size:11px;font-weight:600;color:#8E8E93;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px'>Périodes chargées</div>", unsafe_allow_html=True)
+    st.markdown("<div style='font-size:11px;font-weight:600;color:#8E8E93;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px'>Périodes chargées</div>", unsafe_allow_html=True)
     for p in periodes_dispo:
         st.markdown(f"<span style='background:#E3F0FF;color:#185FA5;border-radius:20px;padding:3px 10px;font-size:11px;font-weight:500;display:inline-block;margin:2px 0'>{p}</span>", unsafe_allow_html=True)
     st.markdown("")
     periode_sel = st.selectbox("Période active", periodes_dispo, label_visibility='collapsed')
 
 df = df_all[df_all['Periode'] == periode_sel].copy()
-if seuil_fcfa > 0:
-    df = df[(df['Dev_N1_FCFA'].abs() >= seuil_fcfa * 1000) | df['Dev_N1_FCFA'].isna()]
+df = df.sort_values(['_ord_statut', 'Impact_Score'], ascending=[True, False])
 
-n_nouv = (df_all[df_all['Periode']==periode_sel]['Source_cible'].str.contains('nouveauté', na=False)).sum()
+# ─── HEADER ───────────────────────────────────────────────────────────────────
+st.markdown("<div class='page-title'>📊 Rentabilité</div>", unsafe_allow_html=True)
+label_periode = "Journée" if "→" not in periode_sel else "Semaine"
+st.markdown(f"<div class='page-caption'>{label_periode} : <strong>{periode_sel}</strong> · {len(periodes_dispo)} période(s) chargée(s)</div>", unsafe_allow_html=True)
 
-# ─── HEADER PAGE ──────────────────────────────────────────────────────────────
-st.markdown("<div class='page-title'>📊 Rentabilité — Suivi Déviation Marge</div>", unsafe_allow_html=True)
-st.markdown(f"<div class='page-caption'>Période active : <strong>{periode_sel}</strong> · {len(periodes_dispo)} période(s) chargée(s) · {n_nouv} nouveauté(s) sur cible plancher uniquement</div>", unsafe_allow_html=True)
-
-# ─── KPIs GLOBAUX ─────────────────────────────────────────────────────────────
-ca_t  = df['CA'].sum(); mg_t = df['Marge'].sum(); tx_t = mg_t/ca_t if ca_t>0 else 0
-mn1_t = df['Marge_N1'].sum(); cn1_t = df['CA_N1'].sum(); tx_n1 = mn1_t/cn1_t if cn1_t>0 else 0
-dev_t = tx_t - tx_n1
-n_r   = (df['Statut']=='🔴 Action requise').sum()
-n_o   = (df['Statut']=='🟡 Vigilance').sum()
-n_v   = (df['Statut']=='✅ OK').sum()
-cib_t = (df['Cible']*df['CA']).sum()/ca_t if ca_t>0 else 0
-
-st.markdown(f"<div class='section-label'>{len(df)} famille(s) · {(df['Rayon_court'].nunique())} rayon(s) · taux cible moyen {cib_t:.1%}</div>", unsafe_allow_html=True)
-k1,k2,k3,k4,k5,k6 = st.columns(6)
-k1.metric("Taux Actuel",   f"{tx_t:.1%}",  fp(dev_t))
-k2.metric("Taux N-1",      f"{tx_n1:.1%}")
-k3.metric("Marge Δ FCFA",  fk(df['Dev_N1_FCFA'].sum()))
-k4.metric("Cible Réseau",  f"{cib_t:.1%}")
-k5.metric("🔴 Action",     f"{n_r}",  f"sur {len(df)} familles")
-k6.metric("✅ OK",         f"{n_v}")
-
-# ─── ALERTES ──────────────────────────────────────────────────────────────────
-st.markdown("---")
-commentaires = _commentaires_auto(df)
-if commentaires:
-    st.markdown("<div class='section-label'>Signaux critiques — Points de blocage prioritaires</div>", unsafe_allow_html=True)
-    for cls, txt in commentaires:
-        st.markdown(f"<div class='alert-card alert-{'red' if cls=='red' else 'amber'}'>{txt}</div>", unsafe_allow_html=True)
-
-if n_v == len(df):
-    st.markdown("<div class='alert-card alert-green'>✅ <strong>Aucune alerte rouge cette période.</strong> Tous les rayons sont dans la tolérance vs N-1.</div>", unsafe_allow_html=True)
-
-# ─── TABS ─────────────────────────────────────────────────────────────────────
-st.markdown("---")
-tab1, tab2, tab3, tab4 = st.tabs(["📊 Réseau", "👤 Acheteur", "🏪 Magasin", "📥 Export Excel"])
+tab1, tab2, tab3, tab4 = st.tabs([
+    "📊 Cockpit Direction",
+    "👤 Briefing Acheteur",
+    "🔍 Analyse",
+    "📥 Export Excel",
+])
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 1 — RÉSEAU
+# TAB 1 — COCKPIT DIRECTION
 # ══════════════════════════════════════════════════════════════════════════════
 with tab1:
+    ca_t  = df['CA'].sum(); mg_t  = df['Marge'].sum(); tx_t = mg_t/ca_t if ca_t>0 else 0
+    mn1_t = df['Marge_N1'].sum(); cn1_t = df['CA_N1'].sum()
+    tx_n1 = mn1_t/cn1_t if cn1_t>0 else 0
+    dev_t = tx_t - tx_n1
+    cib_t = (df['Cible']*df['CA']).sum()/ca_t if ca_t>0 else 0
+    perdu = df['Dev_N1_FCFA'].sum()
+    n_act = (df['Statut']=='Action').sum()
+    score_moy = df['Score_Sante'].mean() if 'Score_Sante' in df.columns else 50
 
-    # Synthèse par rayon — cards comme module 06
-    st.markdown("<div class='section-label'>Performance par rayon</div>", unsafe_allow_html=True)
-    rayon_cols = st.columns(len(ORDRE_RAYONS))
-    RAYON_STYLES = {
-        'BOISSONS':           ('#154360','#E3F0FF','#B3D9FF'),
-        'EPICERIE':           ('#145A32','#F0FFF4','#A8E6BF'),
-        'DROGUERIE':          ('#6E2F8A','#F5F0FF','#D9B3FF'),
-        'PARFUMERIE HYGIENE': ('#7D1435','#FCE4EC','#F5A7B8'),
-    }
-    for i, rayon in enumerate(ORDRE_RAYONS):
-        sub = df[df['Rayon_court'] == rayon]
-        if len(sub) == 0: continue
-        fc, bg, brd = RAYON_STYLES.get(rayon, ('#3A3A3C','#F9F9FB','#CCCCCC'))
-        ca_r  = sub['CA'].sum(); mg_r = sub['Marge'].sum(); tx_r = mg_r/ca_r if ca_r>0 else 0
-        mn1_r = sub['Marge_N1'].sum(); cn1_r = sub['CA_N1'].sum()
-        tn1_r = mn1_r/cn1_r if cn1_r>0 else 0
-        cib_r = (sub['Cible']*sub['CA']).sum()/ca_r if ca_r>0 else 0
-        dev_r = tx_r - tn1_r
-        n_r_r = (sub['Statut']=='🔴 Action requise').sum()
-        with rayon_cols[i]:
-            st.markdown(f"""
-<div style='background:{bg};border:1px solid {brd};border-radius:12px;padding:16px;margin-bottom:8px'>
-  <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:10px'>
-    <span style='font-size:13px;font-weight:700;color:{fc}'>{rayon.title()}</span>
-    <span style='font-size:11px;color:#8E8E93'>{ACHETEURS.get(rayon,"—").replace("Acheteur ","")}</span>
-  </div>
-  <div style='font-size:26px;font-weight:700;color:{fc};letter-spacing:-0.02em'>{fp(tx_r,False)}</div>
-  <div style='font-size:11px;color:#8E8E93;margin-top:2px'>Taux de marge</div>
-  <hr style='margin:10px 0;border-color:{brd}'>
-  <div style='display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px'>
-    <div><span style='color:#8E8E93'>N-1</span><br><strong>{fp(tn1_r,False)}</strong></div>
-    <div><span style='color:#8E8E93'>Cible</span><br><strong>{fp(cib_r,False)}</strong></div>
-    <div><span style='color:#8E8E93'>Dév. N-1</span><br><strong style='color:{"#34C759" if dev_r>=-TOLERANCE else "#FF9500" if dev_r>=-TOLERANCE*2 else "#FF3B30"}'>{fp(dev_r)}</strong></div>
-    <div><span style='color:#8E8E93'>🔴 Alertes</span><br><strong>{n_r_r}</strong></div>
-  </div>
+    # Tendance si multi-périodes
+    tendance_txt = ""
+    if len(periodes_dispo) >= 2:
+        p_prev  = sorted(periodes_dispo)[periodes_dispo.index(periode_sel)-1] if periodes_dispo.index(periode_sel) > 0 else None
+        if p_prev:
+            dp = df_all[df_all['Periode']==p_prev]
+            ca_p=dp['CA'].sum(); mg_p=dp['Marge'].sum()
+            tx_p=mg_p/ca_p if ca_p>0 else 0
+            mn1_p=dp['Marge_N1'].sum(); cn1_p=dp['CA_N1'].sum()
+            tn1_p=mn1_p/cn1_p if cn1_p>0 else 0
+            dev_p=tx_p-tn1_p
+            if dev_t > dev_p + 0.005:   tendance_txt = "Amélioration vs période précédente"
+            elif dev_t < dev_p - 0.005: tendance_txt = "Dégradation vs période précédente"
+            else:                        tendance_txt = "Stable vs période précédente"
+
+    # Verdict automatique
+    verdict = _verdict_auto(df, periode_sel)
+
+    # Phrase verdict
+    st.markdown(f"""
+<div class='verdict-box'>
+  <div class='verdict-title'>Verdict {label_periode.lower()} — {periode_sel}</div>
+  <div class='verdict-text'>{verdict}</div>
+  {f"<div style='font-size:12px;color:#8E8E93;margin-top:6px'>{tendance_txt}</div>" if tendance_txt else ""}
 </div>""", unsafe_allow_html=True)
 
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown("<div class='section-label'>Récapitulatif par rayon — Réalisé vs N-1 vs Cible</div>", unsafe_allow_html=True)
+    # 4 KPIs
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Taux de marge", f"{tx_t:.1%}", fp(dev_t))
+    k2.metric("Marge perdue", fk(perdu), f"vs {tx_n1:.1%} N-1")
+    k3.metric(f"Score santé réseau", f"{score_moy:.0f}/100",
+              "Bon" if score_moy >= 70 else ("Vigilance" if score_moy >= 50 else "Critique"))
+    k4.metric("Familles en action", str(n_act), f"/ {len(df)} familles")
 
-    rows_r = []
+    st.markdown("---")
+
+    # Tableau par rayon — 1 ligne par rayon, 6 colonnes max
+    st.markdown("<div class='section-label'>État par rayon — vue direction</div>", unsafe_allow_html=True)
+    RAYON_COLORS = {'BOISSONS':'#E3F0FF','EPICERIE':'#EBF5E0','DROGUERIE':'#FFF8E1','PARFUMERIE HYGIENE':'#FCE4EC'}
+    RAYON_ACHETEUR = {'BOISSONS':'Acheteur Boissons','EPICERIE':'Acheteur Épicerie','DROGUERIE':'Acheteur DPH','PARFUMERIE HYGIENE':'Acheteur DPH'}
+
+    rows_dir = []
     for rayon in ORDRE_RAYONS:
         sub = df[df['Rayon_court']==rayon]
         if len(sub)==0: continue
         ca_r=sub['CA'].sum(); mg_r=sub['Marge'].sum(); tx_r=mg_r/ca_r if ca_r>0 else 0
         mn1_r=sub['Marge_N1'].sum(); cn1_r=sub['CA_N1'].sum(); tn1_r=mn1_r/cn1_r if cn1_r>0 else 0
-        cib_r=(sub['Cible']*sub['CA']).sum()/ca_r if ca_r>0 else 0
-        rows_r.append({
-            'Rayon': rayon.title(),'Acheteur': ACHETEURS.get(rayon,'—'),
-            'CA (FCFA)': f"{ca_r:,.0f}",'Poids CA': fp(ca_r/ca_t,False),
-            'Taux actuel': fp(tx_r,False),'Taux N-1': fp(tn1_r,False),
-            'Dév. vs N-1': fp(tx_r-tn1_r),'Cible': fp(cib_r,False),
-            'Dév. vs Cible': fp(tx_r-cib_r),
-            'Marge Δ FCFA': fk(sub['Dev_N1_FCFA'].sum()),
-            '🔴': (sub['Statut']=='🔴 Action requise').sum(),
-            '🟡': (sub['Statut']=='🟡 Vigilance').sum(),
-            '✅': (sub['Statut']=='✅ OK').sum(),
+        dev_r=tx_r-tn1_r
+        n_r_act=(sub['Statut']=='Action').sum()
+        score_r=sub['Score_Sante'].mean() if 'Score_Sante' in sub.columns else 50
+        # Action principale du rayon
+        top_act=sub[sub['Statut']=='Action'].nlargest(1,'Impact_Score')
+        action_dir='RAS — maintenir les conditions'
+        if len(top_act):
+            r0=top_act.iloc[0]
+            action_dir = f"{r0['SF_court']} : {r0['Action']}"
+
+        # Santé badge
+        if score_r >= 70:   sante = f"<span class='sante-vert'>{score_r:.0f}/100</span>"
+        elif score_r >= 50: sante = f"<span class='sante-orange'>{score_r:.0f}/100</span>"
+        else:               sante = f"<span class='sante-rouge'>{score_r:.0f}/100</span>"
+
+        rows_dir.append({
+            'Rayon': rayon.title(),
+            'Acheteur': RAYON_ACHETEUR.get(rayon,'—').replace('Acheteur ',''),
+            'Taux': fp(tx_r, False),
+            'vs N-1': fp(dev_r),
+            'Marge perdue': fk(sub['Dev_N1_FCFA'].sum()),
+            'Alertes': n_r_act,
+            'Sante': sante,
+            'Action semaine': action_dir,
         })
-    st.dataframe(pd.DataFrame(rows_r), use_container_width=True, hide_index=True,
-                 column_config={'Rayon': st.column_config.TextColumn('Rayon', width='medium'),
-                                'Acheteur': st.column_config.TextColumn('Acheteur', width='medium')})
 
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown(f"<div class='section-label'>Familles en action requise — triées par score d'impact financier</div>", unsafe_allow_html=True)
+    df_dir = pd.DataFrame(rows_dir)
+    st.dataframe(
+        df_dir.drop(columns=['Sante']).style.map(cd, subset=['vs N-1']),
+        use_container_width=True, hide_index=True, height=210,
+        column_config={
+            'Action semaine': st.column_config.TextColumn('Action semaine', width='large'),
+        }
+    )
+    # Score santé en HTML
+    sante_html = " &nbsp;·&nbsp; ".join([f"<strong>{r['Rayon']}</strong> {r['Sante']}" for r in rows_dir])
+    st.markdown(f"<div style='font-size:12px;margin-top:4px'>Score santé : {sante_html}</div>", unsafe_allow_html=True)
 
-    rouge = df[df['Statut']=='🔴 Action requise'].sort_values('Impact_Score', ascending=False)
-    if len(rouge) == 0:
-        st.markdown("<div class='alert-card alert-green'>✅ Aucune famille en alerte rouge cette période.</div>", unsafe_allow_html=True)
-    else:
-        has_site_r = 'Site nom long' in rouge.columns and rouge['Site nom long'].notna().any()
-        cols_r = ['Rayon_court','SF_court','Segment','Acheteur']
-        names_r = ['Rayon','Famille','Segment','Acheteur']
-        if has_site_r:
-            cols_r.insert(2, 'Site nom long')
-            names_r.insert(2, 'Magasin')
-        cols_r  += ['CA','%Marge','Tx_N1','Dev_N1_pts','Dev_N1_FCFA','Impact_Score','Cible','Source_cible','Dev_Cible_pts','Statut','Que_faire']
-        names_r += ['CA (FCFA)','Taux act.','Taux N-1','Dév. N-1','Marge Δ FCFA','Score Impact','Cible','Source cible','Dév. Cible','Statut','Que faire ?']
-        disp = rouge[cols_r].copy()
-        disp.columns = names_r
-        disp['CA (FCFA)']=disp['CA (FCFA)'].apply(lambda x: f"{x:,.0f}")
-        disp['Score Impact']=disp['Score Impact'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else '—')
-        for col in ['Taux act.','Taux N-1','Cible']: disp[col]=disp[col].apply(lambda x: fp(x,False))
-        for col in ['Dév. N-1','Dév. Cible']:         disp[col]=disp[col].apply(fp)
-        disp['Marge Δ FCFA']=disp['Marge Δ FCFA'].apply(fk)
-        disp['Segment']=disp['Segment'].apply(lambda x: SEG_LABELS.get(x,x))
-        st.dataframe(
-            disp.style.map(cs, subset=['Statut']).map(cd, subset=['Dév. N-1','Dév. Cible']),
-            use_container_width=True, hide_index=True, height=420,
-            column_config={
-                'Famille':    st.column_config.TextColumn('Famille',    width='large'),
-                'Que faire ?':st.column_config.TextColumn('Que faire ?',width='large'),
-            }
-        )
+    # Alertes casse réseau
+    fam_casse = df[df.get('Alerte_Casse', pd.Series(False, index=df.index))==True] if 'Alerte_Casse' in df.columns else pd.DataFrame()
+    if len(fam_casse) > 0:
+        st.markdown("---")
+        st.markdown("<div class='section-label'>Casse anormale — levier opérationnel magasin</div>", unsafe_allow_html=True)
+        top_c = fam_casse.nlargest(5,'Tx_Casse_Fam')[['Rayon_court','SF_court','%Marge','Tx_Casse_Fam','Marge_Nette','Casse_val']]
+        dc = top_c.copy()
+        dc.columns=['Rayon','Famille','Tx brut','% Casse CA','Tx net casse','Casse FCFA']
+        dc['Tx brut']    = dc['Tx brut'].apply(lambda x: fp(x,False))
+        dc['% Casse CA'] = dc['% Casse CA'].apply(lambda x: f"{x:.2%}")
+        dc['Tx net casse']= dc['Tx net casse'].apply(lambda x: fp(x,False))
+        dc['Casse FCFA'] = dc['Casse FCFA'].apply(lambda x: f"{abs(x):,.0f}")
+        st.dataframe(dc, use_container_width=True, hide_index=True)
+        st.caption("La casse est un levier opérationnel (magasin), pas un levier achat. Ces familles ne déclenchent pas d'alerte marge — elles remontent ici séparément.")
 
-    with st.expander(f"🟡 Familles en vigilance ({n_o})"):
-        orange = df[df['Statut']=='🟡 Vigilance'].sort_values('Impact_Score',ascending=False)
-        has_site_o = 'Site nom long' in orange.columns and orange['Site nom long'].notna().any()
-        cols_o = ['Rayon_court','SF_court','Segment','Acheteur']
-        names_o = ['Rayon','Famille','Segment','Acheteur']
-        if has_site_o:
-            cols_o.insert(2, 'Site nom long')
-            names_o.insert(2, 'Magasin')
-        cols_o  += ['%Marge','Tx_N1','Dev_N1_pts','Dev_N1_FCFA','Impact_Score','Que_faire']
-        names_o += ['Taux act.','Taux N-1','Dév. N-1','Marge Δ FCFA','Score Impact','Que faire ?']
-        d2 = orange[cols_o].copy()
-        d2.columns = names_o
-        for col in ['Taux act.','Taux N-1']: d2[col]=d2[col].apply(lambda x: fp(x,False))
-        d2['Dév. N-1']=d2['Dév. N-1'].apply(fp)
-        d2['Marge Δ FCFA']=d2['Marge Δ FCFA'].apply(fk)
-        d2['Score Impact']=d2['Score Impact'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else '—')
-        d2['Segment']=d2['Segment'].apply(lambda x: SEG_LABELS.get(x,x))
-        st.dataframe(d2.style.map(cd, subset=['Dév. N-1']),
-                     use_container_width=True, hide_index=True)
-    st.caption("Score Impact = marge perdue (FCFA) × poids volume · priorise les grosses familles en dérive")
-
-    # Matrice de priorité
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown("<div class='section-label'>Matrice de priorité — Volume vs Dérive marge</div>", unsafe_allow_html=True)
-    chart_data = df.dropna(subset=['CA','Dev_N1_pts']).copy()
-    chart_data['Dev_N1_pct'] = (chart_data['Dev_N1_pts'] * 100).round(2)
-    chart_data['Alerte_Mix_txt'] = chart_data['Alerte_Mix'].map({True:'⚠️ Effet Mix', False:''})
-
-    if len(chart_data) > 0:
-        st.scatter_chart(
-            chart_data,
-            x='CA',
-            y='Dev_N1_pct',
-            color='Rayon_court',
-            size='Impact_Score',
-            use_container_width=True,
-        )
-        n_mix = int(chart_data['Alerte_Mix'].sum())
-        mix_txt = f" · ⚠️ **{n_mix} famille(s) avec effet mix détecté** (CA +15% vs N-1 mais marge en recul)" if n_mix > 0 else ""
-        st.caption(f"Axe X = CA famille (FCFA) · Axe Y = déviation marge vs N-1 (pts) · Taille = Score Impact{mix_txt}")
-        st.caption("👉 Quadrant bas-droite = familles à fort volume en dérive critique — priorité absolue.")
-
-    # Alertes Mix si présentes
-    mix_fams = df[df['Alerte_Mix'] == True].sort_values('Impact_Score', ascending=False)
-    if len(mix_fams) > 0:
-        with st.expander(f"⚠️ Effet Mix détecté — {len(mix_fams)} famille(s) dont le CA progresse mais la marge décroche"):
-            st.markdown("""
-<div class='alert-card alert-amber'>
-  <strong>⚠️ Effet Mix :</strong> ces familles ont un CA en hausse &gt;15% vs N-1 mais un taux de marge en baisse.
-  Signal d'un glissement vers des références moins rentables dans la famille, ou d'une promo mal calibrée qui gonfle le volume sans préserver la marge.
-</div>""", unsafe_allow_html=True)
-            has_site_mix = 'Site nom long' in mix_fams.columns and mix_fams['Site nom long'].notna().any()
-            cols_mix = ['Rayon_court','SF_court']
-            names_mix = ['Rayon','Famille']
-            if has_site_mix:
-                cols_mix.append('Site nom long'); names_mix.append('Magasin')
-            cols_mix  += ['Acheteur','CA','%Marge','Dev_N1_pts','Remise_Necessaire_FCFA','Que_faire']
-            names_mix += ['Acheteur','CA (FCFA)','Taux act.','Dév. N-1','Remise nécessaire FCFA','Que faire ?']
-            dm = mix_fams[cols_mix].copy()
-            dm.columns = names_mix
-            dm['CA (FCFA)'] = dm['CA (FCFA)'].apply(lambda x: f"{x:,.0f}")
-            dm['Taux act.'] = dm['Taux act.'].apply(lambda x: fp(x, False))
-            dm['Dév. N-1']  = dm['Dév. N-1'].apply(fp)
-            dm['Remise nécessaire FCFA'] = dm['Remise nécessaire FCFA'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) and x > 0 else '—')
-            st.dataframe(dm, use_container_width=True, hide_index=True)
-
-    # Tendance multi-périodes si plusieurs fichiers
+    # Tendance multi-périodes
     if len(periodes_dispo) > 1:
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown("<div class='section-label'>Évolution globale — comparaison périodes chargées</div>", unsafe_allow_html=True)
-        rows_t = []
+        st.markdown("---")
+        st.markdown("<div class='section-label'>Tendance — évolution période par période</div>", unsafe_allow_html=True)
+        rows_t=[]
         for p in sorted(periodes_dispo):
             dp=df_all[df_all['Periode']==p]; ca_p=dp['CA'].sum(); mg_p=dp['Marge'].sum()
             tx_p=mg_p/ca_p if ca_p>0 else 0
             mn1_p=dp['Marge_N1'].sum(); cn1_p=dp['CA_N1'].sum(); tn1_p=mn1_p/cn1_p if cn1_p>0 else 0
-            rows_t.append({'Période':p,'Taux réalisé':fp(tx_p,False),'Taux N-1':fp(tn1_p,False),
-                           'Dév. vs N-1':fp(tx_p-tn1_p),'Marge Δ FCFA':fk(dp['Dev_N1_FCFA'].sum()),
-                           '🔴':(dp['Statut']=='🔴 Action requise').sum(),
-                           '🟡':(dp['Statut']=='🟡 Vigilance').sum(),
-                           '✅':(dp['Statut']=='✅ OK').sum()})
-        st.dataframe(pd.DataFrame(rows_t).style.map(cd, subset=['Dév. vs N-1']),
+            sc_p=dp['Score_Sante'].mean() if 'Score_Sante' in dp.columns else 50
+            rows_t.append({'Période':p,'Taux':fp(tx_p,False),'vs N-1':fp(tx_p-tn1_p),
+                           'Marge Δ':fk(dp['Dev_N1_FCFA'].sum()),
+                           'Score santé':f"{sc_p:.0f}/100",
+                           'Alertes':(dp['Statut']=='Action').sum()})
+        st.dataframe(pd.DataFrame(rows_t).style.map(cd,subset=['vs N-1']),
                      use_container_width=True, hide_index=True)
-        st.caption("Chargez d'autres périodes dans la sidebar pour enrichir cette vue tendance.")
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 2 — ACHETEUR
+# TAB 2 — BRIEFING ACHETEUR
 # ══════════════════════════════════════════════════════════════════════════════
 with tab2:
     acheteurs = sorted(df['Acheteur'].dropna().unique())
@@ -1304,247 +1053,365 @@ with tab2:
     ca_a  = df_ach['CA'].sum(); mg_a=df_ach['Marge'].sum(); tx_a=mg_a/ca_a if ca_a>0 else 0
     mn1_a = df_ach['Marge_N1'].sum(); cn1_a=df_ach['CA_N1'].sum(); tn1_a=mn1_a/cn1_a if cn1_a>0 else 0
     cib_a = (df_ach['Cible']*df_ach['CA']).sum()/ca_a if ca_a>0 else 0
-    n_r_a = (df_ach['Statut']=='🔴 Action requise').sum()
+    n_r_a = (df_ach['Statut']=='Action').sum()
+    score_a = df_ach['Score_Sante'].mean() if 'Score_Sante' in df_ach.columns else 50
+    n_nouv  = (df_ach['Tx_N1'].isna()).sum()
 
-    st.markdown(f"<div class='section-label'>{ach_sel} · {periode_sel}</div>", unsafe_allow_html=True)
-    k1,k2,k3,k4,k5 = st.columns(5)
+    # KPIs acheteur
+    k1,k2,k3,k4 = st.columns(4)
     k1.metric("Taux réalisé", f"{tx_a:.1%}", fp(tx_a-tn1_a))
-    k2.metric("Taux N-1",     f"{tn1_a:.1%}")
-    k3.metric("Marge Δ",      fk(df_ach['Dev_N1_FCFA'].sum()))
-    k4.metric("Cible moy.",   f"{cib_a:.1%}")
-    k5.metric("🔴 Alertes",   f"{n_r_a}", f"sur {len(df_ach)} familles")
+    k2.metric("Marge perdue", fk(df_ach['Dev_N1_FCFA'].sum()), f"N-1 : {tn1_a:.1%}")
+    k3.metric("Score santé", f"{score_a:.0f}/100", f"Cible : {cib_a:.1%}")
+    k4.metric("Familles en action", str(n_r_a), f"/ {len(df_ach)} familles")
 
-    st.markdown("")
+    # Info base de comparaison
+    n1_src_txt = f"Cible basée sur N-1 × 1,02"
+    if n_nouv > 0:
+        n1_src_txt += f" · {n_nouv} nouveauté(s) comparée(s) sur plancher segment uniquement"
+    st.caption(n1_src_txt)
+
+    st.markdown("---")
+
+    # BLOC 3 ACTIONS — toujours visible, pas dans un expander
     if n_r_a > 0:
-        top3_rows = df_ach[df_ach['Statut']=='🔴 Action requise'].nlargest(3,'Impact_Score')
-        marge_perdue_tot = abs(df_ach[df_ach['Statut']=='🔴 Action requise']['Dev_N1_FCFA'].sum())
-        lignes_brief = []
-        for _, r3 in top3_rows.iterrows():
-            cause_txt = str(r3.get('Cause_Probable',''))
-            perdu = fk_abs(r3['Dev_N1_FCFA'])
-            lignes_brief.append(f"<li><strong>{r3['SF_court']}</strong> : {perdu} — {cause_txt}</li>")
-        brief_items = ''.join(lignes_brief)
-        marge_tot_fmt = fk_abs(marge_perdue_tot)
-        st.markdown(
-            f"<div class='alert-card alert-amber'>"
-            f"<strong>Brief {ach_sel} · {periode_sel}</strong><br>"
-            f"{n_r_a} famille(s) en alerte — Marge perdue totale : <strong>{marge_tot_fmt}</strong>"
-            f"<ul style='margin:8px 0 4px 16px;font-size:12px'>{brief_items}</ul>"
-            f"<div style='font-size:11px;opacity:.75'>Tableau ci-dessous trie par priorite</div>"
-            f"</div>",
-            unsafe_allow_html=True
-        )
-        fam_casse = df_ach[df_ach.get('Alerte_Casse', pd.Series(False, index=df_ach.index)) == True]
-        if len(fam_casse) > 0:
-            casse_noms = ' / '.join(fam_casse.nlargest(3,'Tx_Casse_Fam')['SF_court'].tolist())
-            st.markdown(
-                f"<div class='alert-card alert-red'>"
-                f"Casse anormale detectee sur {len(fam_casse)} famille(s) : {casse_noms} "
-                f"(taux casse > 0,5% du CA)"
-                f"</div>",
-                unsafe_allow_html=True
-            )
+        actions = _top3_actions(df_ach)
+        marge_tot = abs(df_ach[df_ach['Statut']=='Action']['Dev_N1_FCFA'].sum())
+        st.markdown(f"<div class='section-label'>Tes {min(3, len(actions))} actions cette {label_periode.lower()} — {fk_abs(marge_tot)} en jeu</div>", unsafe_allow_html=True)
+
+        for i, act in enumerate(actions, 1):
+            site_txt = f" · {act['site']}" if act['site'] and act['site'] not in ['—',''] else ""
+            color_cls = act['icone']
+            st.markdown(f"""
+<div class='action-card {color_cls}'>
+  <div class='action-num'>Action {i}{site_txt}</div>
+  <div class='action-fam'>{act['famille']}</div>
+  <div class='action-fcfa {color_cls}'>{act['perdu']} perdus</div>
+  <div class='action-what'>{act['action']} · <em style='color:#8E8E93'>{act['cause']}</em></div>
+</div>""", unsafe_allow_html=True)
+
+        # Toutes les alertes en dessous
+        if n_r_a > 3:
+            st.markdown(f"<div style='font-size:12px;color:#8E8E93;margin:8px 0'>+ {n_r_a-3} autre(s) famille(s) en action — voir le tableau ci-dessous</div>", unsafe_allow_html=True)
     else:
-        st.markdown(
-            f"<div class='alert-card alert-green'>"
-            f"Aucune alerte rouge cette periode pour {ach_sel}."
-            f"</div>",
-            unsafe_allow_html=True
-        )
+        st.markdown(f"""
+<div class='alert-card alert-green'>
+  Aucune alerte rouge cette {label_periode.lower()} pour {ach_sel}. Score santé : {score_a:.0f}/100.
+  Surveiller les familles en vigilance ci-dessous.
+</div>""", unsafe_allow_html=True)
 
-    # Ameliorations 5+10 : filtres actionnables + vue condensee
-    fc1, fc2 = st.columns([2,2])
+    # Alerte casse acheteur
+    if 'Alerte_Casse' in df_ach.columns:
+        fam_c_ach = df_ach[df_ach['Alerte_Casse']==True]
+        if len(fam_c_ach) > 0:
+            noms_c = ' · '.join(fam_c_ach.nlargest(3,'Tx_Casse_Fam')['SF_court'].tolist())
+            st.markdown(f"""
+<div class='alert-card alert-purple' style='margin-top:8px'>
+  Casse anormale (> 0,5% CA) sur : <strong>{noms_c}</strong> — sujet opérationnel à remonter au responsable magasin.
+</div>""", unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # TABLEAU CONDENSÉ — 5 colonnes essentielles
+    fc1, fc2 = st.columns([2, 2])
     with fc1:
-        filtre_actionnable = st.checkbox(
-            "Familles actionnables uniquement",
-            value=True,
-            help="Masque les Produits d appel au-dessus de leur plancher.",
-            key='filtre_actionnable'
-        )
+        filtre_act = st.checkbox("Actions uniquement", value=False, key='filtre_act')
     with fc2:
-        filtre_statut_ach = st.selectbox(
-            "Filtre statut", ['Tous','Action requise','Action + Vigilance'],
-            key='filtre_statut_ach'
-        )
-    df_ach_view = df_ach.copy()
-    if filtre_actionnable:
-        masque_ok = (df_ach_view['Segment']=='Produit d appel') & (df_ach_view['%Marge']>=df_ach_view['Plancher'])
-        df_ach_view = df_ach_view[~masque_ok]
-    if filtre_statut_ach == 'Action requise':
-        df_ach_view = df_ach_view[df_ach_view['Statut']=='Action requise']
-    elif filtre_statut_ach == 'Action + Vigilance':
-        df_ach_view = df_ach_view[df_ach_view['Statut'].isin(['Action requise','Vigilance'])]
-    n_aff = len(df_ach_view); n_cach = len(df_ach)-n_aff
-    lbl = f"{n_aff} famille(s)" + (f" — {n_cach} produits d appel OK masques" if n_cach>0 and filtre_actionnable else "")
-    st.markdown(f"<div class='section-label'>{lbl} — triees par priorite et impact</div>", unsafe_allow_html=True)
-    has_site_a = 'Site nom long' in df_ach_view.columns and df_ach_view['Site nom long'].notna().any()
+        masque_appel = st.checkbox("Masquer produits d'appel OK", value=True, key='masque_appel',
+                                    help="Masque les produits d'appel au-dessus de leur plancher.")
 
-    def color_priorite(v):
-        v=str(v)
-        if 'Urgence'      in v: return 'background:#FFD6D6;color:#991B1B;font-weight:700'
-        if 'Priorite'     in v: return 'background:#FFF3CC;color:#854D0E;font-weight:700'
-        if 'Surveillance' in v: return 'background:#D6EAF8;color:#1A4A7A;font-weight:600'
-        return ''
-    def color_cause(v):
-        v=str(v).lower()
-        if 'negative'    in v: return 'color:#CC0000;font-weight:700'
-        if 'deficitaire' in v: return 'color:#B25000;font-weight:600'
-        if 'degradees'   in v or 'severe' in v: return 'color:#991B1B;font-weight:600'
-        if 'mix'         in v: return 'color:#6B21A8;font-weight:600'
-        if 'ok'          in v: return 'color:#145A32'
-        return 'color:#555555'
+    df_view = df_ach.copy()
+    if filtre_act:
+        df_view = df_view[df_view['Statut']=='Action']
+    if masque_appel:
+        df_view = df_view[~((df_view['Segment']=='Produit d appel') & (df_view['%Marge']>=df_view['Plancher']))]
 
-    # Vue condensee (amelioration 5)
-    cv = ['SF_court','Priorite','Cause_Probable']; cn = ['Famille','Priorite','Cause probable']
-    if has_site_a: cv.insert(1,'Site nom long'); cn.insert(1,'Magasin')
-    cv += ['%Marge','Dev_N1_pts','Dev_N1_FCFA','Statut','Que_faire']
-    cn += ['Taux act.','Dev. N-1','Marge perdue','Statut','Que faire ?']
-    dv = df_ach_view[[c for c in cv if c in df_ach_view.columns]].copy()
+    n_aff = len(df_view); n_cach = len(df_ach)-n_aff
+    lbl = f"{n_aff} famille(s)" + (f" · {n_cach} masquées" if n_cach>0 and masque_appel else "")
+    st.markdown(f"<div class='section-label'>{lbl}</div>", unsafe_allow_html=True)
+
+    has_site_a = 'Site nom long' in df_view.columns and df_view['Site nom long'].notna().any()
+
+    # Vue condensée : Famille · Santé · Marge perdue · Cause · Action
+    cv = ['SF_court']
+    if has_site_a: cv.append('Site nom long')
+    cv += ['Score_Sante','%Marge','Dev_N1_FCFA','Cause','Statut','Action']
+    cn = ['Famille']
+    if has_site_a: cn.append('Magasin')
+    cn += ['Santé','Taux actuel','Marge perdue','Cause','Statut','Action']
+
+    dv = df_view[[c for c in cv if c in df_view.columns]].copy()
     dv.columns = cn[:len(dv.columns)]
-    if 'Taux act.'   in dv.columns: dv['Taux act.']    = dv['Taux act.'].apply(lambda x: fp(x,False))
-    if 'Dev. N-1'    in dv.columns: dv['Dev. N-1']     = dv['Dev. N-1'].apply(fp)
-    if 'Marge perdue'in dv.columns: dv['Marge perdue'] = dv['Marge perdue'].apply(fk_abs)
+    if 'Taux actuel' in dv.columns: dv['Taux actuel'] = dv['Taux actuel'].apply(lambda x: fp(x,False))
+    if 'Marge perdue'in dv.columns: dv['Marge perdue'] = dv['Marge perdue'].apply(fk)
+    if 'Santé'       in dv.columns: dv['Santé']       = dv['Santé'].apply(lambda x: f"{x:.0f}/100" if pd.notna(x) else '—')
+
+    def color_sante(v):
+        try:
+            n = float(str(v).replace('/100',''))
+            if n >= 70: return 'color:#145A32;font-weight:600'
+            if n >= 50: return 'color:#854D0E;font-weight:600'
+            return 'color:#991B1B;font-weight:600'
+        except: return ''
+
+    def color_cause_v(v):
+        v = str(v).lower()
+        if 'négative' in v or 'negative' in v: return 'color:#CC0000;font-weight:700'
+        if 'promo' in v:    return 'color:#B25000;font-weight:600'
+        if 'sévère' in v or 'severe' in v: return 'color:#991B1B;font-weight:600'
+        if 'mix'    in v:   return 'color:#6B21A8;font-weight:600'
+        if 'ok'     in v:   return 'color:#145A32'
+        return 'color:#3A3A3C'
+
     s_dv = dv.style
-    if 'Dev. N-1'       in dv.columns: s_dv = s_dv.map(cd,             subset=['Dev. N-1'])
-    if 'Statut'         in dv.columns: s_dv = s_dv.map(cs,             subset=['Statut'])
-    if 'Priorite'       in dv.columns: s_dv = s_dv.map(color_priorite, subset=['Priorite'])
-    if 'Cause probable' in dv.columns: s_dv = s_dv.map(color_cause,    subset=['Cause probable'])
-    st.dataframe(s_dv, use_container_width=True, hide_index=True, height=500,
+    if 'Statut'     in dv.columns: s_dv = s_dv.map(cs,            subset=['Statut'])
+    if 'Santé'      in dv.columns: s_dv = s_dv.map(color_sante,   subset=['Santé'])
+    if 'Cause'      in dv.columns: s_dv = s_dv.map(color_cause_v, subset=['Cause'])
+
+    st.dataframe(s_dv, use_container_width=True, hide_index=True, height=480,
         column_config={
-            'Famille':       st.column_config.TextColumn('Famille',       width='large'),
-            'Que faire ?':   st.column_config.TextColumn('Que faire ?',   width='large'),
-            'Cause probable':st.column_config.TextColumn('Cause probable',width='medium'),
+            'Famille': st.column_config.TextColumn('Famille', width='large'),
+            'Action':  st.column_config.TextColumn('Action',  width='large'),
+            'Cause':   st.column_config.TextColumn('Cause',   width='medium'),
         })
 
-    with st.expander("Detail complet — colonnes analytiques"):
-        cfl=['Rayon_court','SF_court','Segment']; nfl=['Rayon','Famille','Segment']
-        if has_site_a: cfl.insert(2,'Site nom long'); nfl.insert(2,'Magasin')
-        extra_c=['CA','%Marge','Tx_N1','Dev_N1_pts','Dev_N1_FCFA','Cible','Plancher','Source_cible','Dev_Cible_pts','Tx_Marge_Net','Tx_Casse_Fam','Remise_Necessaire_FCFA','Statut']
-        extra_n=['CA','Taux act.','Taux N-1','Dev. N-1','Marge Delt','Cible','Plancher','Source','Dev. Cible','Tx net casse','Pct Casse','Remise nec.','Statut']
-        for ec,en in zip(extra_c,extra_n):
-            if ec in df_ach_view.columns: cfl.append(ec); nfl.append(en)
-        df_fl=df_ach_view[cfl].copy(); df_fl.columns=nfl
-        for c in ['Taux act.','Taux N-1','Cible','Plancher','Tx net casse']:
-            if c in df_fl.columns: df_fl[c]=df_fl[c].apply(lambda x: fp(x,False))
-        for c in ['Dev. N-1','Dev. Cible']:
-            if c in df_fl.columns: df_fl[c]=df_fl[c].apply(fp)
-        if 'Pct Casse' in df_fl.columns:
-            df_fl['Pct Casse']=df_fl['Pct Casse'].apply(lambda x: f"{x:.2%}" if pd.notna(x) else '-')
-        if 'CA' in df_fl.columns: df_fl['CA']=df_fl['CA'].apply(lambda x: f"{x:,.0f}")
-        if 'Marge Delt' in df_fl.columns: df_fl['Marge Delt']=df_fl['Marge Delt'].apply(fk)
-        if 'Remise nec.' in df_fl.columns:
-            df_fl['Remise nec.']=df_fl['Remise nec.'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) and x>0 else '-')
-        s_fl = df_fl.style.map(cs,subset=['Statut']) if 'Statut' in df_fl.columns else df_fl
-        st.dataframe(s_fl, use_container_width=True, hide_index=True)
-    st.caption("Vue condensee = colonnes cles. Detail complet dans l expander.")
+    # Détail analytique complet en expander
+    with st.expander("Détail analytique complet"):
+        cols_d = ['Rayon_court','SF_court','Segment']
+        noms_d = ['Rayon','Famille','Segment']
+        if has_site_a: cols_d.insert(2,'Site nom long'); noms_d.insert(2,'Magasin')
+        extra = [('CA','CA'),('Marge','Marge brute'),('%Marge','Tx brut'),
+                 ('Marge_Nette','Tx net casse'),('Tx_N1','Tx N-1'),('Cible','Cible'),
+                 ('Dev_N1_pts','Dév. N-1'),('Dev_N1_FCFA','Marge Δ'),
+                 ('Tx_Casse_Fam','% Casse'),('Remise_Necessaire','Remise nec.'),('Statut','Statut')]
+        for ec,en in extra:
+            if ec in df_view.columns: cols_d.append(ec); noms_d.append(en)
+        dd = df_view[cols_d].copy(); dd.columns=noms_d
+        for c in ['Tx brut','Tx net casse','Tx N-1','Cible']:
+            if c in dd.columns: dd[c]=dd[c].apply(lambda x: fp(x,False))
+        if 'Dév. N-1' in dd.columns: dd['Dév. N-1']=dd['Dév. N-1'].apply(fp)
+        if '% Casse'  in dd.columns: dd['% Casse']=dd['% Casse'].apply(lambda x: f"{x:.2%}" if pd.notna(x) else '—')
+        if 'CA'       in dd.columns: dd['CA']=dd['CA'].apply(lambda x: f"{x:,.0f}")
+        if 'Marge brute' in dd.columns: dd['Marge brute']=dd['Marge brute'].apply(lambda x: f"{x:,.0f}")
+        if 'Marge Δ'  in dd.columns: dd['Marge Δ']=dd['Marge Δ'].apply(fk)
+        if 'Remise nec.' in dd.columns: dd['Remise nec.']=dd['Remise nec.'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) and x>0 else '—')
+        if 'Segment'  in dd.columns: dd['Segment']=dd['Segment'].apply(lambda x: SEG_LABELS.get(x,x))
+        s_dd = dd.style.map(cs,subset=['Statut']) if 'Statut' in dd.columns else dd
+        st.dataframe(s_dd, use_container_width=True, hide_index=True)
+    st.caption("Vue principale = 5 colonnes pour décider. Détail analytique complet dans l'expander.")
 
-    # Amelioration 9 : tendance si plusieurs periodes
+    # Tendance acheteur si multi-périodes
     if len(periodes_dispo) >= 2:
-        p_prev  = sorted(periodes_dispo)[-2]
-        df_prv  = df_all[(df_all['Periode']==p_prev)&(df_all['Acheteur']==ach_sel)][['SF_court','Dev_N1_pts']].copy()
-        df_prv.columns = ['SF_court','Dev_prev']
-        df_td   = df_ach_view[['SF_court','Dev_N1_pts']].merge(df_prv,on='SF_court',how='left')
-        n_deg   = ((df_td['Dev_N1_pts']<df_td['Dev_prev']-0.005)&df_td['Dev_prev'].notna()).sum()
-        n_am    = ((df_td['Dev_N1_pts']>df_td['Dev_prev']+0.005)&df_td['Dev_prev'].notna()).sum()
-        if n_deg>0 or n_am>0:
-            parts=[]
-            if n_deg>0: parts.append(f"Degradation sur {n_deg} famille(s)")
-            if n_am >0: parts.append(f"Amelioration sur {n_am} famille(s)")
-            st.markdown(
-                f"<div class='alert-card alert-blue'>Tendance vs {p_prev} : {' | '.join(parts)}</div>",
-                unsafe_allow_html=True)
+        p_prev = sorted(periodes_dispo)[max(0, periodes_dispo.index(periode_sel)-1)]
+        if p_prev != periode_sel:
+            df_prv = df_all[(df_all['Periode']==p_prev)&(df_all['Acheteur']==ach_sel)][['SF_court','Statut']].copy()
+            df_prv.columns=['SF_court','Statut_prev']
+            df_td  = df_view[['SF_court','Statut']].merge(df_prv,on='SF_court',how='left')
+            n_dg   = ((df_td['Statut']=='Action')&(df_td['Statut_prev']!='Action')).sum()
+            n_am   = ((df_td['Statut']!='Action')&(df_td['Statut_prev']=='Action')).sum()
+            if n_dg > 0 or n_am > 0:
+                parts=[]
+                if n_dg>0: parts.append(f"{n_dg} famille(s) passée(s) en alerte")
+                if n_am>0: parts.append(f"{n_am} famille(s) résolue(s)")
+                st.markdown(
+                    f"<div class='alert-card alert-blue' style='margin-top:8px'>Tendance vs {p_prev} : {' · '.join(parts)}</div>",
+                    unsafe_allow_html=True)
+
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 3 — MAGASIN
+# TAB 3 — ANALYSE APPROFONDIE
 # ══════════════════════════════════════════════════════════════════════════════
 with tab3:
-    has_site = 'Site nom long' in df.columns and df['Site nom long'].notna().any()
-    if not has_site:
-        st.markdown("""
-<div class='alert-card alert-blue'>
-  ℹ️ <strong>Extraction au niveau réseau — dimension magasin non disponible.</strong><br>
-  Pour activer cette vue, relancez l'extraction PBI en ajoutant l'axe <strong>Site nom long</strong> en plus de Rayon et Sous Famille.
-  Le format et la détection de période restent identiques.
-</div>""", unsafe_allow_html=True)
-    else:
-        sites = sorted([s for s in df['Site nom long'].dropna().unique() if s not in ['Total','']])
-        cf1,cf2,cf3 = st.columns(3)
-        with cf1: site_sel = st.selectbox("Magasin",['Tous']+sites,key='site_sel')
-        with cf2: rayon_f  = st.selectbox("Rayon",  ['Tous']+[r.title() for r in ORDRE_RAYONS],key='rayon_f')
-        with cf3: stat_f   = st.selectbox("Statut", ['Tous','🔴 Action requise','🟡 Vigilance','✅ OK'],key='stat_f')
+    sous_tab1, sous_tab2, sous_tab3 = st.tabs(["🔎 Fiche famille","🏪 Vue magasin","💸 Vue promo"])
 
-        df_mag = df.copy()
-        if site_sel != 'Tous': df_mag = df_mag[df_mag['Site nom long']==site_sel]
-        if rayon_f  != 'Tous': df_mag = df_mag[df_mag['Rayon_court']==rayon_f.upper()]
-        if stat_f   != 'Tous': df_mag = df_mag[df_mag['Statut']==stat_f]
+    # ── Fiche famille ─────────────────────────────────────────────────────────
+    with sous_tab1:
+        st.markdown("<div class='section-label'>Analyse détaillée d'une famille</div>", unsafe_allow_html=True)
+        familles_dispo = sorted(df['SF_court'].dropna().unique())
+        fam_sel = st.selectbox("Sélectionner une famille", familles_dispo, key='fam_sel')
+        df_fam  = df[df['SF_court']==fam_sel]
 
-        if site_sel == 'Tous':
-            st.markdown("<div class='section-label'>Palmarès magasins — classé par taux de marge décroissant</div>", unsafe_allow_html=True)
-            rows_s = []
-            for site in sites:
-                sub_s=df[df['Site nom long']==site]; ca_s=sub_s['CA'].sum()
-                if ca_s==0: continue
-                mg_s=sub_s['Marge'].sum(); tx_s=mg_s/ca_s
-                mn1_s=sub_s['Marge_N1'].sum(); cn1_s=sub_s['CA_N1'].sum()
-                tn1_s=mn1_s/cn1_s if cn1_s>0 else 0
-                dev_s=tx_s-tn1_s
-                rows_s.append({
-                    'Magasin':site,'CA (FCFA)':f"{ca_s:,.0f}",
-                    'Taux act.':fp(tx_s,False),'Taux N-1':fp(tn1_s,False),
-                    'Dév. vs N-1':fp(dev_s),'Marge Δ FCFA':fk(sub_s['Dev_N1_FCFA'].sum()),
-                    '🔴':(sub_s['Statut']=='🔴 Action requise').sum(),
-                    '🟡':(sub_s['Statut']=='🟡 Vigilance').sum(),
-                    '✅':(sub_s['Statut']=='✅ OK').sum(),
-                    'Statut':'🔴 Action requise' if dev_s<-TOLERANCE*2 else ('🟡 Vigilance' if dev_s<-TOLERANCE else '✅ OK'),
-                })
-            df_sites = pd.DataFrame(rows_s).sort_values('Taux act.', ascending=False).reset_index(drop=True)
-            df_sites.insert(0,'Rang',range(1,len(df_sites)+1))
-            st.dataframe(
-                df_sites.style.map(cs,subset=['Statut']).map(cd,subset=['Dév. vs N-1']),
-                use_container_width=True, hide_index=True,
-                column_config={'Magasin': st.column_config.TextColumn('Magasin', width='medium')}
-            )
+        if len(df_fam)==0:
+            st.info("Famille non trouvée dans la période active.")
         else:
-            st.markdown(f"<div class='section-label'>{site_sel} — familles triées par priorité</div>", unsafe_allow_html=True)
-            dm = df_mag.sort_values(['_ord_statut','Impact_Score'],ascending=[True,False])
-            d3=dm[['Rayon_court','SF_court','Segment','Acheteur','%Marge','Tx_N1',
-                   'Dev_N1_pts','Dev_N1_FCFA','Impact_Score','Statut','Que_faire']].copy()
-            d3.columns=['Rayon','Famille','Segment','Acheteur','Taux act.','Taux N-1',
-                        'Dév. N-1','Marge Δ FCFA','Score Impact','Statut','Que faire ?']
-            for col in ['Taux act.','Taux N-1']: d3[col]=d3[col].apply(lambda x: fp(x,False))
-            d3['Dév. N-1']=d3['Dév. N-1'].apply(fp)
-            d3['Marge Δ FCFA']=d3['Marge Δ FCFA'].apply(fk)
-            d3['Score Impact']=d3['Score Impact'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else '—')
-            d3['Segment']=d3['Segment'].apply(lambda x: SEG_LABELS.get(x,x))
-            st.dataframe(
-                d3.style.map(cs,subset=['Statut']).map(cd,subset=['Dév. N-1']),
-                use_container_width=True, hide_index=True, height=520,
-                column_config={'Que faire ?': st.column_config.TextColumn('Que faire ?', width='large')}
-            )
+            r0 = df_fam.iloc[0]
+            # En-tête fiche
+            col_left, col_right = st.columns([2,1])
+            with col_left:
+                st.markdown(f"<div style='font-size:20px;font-weight:700;color:#1C1C1E'>{fam_sel}</div>", unsafe_allow_html=True)
+                st.markdown(f"<div style='font-size:13px;color:#8E8E93'>{r0['Rayon_court'].title()} · {SEG_LABELS.get(r0['Segment'],r0['Segment'])} · {r0.get('Acheteur','—')}</div>", unsafe_allow_html=True)
+            with col_right:
+                score = r0.get('Score_Sante', 50)
+                color = '#34C759' if score>=70 else ('#FF9500' if score>=50 else '#FF3B30')
+                st.markdown(f"<div style='text-align:right;font-size:36px;font-weight:700;color:{color}'>{score:.0f}<span style='font-size:16px;color:#8E8E93'>/100</span></div>", unsafe_allow_html=True)
+                st.markdown(f"<div style='text-align:right;font-size:12px;color:#8E8E93'>Score de santé</div>", unsafe_allow_html=True)
+
+            st.markdown("")
+            m1,m2,m3,m4 = st.columns(4)
+            m1.metric("Taux brut",     fp(r0.get('%Marge'), False), fp(r0.get('Dev_N1_pts')))
+            m2.metric("Taux N-1",      fp(r0.get('Tx_N1'), False))
+            m3.metric("Cible",         fp(r0.get('Cible'), False))
+            m4.metric("Marge perdue",  fk(r0.get('Dev_N1_FCFA',0)))
+
+            # Casse
+            tx_casse = r0.get('Tx_Casse_Fam', 0)
+            if pd.notna(tx_casse) and tx_casse > 0.003:
+                st.markdown(f"""
+<div class='alert-card alert-purple' style='margin-top:8px'>
+  Casse : {tx_casse:.2%} du CA · Taux net après casse : {fp(r0.get('Marge_Nette'), False)}
+  {"· <strong>Anormale — remonter au magasin</strong>" if tx_casse > 0.005 else ""}
+</div>""", unsafe_allow_html=True)
+
+            # Diagnostic et action
+            st.markdown(f"""
+<div class='verdict-box' style='margin-top:12px'>
+  <div class='verdict-title'>Diagnostic</div>
+  <div style='font-size:14px;font-weight:600;color:#1C1C1E'>{r0.get('Cause','—')}</div>
+  <div style='font-size:13px;color:#3A3A3C;margin-top:6px'>{r0.get('Action','—')}</div>
+</div>""", unsafe_allow_html=True)
+
+            # Décomposition HP vs Promo si disponible
+            if 'Marge Hors Promo' in r0.index and 'CA Hors Promo' in r0.index:
+                st.markdown("<div class='section-label' style='margin-top:16px'>Décomposition fond de rayon vs promo</div>", unsafe_allow_html=True)
+                ca_hp=r0.get('CA Hors Promo',0); mg_hp=r0.get('Marge Hors Promo',0)
+                ca_pr=r0.get('CA Promo',0) if 'CA Promo' in r0.index else 0
+                mg_pr=r0.get('Marge Promo',0) if 'Marge Promo' in r0.index else 0
+                tx_hp=mg_hp/ca_hp if ca_hp and ca_hp>0 else None
+                tx_pr=mg_pr/ca_pr if ca_pr and ca_pr>0 else None
+                c1d,c2d = st.columns(2)
+                c1d.metric("Fond de rayon", fp(tx_hp,False) if tx_hp is not None else '—',
+                           f"CA : {fk_abs(ca_hp) if ca_hp else '—'}")
+                c2d.metric("Sous promo", fp(tx_pr,False) if tx_pr is not None else '—',
+                           f"CA : {fk_abs(ca_pr) if ca_pr else '—'}")
+                if tx_hp and tx_pr:
+                    effet = tx_pr - tx_hp
+                    if effet < -0.03:
+                        st.markdown(f"<div class='alert-card alert-amber'>La promo dégrade la marge de {effet:+.1%}. Revoir la mécanique promotionnelle.</div>", unsafe_allow_html=True)
+
+            # Multi-sites si disponible
+            if 'Site nom long' in df_fam.columns and df_fam['Site nom long'].notna().any():
+                st.markdown("<div class='section-label' style='margin-top:16px'>Par magasin</div>", unsafe_allow_html=True)
+                df_sites_fam = df_fam[df_fam['Site nom long'].notna() & ~df_fam['Site nom long'].isin(['Total',''])]
+                if len(df_sites_fam) > 0:
+                    ds = df_sites_fam[['Site nom long','%Marge','Dev_N1_pts','Dev_N1_FCFA','Score_Sante','Statut']].copy()
+                    ds.columns=['Magasin','Taux','Dév. N-1','Marge Δ','Santé','Statut']
+                    ds['Taux']  = ds['Taux'].apply(lambda x: fp(x,False))
+                    ds['Dév. N-1']=ds['Dév. N-1'].apply(fp)
+                    ds['Marge Δ']=ds['Marge Δ'].apply(fk)
+                    ds['Santé']=ds['Santé'].apply(lambda x: f"{x:.0f}/100" if pd.notna(x) else '—')
+                    ds=ds.sort_values('Marge Δ')
+                    st.dataframe(ds.style.map(cs,subset=['Statut']).map(cd,subset=['Dév. N-1']),
+                                 use_container_width=True, hide_index=True)
+
+    # ── Vue magasin ───────────────────────────────────────────────────────────
+    with sous_tab2:
+        has_site = 'Site nom long' in df.columns and df['Site nom long'].notna().any()
+        if not has_site:
+            st.markdown("<div class='alert-card alert-blue'>Extraction au niveau réseau — ajoutez la dimension <strong>Site nom long</strong> dans PBI pour activer cette vue.</div>", unsafe_allow_html=True)
+        else:
+            sites = sorted([s for s in df['Site nom long'].dropna().unique() if s not in ['Total','']])
+            cf1,cf2 = st.columns([2,2])
+            with cf1: site_sel = st.selectbox("Magasin",['Tous']+sites,key='site_sel2')
+            with cf2: rayon_f  = st.selectbox("Rayon",  ['Tous']+[r.title() for r in ORDRE_RAYONS],key='rayon_f2')
+
+            df_mag = df.copy()
+            if site_sel != 'Tous': df_mag=df_mag[df_mag['Site nom long']==site_sel]
+            if rayon_f  != 'Tous': df_mag=df_mag[df_mag['Rayon_court']==rayon_f.upper()]
+
+            if site_sel == 'Tous':
+                st.markdown("<div class='section-label'>Palmarès magasins — score de santé moyen</div>", unsafe_allow_html=True)
+                rows_s=[]
+                for site in sites:
+                    sub_s=df[df['Site nom long']==site]; ca_s=sub_s['CA'].sum()
+                    if ca_s==0: continue
+                    mg_s=sub_s['Marge'].sum(); tx_s=mg_s/ca_s
+                    mn1_s=sub_s['Marge_N1'].sum(); cn1_s=sub_s['CA_N1'].sum(); tn1_s=mn1_s/cn1_s if cn1_s>0 else 0
+                    sc_s=sub_s['Score_Sante'].mean() if 'Score_Sante' in sub_s.columns else 50
+                    n_act_s=(sub_s['Statut']=='Action').sum()
+                    rows_s.append({'Magasin':site,'CA':f"{ca_s:,.0f}",'Taux':fp(tx_s,False),
+                                   'vs N-1':fp(tx_s-tn1_s),'Marge Δ':fk(sub_s['Dev_N1_FCFA'].sum()),
+                                   'Score santé':f"{sc_s:.0f}/100",'Alertes':n_act_s})
+                df_s=pd.DataFrame(rows_s).sort_values('Score santé')
+                st.dataframe(df_s.style.map(cd,subset=['vs N-1']),use_container_width=True,hide_index=True)
+            else:
+                st.markdown(f"<div class='section-label'>{site_sel} — familles par priorité</div>", unsafe_allow_html=True)
+                dm=df_mag.sort_values(['_ord_statut','Impact_Score'],ascending=[True,False])
+                d3=dm[['SF_court','Score_Sante','%Marge','Dev_N1_pts','Dev_N1_FCFA','Cause','Statut','Action']].copy()
+                d3.columns=['Famille','Santé','Taux','Dév. N-1','Marge Δ','Cause','Statut','Action']
+                d3['Taux']=d3['Taux'].apply(lambda x: fp(x,False))
+                d3['Dév. N-1']=d3['Dév. N-1'].apply(fp)
+                d3['Marge Δ']=d3['Marge Δ'].apply(fk)
+                d3['Santé']=d3['Santé'].apply(lambda x: f"{x:.0f}/100" if pd.notna(x) else '—')
+                st.dataframe(d3.style.map(cs,subset=['Statut']).map(cd,subset=['Dév. N-1']),
+                             use_container_width=True,hide_index=True,height=520,
+                             column_config={'Action':st.column_config.TextColumn('Action',width='large')})
+
+    # ── Vue promo ─────────────────────────────────────────────────────────────
+    with sous_tab3:
+        has_promo = 'CA Promo' in df.columns and 'Marge Promo' in df.columns
+        if not has_promo:
+            st.markdown("<div class='alert-card alert-blue'>Les colonnes CA Promo et Marge Promo ne sont pas dans cette extraction.</div>", unsafe_allow_html=True)
+        else:
+            df_promo = df[df['CA Promo'].notna() & (df['CA Promo']>0)].copy()
+            df_promo['Tx_Promo']  = df_promo['Marge Promo']/df_promo['CA Promo']
+            df_promo['Poids_Promo']= df_promo['CA Promo']/df_promo['CA']
+            df_promo['Tx_HP']     = df_promo['Marge Hors Promo'].fillna(0)/df_promo['CA Hors Promo'].replace(0,1)
+            df_promo['Effet_Promo']= df_promo['Tx_Promo'] - df_promo['Tx_HP']
+            df_promo['Statut_Promo'] = df_promo['Tx_Promo'].apply(
+                lambda x: 'Rentable' if x>=0.15 else ('Limite' if x>=0.05 else 'Deficitaire'))
+
+            # KPIs promo
+            ca_promo_tot = df_promo['CA Promo'].sum()
+            ca_tot_p     = df['CA'].sum()
+            poids_promo  = ca_promo_tot/ca_tot_p if ca_tot_p>0 else 0
+            tx_promo_g   = df_promo['Marge Promo'].sum()/df_promo['CA Promo'].sum() if df_promo['CA Promo'].sum()>0 else 0
+            tx_hp_g      = df_promo['Marge Hors Promo'].sum()/df_promo['CA Hors Promo'].sum() if df_promo['CA Hors Promo'].sum()>0 else 0
+            n_deficit    = (df_promo['Statut_Promo']=='Deficitaire').sum()
+
+            pk1,pk2,pk3,pk4 = st.columns(4)
+            pk1.metric("Poids promo / CA", fp(poids_promo,False))
+            pk2.metric("Tx marge promo",   fp(tx_promo_g,False), fp(tx_promo_g-tx_hp_g))
+            pk3.metric("Tx marge hors promo", fp(tx_hp_g,False))
+            pk4.metric("Promos déficitaires",  str(n_deficit), f"/ {len(df_promo)} familles en promo")
+
+            st.markdown("<div class='section-label'>Toutes les familles en promo — triées par effet marge</div>", unsafe_allow_html=True)
+            dp=df_promo[['Rayon_court','SF_court','CA Promo','Tx_HP','Tx_Promo','Effet_Promo','Poids_Promo','Statut_Promo']].copy()
+            dp.columns=['Rayon','Famille','CA Promo','Tx HP','Tx Promo','Effet promo','% CA en promo','Statut promo']
+            dp['CA Promo']=dp['CA Promo'].apply(lambda x: f"{x:,.0f}")
+            for c in ['Tx HP','Tx Promo','Effet promo','% CA en promo']: dp[c]=dp[c].apply(lambda x: fp(x,False if c!='Effet promo' else True))
+            dp=dp.sort_values('Effet promo')
+
+            def cs_promo(v):
+                if 'Deficitaire' in str(v): return 'background:#FEE2E2;color:#991B1B;font-weight:600'
+                if 'Limite'      in str(v): return 'background:#FEF9C3;color:#854D0E;font-weight:600'
+                return 'background:#D5F5E3;color:#145A32;font-weight:600'
+
+            st.dataframe(dp.style.map(cs_promo,subset=['Statut promo']).map(cd,subset=['Effet promo']),
+                         use_container_width=True,hide_index=True)
+            st.caption("Effet promo = Tx marge promo − Tx marge hors promo. Négatif = la promo dégrade la marge vs fond de rayon.")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 4 — EXPORT EXCEL
 # ══════════════════════════════════════════════════════════════════════════════
 with tab4:
-    st.markdown("<div class='section-label'>Export Excel — Rapport complet</div>", unsafe_allow_html=True)
+    st.markdown("<div class='page-title' style='font-size:20px'>Export Excel</div>", unsafe_allow_html=True)
     st.markdown(f"""
 <div class='alert-card alert-blue'>
-  <strong>📋 Contenu du fichier exporté :</strong><br>
-  <strong>Un onglet par période</strong> — toutes les familles, triées par score d'impact · Rayon · Famille · Magasin · Segment · CA · Marge · Taux actuel vs N-1 vs Cible · Priorité · Statut · Que faire ?<br>
-  <strong>Onglet Synthèse Magasins</strong> — palmarès magasins avec action recommandée par site<br>
-  <strong>Onglet Plan de Négociation</strong> — familles rouges avec remise nécessaire en FCFA, prêt pour les RDV fournisseurs<br>
-  <strong>Onglet Lexique</strong> — définitions et guide de lecture pour diffusion équipe
+  <strong>Contenu du fichier :</strong><br>
+  Un onglet par période chargée · Colonnes : Famille · Magasin · Taux brut · Tx net casse · Marge perdue · Score santé · Cause · Action<br>
+  Onglet <strong>Plan de Négociation</strong> — familles en action avec remise nécessaire en FCFA<br>
+  Onglet <strong>Synthèse Magasins</strong> — si extraction multi-sites disponible<br>
+  Onglet <strong>Guide de lecture</strong> — définitions et exemples pour diffusion équipe
 </div>""", unsafe_allow_html=True)
-    st.caption(f"Périmètre : {len(periodes_dispo)} période(s) · {len(df)} famille(s) active(s) après filtre seuil · {periode_sel}")
 
+    # Dégradations persistantes si multi-périodes
     if len(periodes_dispo) > 1:
-        st.markdown("<div class='section-label'>Dégradations persistantes — rouge sur toutes les périodes</div>", unsafe_allow_html=True)
-        rouge_sets={p:set(df_all[df_all['Periode']==p][df_all[df_all['Periode']==p]['Statut']=='🔴 Action requise']
-                   .apply(lambda r: f"{r['Rayon_court']}|{r['SF_court']}",axis=1)) for p in periodes_dispo}
-        persistants=set.intersection(*rouge_sets.values()) if rouge_sets else set()
+        rouge_sets = {p: set(df_all[df_all['Periode']==p][df_all[df_all['Periode']==p]['Statut']=='Action']
+                     .apply(lambda r: f"{r['Rayon_court']}|{r['SF_court']}", axis=1))
+                     for p in periodes_dispo}
+        persistants = set.intersection(*rouge_sets.values()) if rouge_sets else set()
         if persistants:
             st.markdown(f"""
 <div class='alert-card alert-red'>
-  ⚠️ <strong>{len(persistants)} famille(s)</strong> en rouge sur toutes les {len(periodes_dispo)} périodes chargées — problèmes structurels à inscrire en ordre du jour fournisseur.
+  <strong>{len(persistants)} famille(s)</strong> en alerte sur <strong>toutes</strong> les {len(periodes_dispo)} périodes chargées — problèmes structurels à inscrire à l'ordre du jour fournisseur.
 </div>""", unsafe_allow_html=True)
             rows_p=[]
             for key in sorted(persistants):
@@ -1552,26 +1419,23 @@ with tab4:
                 sub=df[(df['Rayon_court']==rayon)&(df['SF_court']==sf)]
                 if len(sub):
                     r0=sub.iloc[0]
-                    row_p={'Rayon':rayon,'Famille':sf}
-                    if 'Site nom long' in r0.index and pd.notna(r0.get('Site nom long',None)):
-                        row_p['Magasin']=r0.get('Site nom long','—')
-                    row_p.update({'Acheteur':r0.get('Acheteur','—'),
-                                  'Taux actuel':fp(r0.get('%Marge'),False),
-                                  'Score Impact':f"{r0.get('Impact_Score',0):,.0f}",
-                                  'Que faire ?':r0.get('Que_faire','—')})
-                    rows_p.append(row_p)
-            st.dataframe(pd.DataFrame(rows_p).sort_values('Score Impact',ascending=False),
-                         use_container_width=True, hide_index=True,
-                         column_config={'Que faire ?': st.column_config.TextColumn('Que faire ?', width='large')})
-        else:
-            st.markdown("<div class='alert-card alert-green'>✅ Aucune famille en rouge sur toutes les périodes.</div>", unsafe_allow_html=True)
+                    rp={'Rayon':rayon,'Famille':sf,'Acheteur':r0.get('Acheteur','—')}
+                    if 'Site nom long' in r0.index and pd.notna(r0.get('Site nom long')):
+                        rp['Magasin']=r0['Site nom long']
+                    rp.update({'Taux':fp(r0.get('%Marge'),False),
+                               'Score santé':f"{r0.get('Score_Sante',0):.0f}/100",
+                               'Action':r0.get('Action','—')})
+                    rows_p.append(rp)
+            st.dataframe(pd.DataFrame(rows_p).sort_values('Score santé'),
+                         use_container_width=True,hide_index=True,
+                         column_config={'Action':st.column_config.TextColumn('Action',width='large')})
 
     st.markdown("")
     if st.button("Générer le fichier Excel", type="primary", key="gen_excel"):
         with st.spinner("Génération du rapport…"):
             buf = export_excel(df_all, periodes_dispo)
         st.download_button(
-            label="⬇️ Télécharger le rapport Excel",
+            label="Télécharger le rapport Excel",
             data=buf,
             file_name=f"SmartBuyer_Rentabilite_{periode_sel.replace('/','').replace('→','_').replace(' ','')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
