@@ -12,15 +12,118 @@ st.set_page_config(page_title="Rentabilité · SmartBuyer", page_icon="📊", la
 
 st.markdown("""
 <style>
-body,.stApp{background:#F2F2F7;font-family:-apple-system,'SF Pro Display',Arial,sans-serif}
-.sb-header{font-size:26px;font-weight:700;color:#1C1C1E;letter-spacing:-.02em}
-.sb-sub{font-size:13px;color:#8E8E93;margin-top:-6px;margin-bottom:12px}
-.section-title{font-size:14px;font-weight:600;color:#1C1C1E;border-left:3px solid #007AFF;padding-left:10px;margin:16px 0 8px}
-.info-box{background:#E8F4FD;border-radius:12px;padding:12px 16px;border-left:3px solid #007AFF;font-size:13px;color:#1C1C1E;margin-bottom:12px}
-.warn-box{background:#FFF3CD;border-radius:12px;padding:12px 16px;border-left:3px solid #FF9500;font-size:13px;color:#1C1C1E;margin-bottom:12px}
-.ok-box{background:#E3F9E5;border-radius:12px;padding:12px 16px;border-left:3px solid #34C759;font-size:13px;color:#1C1C1E;margin-bottom:12px}
-.commentaire{background:#FFF9F0;border-radius:10px;padding:10px 14px;border-left:3px solid #FF9500;font-size:13px;margin-bottom:6px}
-div[data-testid="stMetric"]>div{background:#FFFFFF!important;border-radius:14px!important;padding:14px!important;border:0.5px solid #E5E5EA!important}
+/* ── Base ── */
+body, .stApp { background:#F2F2F7 !important; font-family:-apple-system,'SF Pro Display','Helvetica Neue',Arial,sans-serif; }
+[data-testid="stSidebar"] { background:#FFFFFF !important; border-right:0.5px solid #E5E5EA; }
+[data-testid="stSidebar"] * { font-family:-apple-system,'SF Pro Display',Arial,sans-serif; }
+
+/* ── Header ── */
+.sb-header { font-size:28px; font-weight:700; color:#1C1C1E; letter-spacing:-0.03em; margin-bottom:2px; }
+.sb-sub    { font-size:13px; color:#8E8E93; margin-top:0; margin-bottom:16px; font-weight:400; }
+
+/* ── KPI cards ── */
+div[data-testid="stMetric"] > div {
+    background:#FFFFFF !important; border-radius:16px !important;
+    padding:16px 18px !important; border:0.5px solid #E5E5EA !important;
+    box-shadow:0 1px 4px rgba(0,0,0,0.05) !important;
+    transition:box-shadow .15s ease;
+}
+div[data-testid="stMetric"] > div:hover { box-shadow:0 3px 12px rgba(0,0,0,0.09) !important; }
+div[data-testid="stMetric"] label { font-size:11px !important; font-weight:600 !important;
+    color:#8E8E93 !important; text-transform:uppercase; letter-spacing:0.05em; }
+div[data-testid="stMetric"] [data-testid="stMetricValue"] { font-size:26px !important;
+    font-weight:700 !important; color:#1C1C1E !important; letter-spacing:-0.02em; }
+
+/* ── Sections ── */
+.section-title {
+    font-size:13px; font-weight:600; color:#1C1C1E;
+    border-left:3px solid #007AFF; padding-left:10px;
+    margin:20px 0 10px; letter-spacing:-0.01em;
+}
+
+/* ── Message boxes ── */
+.info-box {
+    background:#F0F7FF; border-radius:14px; padding:14px 18px;
+    border-left:3px solid #007AFF; font-size:13px; color:#1C1C1E;
+    margin-bottom:14px; line-height:1.6;
+}
+.warn-box {
+    background:#FFFBF0; border-radius:14px; padding:14px 18px;
+    border-left:3px solid #FF9500; font-size:13px; color:#1C1C1E;
+    margin-bottom:14px; line-height:1.6;
+}
+.ok-box {
+    background:#F0FFF4; border-radius:14px; padding:14px 18px;
+    border-left:3px solid #34C759; font-size:13px; color:#1C1C1E;
+    margin-bottom:14px; line-height:1.6;
+}
+
+/* ── Commentaires automatiques ── */
+.commentaire {
+    background:#FFFFFF; border-radius:12px; padding:12px 16px;
+    border:0.5px solid #FFD580; border-left:3px solid #FF9500;
+    font-size:13px; color:#1C1C1E; margin-bottom:8px;
+    line-height:1.6; box-shadow:0 1px 3px rgba(255,149,0,0.08);
+}
+
+/* ── Tabs ── */
+[data-testid="stTabs"] [data-baseweb="tab-list"] {
+    background:#F2F2F7; border-radius:12px; padding:4px; gap:2px;
+}
+[data-testid="stTabs"] [data-baseweb="tab"] {
+    border-radius:9px; font-size:13px; font-weight:500;
+    color:#8E8E93; padding:7px 16px; background:transparent;
+}
+[data-testid="stTabs"] [aria-selected="true"] {
+    background:#FFFFFF !important; color:#1C1C1E !important;
+    box-shadow:0 1px 4px rgba(0,0,0,0.10);
+}
+
+/* ── Dataframe ── */
+[data-testid="stDataFrame"] { border-radius:14px !important; overflow:hidden;
+    border:0.5px solid #E5E5EA !important; }
+
+/* ── Buttons ── */
+[data-testid="stButton"] button, [data-testid="stDownloadButton"] button {
+    border-radius:12px !important; font-weight:600 !important;
+    font-size:13px !important; border:0.5px solid #E5E5EA !important;
+    background:#FFFFFF !important; color:#007AFF !important;
+    padding:8px 18px !important; transition:all .15s ease !important;
+}
+[data-testid="stButton"] button:hover { background:#F0F7FF !important;
+    box-shadow:0 2px 8px rgba(0,122,255,0.15) !important; }
+
+/* ── Sidebar nav ── */
+[data-testid="stSidebarNav"] { display:none; }
+.sidebar-nav-item { padding:6px 10px; border-radius:9px; font-size:13px;
+    color:#3C3C43; cursor:pointer; display:block; }
+.sidebar-nav-item:hover { background:#F2F2F7; }
+
+/* ── Expander ── */
+[data-testid="stExpander"] { border-radius:14px !important;
+    border:0.5px solid #E5E5EA !important; overflow:hidden; }
+[data-testid="stExpander"] summary {
+    font-size:13px !important; font-weight:600 !important; color:#1C1C1E !important;
+    padding:12px 16px !important; background:#FAFAFA !important;
+}
+
+/* ── Slider ── */
+[data-testid="stSlider"] label { font-size:12px !important; color:#8E8E93 !important; font-weight:600 !important; }
+[data-testid="stSlider"] [data-baseweb="slider"] div[role="slider"] {
+    background:#007AFF !important; border:2px solid #FFFFFF !important;
+    box-shadow:0 2px 6px rgba(0,122,255,0.35) !important;
+}
+
+/* ── Selectbox ── */
+[data-testid="stSelectbox"] label { font-size:12px !important; color:#8E8E93 !important; font-weight:600 !important; }
+[data-testid="stSelectbox"] > div > div { border-radius:10px !important;
+    border:0.5px solid #E5E5EA !important; }
+
+/* ── File uploader ── */
+[data-testid="stFileUploader"] { border-radius:14px !important; }
+[data-testid="stFileUploader"] label { font-size:12px !important; color:#8E8E93 !important; font-weight:600 !important; }
+[data-testid="stFileUploader"] > div { border-radius:14px !important;
+    border:1.5px dashed #C7C7CC !important; background:#FAFAFA !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -324,7 +427,7 @@ with tab_reseau:
         mn1_r=sub['Marge_N1'].sum(); cn1_r=sub['CA_N1'].sum(); tn1_r=mn1_r/cn1_r if cn1_r>0 else 0
         cib_r=(sub['Cible']*sub['CA']).sum()/ca_r if ca_r>0 else 0
         rows_r.append({'Rayon':rayon,'Acheteur':ACHETEURS.get(rayon,'—'),'CA (K)':f"{ca_r/1000:,.0f}",'Taux actuel':fp(tx_r,False),'Taux N-1':fp(tn1_r,False),'Dév. vs N-1':fp(tx_r-tn1_r),'Cible':fp(cib_r,False),'Dév. vs Cible':fp(tx_r-cib_r),'Marge Δ FCFA':fk(sub['Dev_N1_FCFA'].sum()),'🔴':(sub['Statut']=='🔴 Action requise').sum(),'🟡':(sub['Statut']=='🟡 Vigilance').sum(),'✅':(sub['Statut']=='✅ OK').sum(),'Statut':'🔴 Action requise' if (sub['Statut']=='🔴 Action requise').sum()>2 else ('🟡 Vigilance' if (sub['Statut']=='🟡 Vigilance').sum()>2 else '✅ OK')})
-    st.dataframe(pd.DataFrame(rows_r).style.applymap(cs,subset=['Statut']).applymap(cd,subset=['Dév. vs N-1','Dév. vs Cible']),use_container_width=True,hide_index=True,height=210)
+    st.dataframe(pd.DataFrame(rows_r).style.map(cs,subset=['Statut']).map(cd,subset=['Dév. vs N-1','Dév. vs Cible']),use_container_width=True,hide_index=True,height=210)
 
     st.markdown('<div class="section-title">🔴 Familles — triées par score d\'impact financier</div>', unsafe_allow_html=True)
     rouge=df[df['Statut']=='🔴 Action requise'].sort_values('Impact_Score',ascending=False)
@@ -338,7 +441,7 @@ with tab_reseau:
         for col in ['Dév. N-1','Dév. Cible']: disp[col]=disp[col].apply(fp)
         disp['Marge Δ FCFA']=disp['Marge Δ FCFA'].apply(fk)
         disp['Segment']=disp['Segment'].apply(lambda x: SEG_LABELS.get(x,x))
-        st.dataframe(disp.style.applymap(cs,subset=['Statut']).applymap(cd,subset=['Dév. N-1','Dév. Cible']),use_container_width=True,hide_index=True,height=420)
+        st.dataframe(disp.style.map(cs,subset=['Statut']).map(cd,subset=['Dév. N-1','Dév. Cible']),use_container_width=True,hide_index=True,height=420)
 
     with st.expander(f"🟡 Familles en vigilance ({n_o})"):
         orange=df[df['Statut']=='🟡 Vigilance'].sort_values('Impact_Score',ascending=False)
@@ -348,7 +451,7 @@ with tab_reseau:
         d2['Dév. N-1']=d2['Dév. N-1'].apply(fp); d2['Marge Δ FCFA']=d2['Marge Δ FCFA'].apply(fk)
         d2['Score Impact']=d2['Score Impact'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else '—')
         d2['Segment']=d2['Segment'].apply(lambda x: SEG_LABELS.get(x,x))
-        st.dataframe(d2.style.applymap(cd,subset=['Dév. N-1']),use_container_width=True,hide_index=True)
+        st.dataframe(d2.style.map(cd,subset=['Dév. N-1']),use_container_width=True,hide_index=True)
 
     st.markdown("")
     col_exp,_=st.columns([1,3])
@@ -389,7 +492,7 @@ with tab_acheteur:
     for col in ['Dév. N-1','Dév. Cible']: da[col]=da[col].apply(fp)
     da['Marge Δ FCFA']=da['Marge Δ FCFA'].apply(fk)
     da['Segment']=da['Segment'].apply(lambda x: SEG_LABELS.get(x,x))
-    st.dataframe(da.style.applymap(cs,subset=['Statut']).applymap(cd,subset=['Dév. N-1','Dév. Cible']),use_container_width=True,hide_index=True,height=580)
+    st.dataframe(da.style.map(cs,subset=['Statut']).map(cd,subset=['Dév. N-1','Dév. Cible']),use_container_width=True,hide_index=True,height=580)
 
     col_ea,_=st.columns([1,3])
     with col_ea:
@@ -421,7 +524,7 @@ with tab_magasin:
                 mn1_s=sub_s['Marge_N1'].sum(); cn1_s=sub_s['CA_N1'].sum(); tn1_s=mn1_s/cn1_s if cn1_s>0 else 0
                 dev_s=tx_s-tn1_s
                 rows_s.append({'Magasin':site,'CA (K)':f"{ca_s/1000:,.0f}",'Taux act.':fp(tx_s,False),'Taux N-1':fp(tn1_s,False),'Dév. vs N-1':fp(dev_s),'Marge Δ FCFA':fk(sub_s['Dev_N1_FCFA'].sum()),'🔴':(sub_s['Statut']=='🔴 Action requise').sum(),'🟡':(sub_s['Statut']=='🟡 Vigilance').sum(),'✅':(sub_s['Statut']=='✅ OK').sum(),'Statut':'🔴 Action requise' if dev_s<-TOLERANCE*2 else ('🟡 Vigilance' if dev_s<-TOLERANCE else '✅ OK')})
-            st.dataframe(pd.DataFrame(rows_s).sort_values('Statut').style.applymap(cs,subset=['Statut']).applymap(cd,subset=['Dév. vs N-1']),use_container_width=True,hide_index=True)
+            st.dataframe(pd.DataFrame(rows_s).sort_values('Statut').style.map(cs,subset=['Statut']).map(cd,subset=['Dév. vs N-1']),use_container_width=True,hide_index=True)
         else:
             dm=df_mag.sort_values(['_ord_statut','Impact_Score'],ascending=[True,False])
             d3=dm[['Rayon_court','SF_court','Segment','Acheteur','%Marge','Tx_N1','Dev_N1_pts','Dev_N1_FCFA','Impact_Score','Statut','Que_faire']].copy()
@@ -430,7 +533,7 @@ with tab_magasin:
             d3['Dév. N-1']=d3['Dév. N-1'].apply(fp); d3['Marge Δ FCFA']=d3['Marge Δ FCFA'].apply(fk)
             d3['Score Impact']=d3['Score Impact'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else '—')
             d3['Segment']=d3['Segment'].apply(lambda x: SEG_LABELS.get(x,x))
-            st.dataframe(d3.style.applymap(cs,subset=['Statut']).applymap(cd,subset=['Dév. N-1']),use_container_width=True,hide_index=True,height=520)
+            st.dataframe(d3.style.map(cs,subset=['Statut']).map(cd,subset=['Dév. N-1']),use_container_width=True,hide_index=True,height=520)
 
 # ── TAB TENDANCE ───────────────────────────────────────────────────────────────
 with tab_tendance:
@@ -444,7 +547,7 @@ with tab_tendance:
             tx_p=mg_p/ca_p if ca_p>0 else 0
             mn1_p=dp['Marge_N1'].sum(); cn1_p=dp['CA_N1'].sum(); tn1_p=mn1_p/cn1_p if cn1_p>0 else 0
             rows_t.append({'Période':p,'Taux réalisé':fp(tx_p,False),'Taux N-1':fp(tn1_p,False),'Dév. vs N-1':fp(tx_p-tn1_p),'Marge Δ FCFA':fk(dp['Dev_N1_FCFA'].sum()),'🔴 Alertes':(dp['Statut']=='🔴 Action requise').sum(),'🟡 Vigilance':(dp['Statut']=='🟡 Vigilance').sum(),'✅ OK':(dp['Statut']=='✅ OK').sum()})
-        st.dataframe(pd.DataFrame(rows_t).style.applymap(cd,subset=['Dév. vs N-1']),use_container_width=True,hide_index=True)
+        st.dataframe(pd.DataFrame(rows_t).style.map(cd,subset=['Dév. vs N-1']),use_container_width=True,hide_index=True)
 
         st.markdown('<div class="section-title">Dégradations persistantes — rouge sur toutes les périodes</div>', unsafe_allow_html=True)
         rouge_sets={p:set(df_all[df_all['Periode']==p][df_all[df_all['Periode']==p]['Statut']=='🔴 Action requise'].apply(lambda r: f"{r['Rayon_court']}|{r['SF_court']}",axis=1)) for p in periodes_dispo}
