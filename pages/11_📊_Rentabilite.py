@@ -267,8 +267,25 @@ def load_extraction(file_bytes: bytes, filename: str, ref_bytes=None):
     _ord = {'🔴 Action requise':0,'🟡 Vigilance':1,'✅ OK':2,'⚪ N/A':3}
     df['_ord_statut'] = df['Statut'].map(_ord)
     df['_ord_rayon']  = df['Rayon_court'].map({r:i for i,r in enumerate(ORDRE_RAYONS)})
-    df['Periode']     = periode
-    df['Fichier']     = filename
+    # Nettoyage outliers — exclure les taux aberrants (données PBI corrompues)
+    df = df[df['%Marge'].between(-0.4, 0.8)].copy()
+
+    # Remise compensatrice — montant nécessaire pour ramener la marge à la cible
+    df['Remise_Necessaire_FCFA'] = np.where(
+        df['Dev_Cible_pts'] < 0,
+        df['Dev_Cible_pts'].abs() * df['CA'],
+        0
+    )
+
+    # Alerte Mix — famille dont le CA progresse fort mais la marge décroche
+    # Signale un glissement de mix produit défavorable dans la famille
+    df['Alerte_Mix'] = (
+        df['%Vs N-1'].notna() & (df['%Vs N-1'] > 0.15) &
+        df['Dev_N1_pts'].notna() & (df['Dev_N1_pts'] < -0.02)
+    )
+
+    df['Periode']  = periode
+    df['Fichier']  = filename
     return df
 
 # ─── EXPORT EXCEL ─────────────────────────────────────────────────────────────
@@ -319,8 +336,8 @@ def export_excel(df_all, periodes):
         HDRS = ['Rayon','Famille','Segment','Source cible','Acheteur',
                 'CA (FCFA)','Marge (FCFA)','Taux actuel','Taux N-1','Cible','Plancher',
                 'Dév. N-1 (pts)','Dév. Cible (pts)','Marge Δ FCFA','Score Impact',
-                'Statut','Que faire ?']
-        WIDTHS = [20,30,16,18,18,14,14,12,12,12,12,14,14,16,13,16,46]
+                'Priorité','Statut','Que faire ?']
+        WIDTHS = [20,30,16,18,18,14,14,12,12,12,12,14,14,16,13,14,16,46]
         write_header_row(ws, 3, HDRS, WIDTHS)
 
         C_R='FFD6D6'; C_O='FFF3CC'; C_G='D6F5D6'; C_L='F7F7F7'; C_W='FFFFFF'
@@ -344,21 +361,307 @@ def export_excel(df_all, periodes):
                 r.get('Dev_Cible_pts', None),
                 r.get('Dev_N1_FCFA', None),
                 r.get('Impact_Score', None),
+                ('🔴 Urgence'    if (r.get('Impact_Score') or 0) > 500000 else
+                 '🟡 Priorité'  if (r.get('Impact_Score') or 0) > 100000 else
+                 '🔵 Surveillance'),
                 stat,
                 r.get('Que_faire',''),
             ]
             FMTS = [None,None,None,None,None,'#,##0','#,##0','0.0%','0.0%','0.0%','0.0%',
-                    '+0.0%;-0.0%;-','+0.0%;-0.0%;-','+#,##0;-#,##0;-','#,##0',None,None]
+                    '+0.0%;-0.0%;-','+0.0%;-0.0%;-','+#,##0;-#,##0;-','#,##0',None,None,None]
             for j, (v, f) in enumerate(zip(vals, FMTS), 1):
                 c = ws.cell(row=i, column=j, value=v)
                 c.fill = xfill(bg); c.border = xbdr()
                 c.font = Font('Calibri', size=10 if j < 15 else 9, color=C_DK)
                 if f: c.number_format = f
-                c.alignment = xctr() if j in (8,9,10,11,12,13,16) else xrgt() if j in (6,7,14,15) else xlft(w=(j==17))
+                if j == 16:  # Priorité
+                    prio_bg = {'🔴 Urgence':'FFD6D6','🟡 Priorité':'FFF3CC','🔵 Surveillance':'D6EAF8'}.get(str(v),'FFFFFF')
+                    prio_fg = {'🔴 Urgence':'991B1B','🟡 Priorité':'854D0E','🔵 Surveillance':'1A4A7A'}.get(str(v),'1A1A2E')
+                    c.fill = xfill(prio_bg)
+                    c.font = Font('Calibri', size=9, bold=True, color=prio_fg)
+                    c.alignment = xctr()
+                else:
+                    c.alignment = xctr() if j in (8,9,10,11,12,13,17) else xrgt() if j in (6,7,14,15) else xlft(w=(j==18))
             ws.row_dimensions[i].height = 16
 
         ws.freeze_panes = 'A4'
         ws.auto_filter.ref = f'A3:{get_column_letter(len(HDRS))}{3+len(df)}'
+
+    # ── Onglet Synthèse Magasins ────────────────────────────────────────────────
+    has_site_col = 'Site nom long' in df_all.columns and df_all['Site nom long'].notna().any()
+    if has_site_col:
+        ws_mag = wb.create_sheet("Synthese Magasins")
+        ws_mag.sheet_view.showGridLines = False
+
+        # Colonnes
+        ws_mag.column_dimensions['A'].width = 28  # Magasin
+        ws_mag.column_dimensions['B'].width = 14  # CA
+        ws_mag.column_dimensions['C'].width = 12  # Marge
+        ws_mag.column_dimensions['D'].width = 11  # Taux actuel
+        ws_mag.column_dimensions['E'].width = 11  # Taux N-1
+        ws_mag.column_dimensions['F'].width = 13  # Dev N-1
+        ws_mag.column_dimensions['G'].width = 13  # Marge delta
+        ws_mag.column_dimensions['H'].width = 11  # Priorite
+        ws_mag.column_dimensions['I'].width = 11  # Statut
+        ws_mag.column_dimensions['J'].width = 10  # Fam rouges
+        ws_mag.column_dimensions['K'].width = 10  # Fam orange
+        ws_mag.column_dimensions['L'].width = 10  # Fam vertes
+        ws_mag.column_dimensions['M'].width = 42  # Top famille
+        ws_mag.column_dimensions['N'].width = 42  # Action magasin
+
+        # Titre
+        ws_mag.merge_cells('A1:N1')
+        ct = ws_mag.cell(row=1, column=1, value='SYNTHESE PAR MAGASIN  --  DEVIATION MARGE vs N-1')
+        ct.font = Font('Calibri', size=13, bold=True, color=C_WH)
+        ct.fill = xfill(C_HDR); ct.alignment = xctr()
+        ws_mag.row_dimensions[1].height = 30
+
+        # Sous-titre periode
+        ws_mag.merge_cells('A2:N2')
+        ct2 = ws_mag.cell(row=2, column=1,
+            value=f'  Periode : {", ".join(periodes)}  --  Classe par deviation N-1 croissante (pires magasins en tete)')
+        ct2.font = Font('Calibri', size=9, italic=True, color='AABBCC')
+        ct2.fill = xfill(C_HDR); ct2.alignment = xlft()
+        ws_mag.row_dimensions[2].height = 16
+
+        # En-tetes
+        MAG_HDRS = ['Magasin','CA (FCFA)','Marge (FCFA)','Taux actuel','Taux N-1',
+                    'Dev. N-1 (pts)','Marge delta FCFA','Priorite','Statut',
+                    'Fam. Rouges','Fam. Orange','Fam. Vertes',
+                    'Famille la plus impactee','Action recommandee']
+        for j, h in enumerate(MAG_HDRS, 1):
+            c = ws_mag.cell(row=3, column=j, value=h)
+            c.font = Font('Calibri', size=9, bold=True, color=C_WH)
+            c.fill = xfill(C_SUB); c.alignment = xctr(); c.border = xbdr()
+        ws_mag.row_dimensions[3].height = 28
+
+        # Calcul par magasin
+        df_sites = df_all[df_all['Periode'].isin(periodes)].copy()
+        df_sites = df_sites[
+            df_sites['Site nom long'].notna() &
+            ~df_sites['Site nom long'].isin(['Total','']) &
+            df_sites['CA'].notna() & (df_sites['CA'] > 0)
+        ].copy()
+
+        # Agréger par magasin
+        site_rows = []
+        for site in sorted(df_sites['Site nom long'].unique()):
+            sub = df_sites[df_sites['Site nom long'] == site]
+            ca_s   = sub['CA'].sum()
+            mg_s   = sub['Marge'].sum()
+            tx_s   = mg_s / ca_s if ca_s > 0 else 0
+            mn1_s  = sub['Marge_N1'].sum()
+            cn1_s  = sub['CA_N1'].sum()
+            tn1_s  = mn1_s / cn1_s if cn1_s > 0 else 0
+            dev_s  = tx_s - tn1_s
+            dmg_s  = sub['Dev_N1_FCFA'].sum()
+            n_r    = (sub['Statut'] == '🔴 Action requise').sum()
+            n_o    = (sub['Statut'] == '🟡 Vigilance').sum()
+            n_v    = (sub['Statut'] == '✅ OK').sum()
+
+            # Famille la plus impactée (pire Score Impact)
+            top_fam_row = sub.nlargest(1, 'Impact_Score')
+            top_fam = top_fam_row['SF_court'].values[0] if len(top_fam_row) else '—'
+            top_dev = top_fam_row['Dev_N1_pts'].values[0] if len(top_fam_row) else None
+
+            # Statut global magasin
+            if dev_s < -0.030:   stat_s = 'ACTION'
+            elif dev_s < -0.015: stat_s = 'VIGILANCE'
+            else:                stat_s = 'OK'
+
+            # Priorité magasin
+            score_s = sub['Impact_Score'].sum()
+            if score_s > 2000000:   prio_s = 'Urgence'
+            elif score_s > 500000:  prio_s = 'Priorite'
+            else:                   prio_s = 'Surveillance'
+
+            # Action recommandée
+            if n_r >= 5:
+                action = f'{n_r} familles en alerte -- Reunion acheteur + revue conditions fournisseurs'
+            elif n_r >= 2:
+                action = f'{n_r} familles en alerte -- Priorite sur {top_fam} ({top_dev:+.1f} pts vs N-1)' if pd.notna(top_dev) else f'{n_r} familles en alerte -- Traiter cette semaine'
+            elif n_r == 1:
+                action = f'1 famille en alerte -- Traiter {top_fam} cette semaine'
+            elif n_o >= 3:
+                action = f'{n_o} familles en vigilance -- Surveiller la tendance'
+            else:
+                action = 'RAS -- Maintenir les conditions actuelles'
+
+            site_rows.append({
+                'Magasin': site,
+                'CA': ca_s, 'Marge': mg_s,
+                'Tx': tx_s, 'Tn1': tn1_s, 'Dev': dev_s, 'DMg': dmg_s,
+                'Prio': prio_s, 'Stat': stat_s,
+                'NR': n_r, 'NO': n_o, 'NV': n_v,
+                'TopFam': top_fam, 'Action': action,
+            })
+
+        # Trier par déviation croissante (pires en tête)
+        site_rows.sort(key=lambda x: x['Dev'])
+
+        STAT_COLORS = {
+            'ACTION':     ('FFD6D6', '991B1B'),
+            'VIGILANCE':  ('FFF3CC', '854D0E'),
+            'OK':         ('D6F5D6', '145A32'),
+        }
+        PRIO_COLORS = {
+            'Urgence':     ('FFD6D6', '991B1B'),
+            'Priorite':    ('FFF3CC', '854D0E'),
+            'Surveillance':('D6EAF8', '1A4A7A'),
+        }
+
+        for i, row in enumerate(site_rows, 4):
+            bg_base = 'F7F7F7' if i % 2 == 0 else 'FFFFFF'
+            stat_bg, stat_fg = STAT_COLORS.get(row['Stat'], ('FFFFFF', '1A1A2E'))
+            prio_bg, prio_fg = PRIO_COLORS.get(row['Prio'], ('FFFFFF', '1A1A2E'))
+
+            data = [
+                (row['Magasin'],  bg_base,  '1A1A2E', True,  'left',   None),
+                (row['CA'],       bg_base,  '1A1A2E', False, 'right',  '#,##0'),
+                (row['Marge'],    bg_base,  '1A1A2E', False, 'right',  '#,##0'),
+                (row['Tx'],       bg_base,  '1A1A2E', False, 'center', '0.0%'),
+                (row['Tn1'],      bg_base,  '1A1A2E', False, 'center', '0.0%'),
+                (row['Dev'],      bg_base,  stat_fg,  True,  'center', '+0.0%;-0.0%;-'),
+                (row['DMg'],      bg_base,  stat_fg,  True,  'right',  '+#,##0;-#,##0;-'),
+                (row['Prio'],     prio_bg,  prio_fg,  True,  'center', None),
+                (row['Stat'],     stat_bg,  stat_fg,  True,  'center', None),
+                (row['NR'],       'FFD6D6' if row['NR'] > 0 else bg_base, '991B1B' if row['NR'] > 0 else '1A1A2E', True, 'center', None),
+                (row['NO'],       'FFF3CC' if row['NO'] > 0 else bg_base, '854D0E' if row['NO'] > 0 else '1A1A2E', True, 'center', None),
+                (row['NV'],       'D6F5D6' if row['NV'] > 0 else bg_base, '145A32' if row['NV'] > 0 else '1A1A2E', True, 'center', None),
+                (row['TopFam'],   bg_base,  '1A1A2E', False, 'left',   None),
+                (row['Action'],   bg_base,  '1A1A2E', False, 'left',   None),
+            ]
+
+            for j, (val, bg, fg, bold, align, fmt) in enumerate(data, 1):
+                c = ws_mag.cell(row=i, column=j, value=val)
+                c.fill      = xfill(bg)
+                c.font      = Font('Calibri', size=9, bold=bold, color=fg)
+                c.alignment = Alignment(horizontal=align, vertical='center', wrap_text=(j >= 13))
+                c.border    = xbdr()
+                if fmt: c.number_format = fmt
+            ws_mag.row_dimensions[i].height = 20 if i < len(site_rows) + 4 else 20
+
+        # Ligne totaux réseau
+        r_tot = len(site_rows) + 4
+        ws_mag.merge_cells(f'A{r_tot}:A{r_tot}')
+        tot_data = [
+            ('TOTAL RESEAU', C_HDR, C_WH, True, 'left', None),
+            (df_sites['CA'].sum(), C_SUB, C_WH, True, 'right', '#,##0'),
+            (df_sites['Marge'].sum(), C_SUB, C_WH, True, 'right', '#,##0'),
+            (df_sites['Marge'].sum()/df_sites['CA'].sum() if df_sites['CA'].sum()>0 else 0, C_SUB, C_WH, True, 'center', '0.0%'),
+            (df_sites['Marge_N1'].sum()/df_sites['CA_N1'].sum() if df_sites['CA_N1'].sum()>0 else 0, C_SUB, C_WH, True, 'center', '0.0%'),
+            (df_sites['Marge'].sum()/df_sites['CA'].sum() - df_sites['Marge_N1'].sum()/df_sites['CA_N1'].sum() if df_sites['CA_N1'].sum()>0 else 0, C_SUB, C_WH, True, 'center', '+0.0%;-0.0%;-'),
+            (df_sites['Dev_N1_FCFA'].sum(), C_SUB, C_WH, True, 'right', '+#,##0;-#,##0;-'),
+            ('', C_SUB, C_WH, False, 'center', None),
+            ('', C_SUB, C_WH, False, 'center', None),
+            ((df_sites['Statut']=='🔴 Action requise').sum(), C_SUB, C_WH, True, 'center', None),
+            ((df_sites['Statut']=='🟡 Vigilance').sum(), C_SUB, C_WH, True, 'center', None),
+            ((df_sites['Statut']=='✅ OK').sum(), C_SUB, C_WH, True, 'center', None),
+            ('', C_SUB, C_WH, False, 'center', None),
+            ('', C_SUB, C_WH, False, 'center', None),
+        ]
+        for j, (val, bg, fg, bold, align, fmt) in enumerate(tot_data, 1):
+            c = ws_mag.cell(row=r_tot, column=j, value=val)
+            c.fill = xfill(bg); c.font = Font('Calibri', size=10, bold=bold, color=fg)
+            c.alignment = Alignment(horizontal=align, vertical='center')
+            c.border = xbdr()
+            if fmt: c.number_format = fmt
+        ws_mag.row_dimensions[r_tot].height = 22
+
+        ws_mag.freeze_panes = 'A4'
+        ws_mag.auto_filter.ref = f'A3:N{r_tot - 1}'
+
+    # ── Onglet Plan de Négociation ───────────────────────────────────────────────
+    ws_neg = wb.create_sheet("Plan de Negociation")
+    ws_neg.sheet_view.showGridLines = False
+    ws_neg.column_dimensions['A'].width = 20
+    ws_neg.column_dimensions['B'].width = 30
+    ws_neg.column_dimensions['C'].width = 20
+    ws_neg.column_dimensions['D'].width = 14
+    ws_neg.column_dimensions['E'].width = 16
+    ws_neg.column_dimensions['F'].width = 14
+    ws_neg.column_dimensions['G'].width = 14
+    ws_neg.column_dimensions['H'].width = 14
+    ws_neg.column_dimensions['I'].width = 14
+    ws_neg.column_dimensions['J'].width = 44
+
+    # Titre
+    ws_neg.merge_cells('A1:J1')
+    cn1 = ws_neg.cell(row=1, column=1, value='PLAN DE NEGOCIATION  --  FAMILLES EN ACTION REQUISE')
+    cn1.font = Font('Calibri', size=13, bold=True, color=C_WH)
+    cn1.fill = xfill(C_HDR); cn1.alignment = xctr()
+    ws_neg.row_dimensions[1].height = 30
+
+    ws_neg.merge_cells('A2:J2')
+    cn2 = ws_neg.cell(row=2, column=1,
+        value='  Toutes periodes confondues -- Trie par remise necessaire decroissante -- Utiliser ce tableau en preparation des rendez-vous fournisseurs')
+    cn2.font = Font('Calibri', size=9, italic=True, color='AABBCC')
+    cn2.fill = xfill(C_HDR); cn2.alignment = xlft()
+    ws_neg.row_dimensions[2].height = 16
+
+    # En-têtes
+    NEG_HDRS = ['Rayon','Famille','Acheteur','CA (FCFA)','Marge (FCFA)',
+                'Taux actuel','Cible','Dev. N-1 (pts)',
+                'Remise necessaire FCFA','Action a mener']
+    NEG_W    = [20, 30, 20, 14, 14, 12, 12, 13, 18, 44]
+    for j, (h, w) in enumerate(zip(NEG_HDRS, NEG_W), 1):
+        c = ws_neg.cell(row=3, column=j, value=h)
+        c.font = Font('Calibri', size=9, bold=True, color=C_WH)
+        c.fill = xfill('CC2200' if j == 9 else C_SUB)
+        c.alignment = xctr(); c.border = xbdr()
+        ws_neg.column_dimensions[get_column_letter(j)].width = w
+    ws_neg.row_dimensions[3].height = 28
+
+    # Données — toutes périodes, statut rouge uniquement, triées par remise décroissante
+    df_neg = df_all[
+        df_all['Statut'] == '🔴 Action requise'
+    ].copy()
+    df_neg = df_neg.sort_values('Remise_Necessaire_FCFA', ascending=False)
+
+    for i, (_, r) in enumerate(df_neg.iterrows(), 4):
+        bg = 'F7F7F7' if i % 2 == 0 else 'FFFFFF'
+        neg_vals = [
+            r.get('Rayon_court', ''),
+            r.get('SF_court', ''),
+            r.get('Acheteur', ''),
+            r.get('CA', None),
+            r.get('Marge', None),
+            r.get('%Marge', None),
+            r.get('Cible', None),
+            r.get('Dev_N1_pts', None),
+            r.get('Remise_Necessaire_FCFA', None),
+            r.get('Que_faire', ''),
+        ]
+        NEG_FMTS = [None, None, None, '#,##0', '#,##0', '0.0%', '0.0%',
+                    '+0.0%;-0.0%;-', '#,##0', None]
+        for j, (v, f) in enumerate(zip(neg_vals, NEG_FMTS), 1):
+            c = ws_neg.cell(row=i, column=j, value=v)
+            c.fill = xfill('FFE8E8' if j == 9 and (v or 0) > 500000 else bg)
+            c.font = Font('Calibri', size=9,
+                          bold=(j == 9 and (v or 0) > 500000),
+                          color='CC2200' if j == 9 and (v or 0) > 500000 else '1A1A2E')
+            c.alignment = Alignment(
+                horizontal='right' if j in (4, 5, 9) else 'center' if j in (6, 7, 8) else 'left',
+                vertical='center', wrap_text=(j == 10))
+            c.border = xbdr()
+            if f: c.number_format = f
+        ws_neg.row_dimensions[i].height = 18
+
+    # Ligne de total remise
+    r_tot_neg = len(df_neg) + 4
+    ws_neg.merge_cells(f'A{r_tot_neg}:H{r_tot_neg}')
+    ct = ws_neg.cell(row=r_tot_neg, column=1, value='TOTAL REMISE NECESSAIRE POUR ATTEINDRE LES CIBLES')
+    ct.font = Font('Calibri', size=10, bold=True, color=C_WH)
+    ct.fill = xfill(C_HDR); ct.alignment = xlft()
+    cv = ws_neg.cell(row=r_tot_neg, column=9,
+                     value=df_neg['Remise_Necessaire_FCFA'].sum())
+    cv.font      = Font('Calibri', size=11, bold=True, color=C_WH)
+    cv.fill      = xfill('CC2200')
+    cv.number_format = '#,##0'
+    cv.alignment = xctr(); cv.border = xbdr()
+    ws_neg.row_dimensions[r_tot_neg].height = 24
+    ws_neg.freeze_panes = 'A4'
+    ws_neg.auto_filter.ref = f'A3:J{r_tot_neg - 1}'
 
     # ── Onglet Lexique ─────────────────────────────────────────────────────────
     ws_lex = wb.create_sheet("Lexique et Statuts")
@@ -428,6 +731,9 @@ def export_excel(df_all, periodes):
         ("Score Impact",
          "Indicateur de priorite : marge perdue ponderee par le volume de la famille.",
          "Ex : Riz Long score 850 000  vs  Chips score 48 000.\nRiz Long est prioritaire meme si son ecart en % est plus faible car il pese plus en volume."),
+        ("Priorite",
+         "Niveau d action derive automatiquement du Score Impact.\nTrois niveaux : Urgence / Priorite / Surveillance.",
+         "Score > 500 000  ->  Urgence : appel fournisseur cette semaine.\nScore 100 000 a 500 000  ->  Priorite : traiter cette semaine.\nScore < 100 000  ->  Surveillance : monitorer."),
         ("Source cible",
          "Indique comment la cible a ete calculee pour cette famille.",
          '"N-1 x 1,02"  ->  calcule depuis l historique N-1.\n"Plancher segment (nouveaute)"  ->  article sans historique, compare uniquement vs plancher.'),
@@ -805,6 +1111,44 @@ with tab1:
         st.dataframe(d2.style.map(cd, subset=['Dév. N-1']),
                      use_container_width=True, hide_index=True)
     st.caption("Score Impact = marge perdue (FCFA) × poids volume · priorise les grosses familles en dérive")
+
+    # Matrice de priorité
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("<div class='section-label'>Matrice de priorité — Volume vs Dérive marge</div>", unsafe_allow_html=True)
+    chart_data = df.dropna(subset=['CA','Dev_N1_pts']).copy()
+    chart_data['Dev_N1_pct'] = (chart_data['Dev_N1_pts'] * 100).round(2)
+    chart_data['Alerte_Mix_txt'] = chart_data['Alerte_Mix'].map({True:'⚠️ Effet Mix', False:''})
+
+    if len(chart_data) > 0:
+        st.scatter_chart(
+            chart_data,
+            x='CA',
+            y='Dev_N1_pct',
+            color='Rayon_court',
+            size='Impact_Score',
+            use_container_width=True,
+        )
+        n_mix = int(chart_data['Alerte_Mix'].sum())
+        mix_txt = f" · ⚠️ **{n_mix} famille(s) avec effet mix détecté** (CA +15% vs N-1 mais marge en recul)" if n_mix > 0 else ""
+        st.caption(f"Axe X = CA famille (FCFA) · Axe Y = déviation marge vs N-1 (pts) · Taille = Score Impact{mix_txt}")
+        st.caption("👉 Quadrant bas-droite = familles à fort volume en dérive critique — priorité absolue.")
+
+    # Alertes Mix si présentes
+    mix_fams = df[df['Alerte_Mix'] == True].sort_values('Impact_Score', ascending=False)
+    if len(mix_fams) > 0:
+        with st.expander(f"⚠️ Effet Mix détecté — {len(mix_fams)} famille(s) dont le CA progresse mais la marge décroche"):
+            st.markdown("""
+<div class='alert-card alert-amber'>
+  <strong>⚠️ Effet Mix :</strong> ces familles ont un CA en hausse &gt;15% vs N-1 mais un taux de marge en baisse.
+  Signal d'un glissement vers des références moins rentables dans la famille, ou d'une promo mal calibrée qui gonfle le volume sans préserver la marge.
+</div>""", unsafe_allow_html=True)
+            dm = mix_fams[['Rayon_court','SF_court','Acheteur','CA','%Marge','Dev_N1_pts','Remise_Necessaire_FCFA','Que_faire']].copy()
+            dm.columns = ['Rayon','Famille','Acheteur','CA (FCFA)','Taux act.','Dév. N-1','Remise nécessaire FCFA','Que faire ?']
+            dm['CA (FCFA)'] = dm['CA (FCFA)'].apply(lambda x: f"{x:,.0f}")
+            dm['Taux act.'] = dm['Taux act.'].apply(lambda x: fp(x, False))
+            dm['Dév. N-1']  = dm['Dév. N-1'].apply(fp)
+            dm['Remise nécessaire FCFA'] = dm['Remise nécessaire FCFA'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) and x > 0 else '—')
+            st.dataframe(dm, use_container_width=True, hide_index=True)
 
     # Tendance multi-périodes si plusieurs fichiers
     if len(periodes_dispo) > 1:
