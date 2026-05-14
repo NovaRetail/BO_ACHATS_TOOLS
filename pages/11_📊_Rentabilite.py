@@ -102,11 +102,19 @@ def fp(v, sign=True):
 
 def fk(v):
     try:
-        if pd.isna(v) or v == 0: return '—'
+        if pd.isna(v) or v == 0: return '-'
         a = abs(v)
-        if a >= 1_000_000: return f"{v/1_000_000:+.1f} M"
-        return f"{v/1000:+,.0f} K"
-    except: return '—'
+        if a >= 1_000_000: return f"{v/1_000_000:+.2f} M FCFA"
+        return f"{v/1000:+,.0f} K FCFA"
+    except: return '-'
+
+def fk_abs(v):
+    try:
+        if pd.isna(v) or v == 0: return '-'
+        a = abs(v)
+        if a >= 1_000_000: return f"{a/1_000_000:.2f} M FCFA perdus"
+        return f"{a/1000:,.0f} K FCFA perdus"
+    except: return '-'
 
 def badge_statut(s):
     if '✅' in str(s): return '<span class="badge-ok">✅ OK</span>'
@@ -149,20 +157,49 @@ def _statut_vec(dev):
     s[nn & (dev < -TOLERANCE*2)]                        = '🔴 Action requise'
     return s
 
+def _cause_probable_vec(df):
+    dev = df['Dev_N1_pts']
+    seg = df['Segment']
+    has_promo = 'CA Promo' in df.columns and 'Marge Promo' in df.columns
+    if has_promo:
+        poids_promo = df['CA Promo'].fillna(0) / df['CA'].replace(0,1)
+        tx_promo    = df['Marge Promo'].fillna(0) / df['CA Promo'].replace(0,1)
+        promo_def   = (poids_promo > 0.20) & (tx_promo < 0.05) & dev.notna() & (dev < -0.02)
+    else:
+        promo_def   = pd.Series(False, index=df.index)
+    alerte_mix = df.get('Alerte_Mix', pd.Series(False, index=df.index))
+    cause = pd.Series('A investiguer', index=df.index)
+    cause[dev.notna() & (dev >= -TOLERANCE)]                     = 'Marge OK'
+    cause[promo_def]                                              = 'Promo deficitaire'
+    cause[alerte_mix & ~promo_def]                               = 'Effet mix defavorable'
+    cause[dev.notna() & (dev < -0.05) & ~promo_def & ~alerte_mix] = 'Conditions achat degradees'
+    cause[dev.notna() & (dev < -0.10) & ~promo_def]             = 'Chute severe prix achat'
+    cause[seg == 'Produit d appel']                              = 'Produit appel - remise arriere'
+    cause[df['%Marge'].notna() & (df['%Marge'] < 0)]            = 'Marge negative - urgence'
+    return cause
+
 def _que_faire_vec(df):
     tx  = df['%Marge']
     dev = df['Dev_N1_pts']
     seg = df['Segment']
     ca_med = df.groupby('Rayon_court')['CA'].transform('median').fillna(1)
     gros   = df['CA'] > ca_med * 1.5
-    c = pd.Series('✅ RAS — surveiller la tendance', index=df.index)
-    c[dev.notna() & (dev < -TOLERANCE*2)]              = '🔍 Optimiser mix promo / conditions fournisseur'
-    c[dev.notna() & (dev < -0.05)]                     = '📋 Révision conditions achat + audit promos'
-    c[dev.notna() & (dev < -0.05) & gros]              = '📞 Volume élevé + marge en chute — renégociation urgente'
-    c[dev.notna() & (dev < -0.10)]                     = '📞 Convocation fournisseur — analyse prix achat vs marché'
-    c[seg == 'Produit d appel']                        = '📋 Négocier remise arrière ou ristourne volume'
-    c[(seg=='Produit d appel') & dev.notna() & (dev < -0.05)] = "📞 Produit d'appel sous pression — remise arrière urgente"
-    c[tx.notna() & (tx < 0)]                           = '🚨 Marge négative — bloquer la promo immédiatement'
+    has_promo = 'CA Promo' in df.columns and 'Marge Promo' in df.columns
+    if has_promo:
+        poids_promo  = df['CA Promo'].fillna(0) / df['CA'].replace(0,1)
+        tx_promo_ser = df['Marge Promo'].fillna(0) / df['CA Promo'].replace(0,1)
+        promo_def    = (poids_promo > 0.20) & (tx_promo_ser < 0.05)
+    else:
+        promo_def = pd.Series(False, index=df.index)
+    c = pd.Series('OK - maintenir les conditions', index=df.index)
+    c[promo_def & dev.notna() & (dev < -0.02)]                   = 'Stopper ou reneg. la promo en cours'
+    c[dev.notna() & (dev < -TOLERANCE*2) & ~promo_def]           = 'Verifier conditions achat fournisseur'
+    c[dev.notna() & (dev < -0.05) & ~promo_def]                  = 'Revision conditions achat + audit promos'
+    c[dev.notna() & (dev < -0.05) & gros & ~promo_def]           = 'Volume eleve en derive - reneg. urgente'
+    c[dev.notna() & (dev < -0.10) & ~promo_def]                  = 'Convocation fourn. - analyse PA vs marche'
+    c[seg == 'Produit d appel']                                   = 'Negocier remise arriere ou ristourne vol.'
+    c[(seg=='Produit d appel') & dev.notna() & (dev < -0.05)]    = "Produit appel sous pression - remise arriere urgente"
+    c[tx.notna() & (tx < 0)]                                      = 'MARGE NEGATIVE - stopper promo immediat'
     return c
 
 def _impact_score_vec(df):
@@ -266,39 +303,74 @@ def load_extraction(file_bytes: bytes, filename: str, ref_bytes=None):
         df['Cible']    = df['Cible_ref'].fillna(df['Plancher'])
         df['Plancher'] = df['Plancher_ref'].fillna(df['Plancher'])
     else:
-        df['Cible'] = np.where(
+        cible_base = np.where(
             df['Tx_N1'].notna(),
             np.maximum(df['Tx_N1'] * 1.02, df['Plancher']),
-            df['Plancher'])
+            df['Plancher']
+        )
+        plafond_appel = df['Plancher'] + 0.02
+        df['Cible'] = np.where(
+            df['Segment'] == 'Produit d appel',
+            np.minimum(cible_base, plafond_appel),
+            cible_base
+        )
 
     df['Source_cible']   = np.where(df['Tx_N1'].notna(), 'N-1 × 1,02', 'Plancher segment (nouveauté)')
     df['Dev_N1_pts']     = df['%Marge'] - df['Tx_N1']
     df['Dev_N1_FCFA']    = df['Dev_N1_pts'] * df['CA']
     df['Dev_Cible_pts']  = df['%Marge'] - df['Cible']
     df['Dev_Cible_FCFA'] = df['Dev_Cible_pts'] * df['CA']
+    # Nettoyage outliers — exclure les taux aberrants AVANT les calculs
+    df = df[df['%Marge'].between(-0.4, 0.8)].copy()
+
     df['Statut']         = _statut_vec(df['Dev_N1_pts'])
     df['Impact_Score']   = _impact_score_vec(df)
+    df['Cause_Probable'] = _cause_probable_vec(df)
     df['Que_faire']      = _que_faire_vec(df)
 
     _ord = {'🔴 Action requise':0,'🟡 Vigilance':1,'✅ OK':2,'⚪ N/A':3}
     df['_ord_statut'] = df['Statut'].map(_ord)
     df['_ord_rayon']  = df['Rayon_court'].map({r:i for i,r in enumerate(ORDRE_RAYONS)})
-    # Nettoyage outliers — exclure les taux aberrants (données PBI corrompues)
-    df = df[df['%Marge'].between(-0.4, 0.8)].copy()
+    df['Priorite'] = pd.cut(
+        df['Impact_Score'].fillna(0),
+        bins=[-1, 100000, 500000, float('inf')],
+        labels=['Surveillance', 'Priorite', 'Urgence']
+    ).astype(str)
 
-    # Remise compensatrice — montant nécessaire pour ramener la marge à la cible
+    # Remise compensatrice
     df['Remise_Necessaire_FCFA'] = np.where(
         df['Dev_Cible_pts'] < 0,
         df['Dev_Cible_pts'].abs() * df['CA'],
         0
     )
+    # Amelioration 3 : taux marge net casse + alerte casse par famille
+    if 'Casse (Valeur)' in df.columns:
+        df['Casse_val']       = df['Casse (Valeur)'].fillna(0)
+        df['Marge_Net_Casse'] = df['Marge'] + df['Casse_val']
+        df['Tx_Marge_Net']    = df['Marge_Net_Casse'] / df['CA'].replace(0,1)
+        df['Tx_Casse_Fam']    = df['Casse_val'].abs() / df['CA'].replace(0,1)
+        df['Alerte_Casse']    = df['Tx_Casse_Fam'] > 0.005
+    else:
+        df['Marge_Net_Casse'] = df['Marge']
+        df['Tx_Marge_Net']    = df['%Marge']
+        df['Tx_Casse_Fam']    = 0.0
+        df['Alerte_Casse']    = False
 
     # Alerte Mix — famille dont le CA progresse fort mais la marge décroche
-    # Signale un glissement de mix produit défavorable dans la famille
+    # PBI exporte parfois %Vs N-1 en décimal (0.15) parfois en entier (15.0)
+    # On normalise : si médiane > 1 → format entier → diviser par 100
+    _evo_ca = df['%Vs N-1'].dropna()
+    _evo_ca_norm = _evo_ca / 100 if _evo_ca.abs().median() > 1 else _evo_ca
+    df['_evo_ca_norm'] = np.where(
+        df['%Vs N-1'].notna(),
+        df['%Vs N-1'] / (100 if _evo_ca.abs().median() > 1 else 1),
+        np.nan
+    )
     df['Alerte_Mix'] = (
-        df['%Vs N-1'].notna() & (df['%Vs N-1'] > 0.15) &
+        df['_evo_ca_norm'].notna() & (df['_evo_ca_norm'] > 0.15) &
         df['Dev_N1_pts'].notna() & (df['Dev_N1_pts'] < -0.02)
     )
+    df.drop(columns=['_evo_ca_norm'], inplace=True)
 
     df['Periode']  = periode
     df['Fichier']  = filename
@@ -349,11 +421,17 @@ def export_excel(df_all, periodes):
         c2.fill = xfill(C_HDR); c2.alignment = xlft()
         ws.row_dimensions[2].height = 16
 
-        HDRS = ['Rayon','Famille','Segment','Source cible','Acheteur',
-                'CA (FCFA)','Marge (FCFA)','Taux actuel','Taux N-1','Cible','Plancher',
-                'Dév. N-1 (pts)','Dév. Cible (pts)','Marge Δ FCFA','Score Impact',
-                'Priorité','Statut','Que faire ?']
-        WIDTHS = [20,30,16,18,18,14,14,12,12,12,12,14,14,16,13,14,16,46]
+        has_site_export = 'Site nom long' in df.columns and df['Site nom long'].notna().any()
+        HDRS = ['Rayon','Famille']
+        if has_site_export: HDRS.append('Magasin')
+        HDRS += ['Segment','Source cible','Acheteur',
+                 'CA (FCFA)','Marge (FCFA)','Taux actuel','Taux N-1','Cible','Plancher',
+                 'Dév. N-1 (pts)','Dév. Cible (pts)','Marge Δ FCFA','Score Impact',
+                 'Priorité','Statut','Que faire ?']
+        _w = [20,30]
+        if has_site_export: _w.append(24)
+        _w += [16,18,18,14,14,12,12,12,12,14,14,16,13,14,18,16,46]
+        WIDTHS = _w
         write_header_row(ws, 3, HDRS, WIDTHS)
 
         C_R='FFD6D6'; C_O='FFF3CC'; C_G='D6F5D6'; C_L='F7F7F7'; C_W='FFFFFF'
@@ -361,9 +439,13 @@ def export_excel(df_all, periodes):
             stat = r.get('Statut','')
             bg = C_R if '🔴' in str(stat) else (C_O if '🟡' in str(stat)
                  else (C_G if '✅' in str(stat) else (C_L if i%2==0 else C_W)))
+            _site_val = r.get('Site nom long','—') if has_site_export and 'Site nom long' in r.index else None
             vals = [
                 r.get('Rayon_court',''),
                 r.get('SF_court',''),
+            ]
+            if has_site_export: vals.append(_site_val or '—')
+            vals += [
                 SEG_LABELS.get(r.get('Segment',''), r.get('Segment','')),
                 r.get('Source_cible',''),
                 r.get('Acheteur',''),
@@ -381,23 +463,30 @@ def export_excel(df_all, periodes):
                  '🟡 Priorité'  if (r.get('Impact_Score') or 0) > 100000 else
                  '🔵 Surveillance'),
                 stat,
+                r.get('Cause_Probable',''),
                 r.get('Que_faire',''),
             ]
-            FMTS = [None,None,None,None,None,'#,##0','#,##0','0.0%','0.0%','0.0%','0.0%',
-                    '+0.0%;-0.0%;-','+0.0%;-0.0%;-','+#,##0;-#,##0;-','#,##0',None,None,None]
+            base_fmts = [None,None]  # Rayon, Famille
+            if has_site_export: base_fmts.append(None)  # Magasin
+            base_fmts += [None,None,None,'#,##0','#,##0','0.0%','0.0%','0.0%','0.0%',
+                          '+0.0%;-0.0%;-','+0.0%;-0.0%;-','+#,##0;-#,##0;-','#,##0',None,None,None,None]
+            FMTS = base_fmts
             for j, (v, f) in enumerate(zip(vals, FMTS), 1):
                 c = ws.cell(row=i, column=j, value=v)
                 c.fill = xfill(bg); c.border = xbdr()
                 c.font = Font('Calibri', size=10 if j < 15 else 9, color=C_DK)
                 if f: c.number_format = f
-                if j == 16:  # Priorité
+                _off = 1 if has_site_export else 0
+                _j_prio = 17 + _off; _j_stat = 18 + _off; _j_action = 19 + _off
+                _j_num = {6+_off, 7+_off}; _j_pct = {8+_off,9+_off,10+_off,11+_off,12+_off,13+_off,_j_stat}
+                if j == _j_prio:  # Priorité
                     prio_bg = {'🔴 Urgence':'FFD6D6','🟡 Priorité':'FFF3CC','🔵 Surveillance':'D6EAF8'}.get(str(v),'FFFFFF')
                     prio_fg = {'🔴 Urgence':'991B1B','🟡 Priorité':'854D0E','🔵 Surveillance':'1A4A7A'}.get(str(v),'1A1A2E')
                     c.fill = xfill(prio_bg)
                     c.font = Font('Calibri', size=9, bold=True, color=prio_fg)
                     c.alignment = xctr()
                 else:
-                    c.alignment = xctr() if j in (8,9,10,11,12,13,17) else xrgt() if j in (6,7,14,15) else xlft(w=(j==18))
+                    c.alignment = xctr() if j in _j_pct else xrgt() if j in _j_num|{14+_off,15+_off} else xlft(w=(j==_j_action))
             ws.row_dimensions[i].height = 16
 
         ws.freeze_panes = 'A4'
@@ -602,13 +691,13 @@ def export_excel(df_all, periodes):
     ws_neg.column_dimensions['J'].width = 44
 
     # Titre
-    ws_neg.merge_cells('A1:J1')
+    ws_neg.merge_cells('A1:K1')
     cn1 = ws_neg.cell(row=1, column=1, value='PLAN DE NEGOCIATION  --  FAMILLES EN ACTION REQUISE')
     cn1.font = Font('Calibri', size=13, bold=True, color=C_WH)
     cn1.fill = xfill(C_HDR); cn1.alignment = xctr()
     ws_neg.row_dimensions[1].height = 30
 
-    ws_neg.merge_cells('A2:J2')
+    ws_neg.merge_cells('A2:K2')
     periode_latest = sorted(periodes)[-1]
     cn2 = ws_neg.cell(row=2, column=1,
         value=f'  Periode : {periode_latest}  --  Trie par remise necessaire decroissante  --  Utiliser ce tableau en preparation des rendez-vous fournisseurs')
@@ -624,7 +713,7 @@ def export_excel(df_all, periodes):
     for j, (h, w) in enumerate(zip(NEG_HDRS, NEG_W), 1):
         c = ws_neg.cell(row=3, column=j, value=h)
         c.font = Font('Calibri', size=9, bold=True, color=C_WH)
-        c.fill = xfill('CC2200' if j == 9 else C_SUB)
+        c.fill = xfill('CC2200' if j == 10 else C_SUB)
         c.alignment = xctr(); c.border = xbdr()
         ws_neg.column_dimensions[get_column_letter(j)].width = w
     ws_neg.row_dimensions[3].height = 28
@@ -1171,8 +1260,15 @@ with tab1:
   <strong>⚠️ Effet Mix :</strong> ces familles ont un CA en hausse &gt;15% vs N-1 mais un taux de marge en baisse.
   Signal d'un glissement vers des références moins rentables dans la famille, ou d'une promo mal calibrée qui gonfle le volume sans préserver la marge.
 </div>""", unsafe_allow_html=True)
-            dm = mix_fams[['Rayon_court','SF_court','Acheteur','CA','%Marge','Dev_N1_pts','Remise_Necessaire_FCFA','Que_faire']].copy()
-            dm.columns = ['Rayon','Famille','Acheteur','CA (FCFA)','Taux act.','Dév. N-1','Remise nécessaire FCFA','Que faire ?']
+            has_site_mix = 'Site nom long' in mix_fams.columns and mix_fams['Site nom long'].notna().any()
+            cols_mix = ['Rayon_court','SF_court']
+            names_mix = ['Rayon','Famille']
+            if has_site_mix:
+                cols_mix.append('Site nom long'); names_mix.append('Magasin')
+            cols_mix  += ['Acheteur','CA','%Marge','Dev_N1_pts','Remise_Necessaire_FCFA','Que_faire']
+            names_mix += ['Acheteur','CA (FCFA)','Taux act.','Dév. N-1','Remise nécessaire FCFA','Que faire ?']
+            dm = mix_fams[cols_mix].copy()
+            dm.columns = names_mix
             dm['CA (FCFA)'] = dm['CA (FCFA)'].apply(lambda x: f"{x:,.0f}")
             dm['Taux act.'] = dm['Taux act.'].apply(lambda x: fp(x, False))
             dm['Dév. N-1']  = dm['Dév. N-1'].apply(fp)
@@ -1220,45 +1316,143 @@ with tab2:
 
     st.markdown("")
     if n_r_a > 0:
-        top3 = df_ach[df_ach['Statut']=='🔴 Action requise'].nlargest(3,'Impact_Score')['SF_court'].tolist()
-        st.markdown(f"""
-<div class='alert-card alert-amber'>
-  🎯 <strong>Briefing {ach_sel} — semaine {periode_sel}</strong><br>
-  {n_r_a} famille(s) en alerte rouge · Priorités immédiates : <strong>{' · '.join(top3)}</strong><br>
-  <span style='font-size:12px;opacity:.85'>→ Tableau trié par score d'impact · Colonne "Que faire ?" = action à mener cette semaine.</span>
-</div>""", unsafe_allow_html=True)
+        top3_rows = df_ach[df_ach['Statut']=='🔴 Action requise'].nlargest(3,'Impact_Score')
+        marge_perdue_tot = abs(df_ach[df_ach['Statut']=='🔴 Action requise']['Dev_N1_FCFA'].sum())
+        lignes_brief = []
+        for _, r3 in top3_rows.iterrows():
+            cause_txt = str(r3.get('Cause_Probable',''))
+            perdu = fk_abs(r3['Dev_N1_FCFA'])
+            lignes_brief.append(f"<li><strong>{r3['SF_court']}</strong> : {perdu} — {cause_txt}</li>")
+        brief_items = ''.join(lignes_brief)
+        marge_tot_fmt = fk_abs(marge_perdue_tot)
+        st.markdown(
+            f"<div class='alert-card alert-amber'>"
+            f"<strong>Brief {ach_sel} · {periode_sel}</strong><br>"
+            f"{n_r_a} famille(s) en alerte — Marge perdue totale : <strong>{marge_tot_fmt}</strong>"
+            f"<ul style='margin:8px 0 4px 16px;font-size:12px'>{brief_items}</ul>"
+            f"<div style='font-size:11px;opacity:.75'>Tableau ci-dessous trie par priorite</div>"
+            f"</div>",
+            unsafe_allow_html=True
+        )
+        fam_casse = df_ach[df_ach.get('Alerte_Casse', pd.Series(False, index=df_ach.index)) == True]
+        if len(fam_casse) > 0:
+            casse_noms = ' / '.join(fam_casse.nlargest(3,'Tx_Casse_Fam')['SF_court'].tolist())
+            st.markdown(
+                f"<div class='alert-card alert-red'>"
+                f"Casse anormale detectee sur {len(fam_casse)} famille(s) : {casse_noms} "
+                f"(taux casse > 0,5% du CA)"
+                f"</div>",
+                unsafe_allow_html=True
+            )
     else:
-        st.markdown(f"""
-<div class='alert-card alert-green'>
-  ✅ <strong>{ach_sel}</strong> — Aucune alerte rouge cette période. Surveiller les familles en vigilance ci-dessous.
-</div>""", unsafe_allow_html=True)
+        st.markdown(
+            f"<div class='alert-card alert-green'>"
+            f"Aucune alerte rouge cette periode pour {ach_sel}."
+            f"</div>",
+            unsafe_allow_html=True
+        )
 
-    st.markdown("<div class='section-label'>Toutes les familles — triées par priorité et impact financier</div>", unsafe_allow_html=True)
-    has_site_a = 'Site nom long' in df_ach.columns and df_ach['Site nom long'].notna().any()
-    cols_a = ['Rayon_court','SF_court','Segment']
-    names_a = ['Rayon','Famille','Segment']
-    if has_site_a:
-        cols_a.insert(2, 'Site nom long')
-        names_a.insert(2, 'Magasin')
-    cols_a  += ['CA','%Marge','Tx_N1','Dev_N1_pts','Dev_N1_FCFA','Impact_Score','Cible','Plancher','Source_cible','Dev_Cible_pts','Statut','Que_faire']
-    names_a += ['CA (FCFA)','Taux act.','Taux N-1','Dév. N-1','Marge Δ FCFA','Score Impact','Cible','Plancher','Source cible','Dév. Cible','Statut','Que faire ?']
-    da = df_ach[cols_a].copy()
-    da.columns = names_a
-    da['CA (FCFA)']=da['CA (FCFA)'].apply(lambda x: f"{x:,.0f}")
-    da['Score Impact']=da['Score Impact'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else '—')
-    for col in ['Taux act.','Taux N-1','Cible','Plancher']: da[col]=da[col].apply(lambda x: fp(x,False))
-    for col in ['Dév. N-1','Dév. Cible']: da[col]=da[col].apply(fp)
-    da['Marge Δ FCFA']=da['Marge Δ FCFA'].apply(fk)
-    da['Segment']=da['Segment'].apply(lambda x: SEG_LABELS.get(x,x))
-    st.dataframe(
-        da.style.map(cs,subset=['Statut']).map(cd,subset=['Dév. N-1','Dév. Cible']),
-        use_container_width=True, hide_index=True, height=560,
+    # Ameliorations 5+10 : filtres actionnables + vue condensee
+    fc1, fc2 = st.columns([2,2])
+    with fc1:
+        filtre_actionnable = st.checkbox(
+            "Familles actionnables uniquement",
+            value=True,
+            help="Masque les Produits d appel au-dessus de leur plancher.",
+            key='filtre_actionnable'
+        )
+    with fc2:
+        filtre_statut_ach = st.selectbox(
+            "Filtre statut", ['Tous','Action requise','Action + Vigilance'],
+            key='filtre_statut_ach'
+        )
+    df_ach_view = df_ach.copy()
+    if filtre_actionnable:
+        masque_ok = (df_ach_view['Segment']=='Produit d appel') & (df_ach_view['%Marge']>=df_ach_view['Plancher'])
+        df_ach_view = df_ach_view[~masque_ok]
+    if filtre_statut_ach == 'Action requise':
+        df_ach_view = df_ach_view[df_ach_view['Statut']=='Action requise']
+    elif filtre_statut_ach == 'Action + Vigilance':
+        df_ach_view = df_ach_view[df_ach_view['Statut'].isin(['Action requise','Vigilance'])]
+    n_aff = len(df_ach_view); n_cach = len(df_ach)-n_aff
+    lbl = f"{n_aff} famille(s)" + (f" — {n_cach} produits d appel OK masques" if n_cach>0 and filtre_actionnable else "")
+    st.markdown(f"<div class='section-label'>{lbl} — triees par priorite et impact</div>", unsafe_allow_html=True)
+    has_site_a = 'Site nom long' in df_ach_view.columns and df_ach_view['Site nom long'].notna().any()
+
+    def color_priorite(v):
+        v=str(v)
+        if 'Urgence'      in v: return 'background:#FFD6D6;color:#991B1B;font-weight:700'
+        if 'Priorite'     in v: return 'background:#FFF3CC;color:#854D0E;font-weight:700'
+        if 'Surveillance' in v: return 'background:#D6EAF8;color:#1A4A7A;font-weight:600'
+        return ''
+    def color_cause(v):
+        v=str(v).lower()
+        if 'negative'    in v: return 'color:#CC0000;font-weight:700'
+        if 'deficitaire' in v: return 'color:#B25000;font-weight:600'
+        if 'degradees'   in v or 'severe' in v: return 'color:#991B1B;font-weight:600'
+        if 'mix'         in v: return 'color:#6B21A8;font-weight:600'
+        if 'ok'          in v: return 'color:#145A32'
+        return 'color:#555555'
+
+    # Vue condensee (amelioration 5)
+    cv = ['SF_court','Priorite','Cause_Probable']; cn = ['Famille','Priorite','Cause probable']
+    if has_site_a: cv.insert(1,'Site nom long'); cn.insert(1,'Magasin')
+    cv += ['%Marge','Dev_N1_pts','Dev_N1_FCFA','Statut','Que_faire']
+    cn += ['Taux act.','Dev. N-1','Marge perdue','Statut','Que faire ?']
+    dv = df_ach_view[[c for c in cv if c in df_ach_view.columns]].copy()
+    dv.columns = cn[:len(dv.columns)]
+    if 'Taux act.'   in dv.columns: dv['Taux act.']    = dv['Taux act.'].apply(lambda x: fp(x,False))
+    if 'Dev. N-1'    in dv.columns: dv['Dev. N-1']     = dv['Dev. N-1'].apply(fp)
+    if 'Marge perdue'in dv.columns: dv['Marge perdue'] = dv['Marge perdue'].apply(fk_abs)
+    s_dv = dv.style
+    if 'Dev. N-1'       in dv.columns: s_dv = s_dv.map(cd,             subset=['Dev. N-1'])
+    if 'Statut'         in dv.columns: s_dv = s_dv.map(cs,             subset=['Statut'])
+    if 'Priorite'       in dv.columns: s_dv = s_dv.map(color_priorite, subset=['Priorite'])
+    if 'Cause probable' in dv.columns: s_dv = s_dv.map(color_cause,    subset=['Cause probable'])
+    st.dataframe(s_dv, use_container_width=True, hide_index=True, height=500,
         column_config={
-            'Famille':    st.column_config.TextColumn('Famille',    width='large'),
-            'Que faire ?':st.column_config.TextColumn('Que faire ?',width='large'),
-        }
-    )
+            'Famille':       st.column_config.TextColumn('Famille',       width='large'),
+            'Que faire ?':   st.column_config.TextColumn('Que faire ?',   width='large'),
+            'Cause probable':st.column_config.TextColumn('Cause probable',width='medium'),
+        })
 
+    with st.expander("Detail complet — colonnes analytiques"):
+        cfl=['Rayon_court','SF_court','Segment']; nfl=['Rayon','Famille','Segment']
+        if has_site_a: cfl.insert(2,'Site nom long'); nfl.insert(2,'Magasin')
+        extra_c=['CA','%Marge','Tx_N1','Dev_N1_pts','Dev_N1_FCFA','Cible','Plancher','Source_cible','Dev_Cible_pts','Tx_Marge_Net','Tx_Casse_Fam','Remise_Necessaire_FCFA','Statut']
+        extra_n=['CA','Taux act.','Taux N-1','Dev. N-1','Marge Delt','Cible','Plancher','Source','Dev. Cible','Tx net casse','Pct Casse','Remise nec.','Statut']
+        for ec,en in zip(extra_c,extra_n):
+            if ec in df_ach_view.columns: cfl.append(ec); nfl.append(en)
+        df_fl=df_ach_view[cfl].copy(); df_fl.columns=nfl
+        for c in ['Taux act.','Taux N-1','Cible','Plancher','Tx net casse']:
+            if c in df_fl.columns: df_fl[c]=df_fl[c].apply(lambda x: fp(x,False))
+        for c in ['Dev. N-1','Dev. Cible']:
+            if c in df_fl.columns: df_fl[c]=df_fl[c].apply(fp)
+        if 'Pct Casse' in df_fl.columns:
+            df_fl['Pct Casse']=df_fl['Pct Casse'].apply(lambda x: f"{x:.2%}" if pd.notna(x) else '-')
+        if 'CA' in df_fl.columns: df_fl['CA']=df_fl['CA'].apply(lambda x: f"{x:,.0f}")
+        if 'Marge Delt' in df_fl.columns: df_fl['Marge Delt']=df_fl['Marge Delt'].apply(fk)
+        if 'Remise nec.' in df_fl.columns:
+            df_fl['Remise nec.']=df_fl['Remise nec.'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) and x>0 else '-')
+        s_fl = df_fl.style.map(cs,subset=['Statut']) if 'Statut' in df_fl.columns else df_fl
+        st.dataframe(s_fl, use_container_width=True, hide_index=True)
+    st.caption("Vue condensee = colonnes cles. Detail complet dans l expander.")
+
+    # Amelioration 9 : tendance si plusieurs periodes
+    if len(periodes_dispo) >= 2:
+        p_prev  = sorted(periodes_dispo)[-2]
+        df_prv  = df_all[(df_all['Periode']==p_prev)&(df_all['Acheteur']==ach_sel)][['SF_court','Dev_N1_pts']].copy()
+        df_prv.columns = ['SF_court','Dev_prev']
+        df_td   = df_ach_view[['SF_court','Dev_N1_pts']].merge(df_prv,on='SF_court',how='left')
+        n_deg   = ((df_td['Dev_N1_pts']<df_td['Dev_prev']-0.005)&df_td['Dev_prev'].notna()).sum()
+        n_am    = ((df_td['Dev_N1_pts']>df_td['Dev_prev']+0.005)&df_td['Dev_prev'].notna()).sum()
+        if n_deg>0 or n_am>0:
+            parts=[]
+            if n_deg>0: parts.append(f"Degradation sur {n_deg} famille(s)")
+            if n_am >0: parts.append(f"Amelioration sur {n_am} famille(s)")
+            st.markdown(
+                f"<div class='alert-card alert-blue'>Tendance vs {p_prev} : {' | '.join(parts)}</div>",
+                unsafe_allow_html=True)
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 3 — MAGASIN
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1335,8 +1529,10 @@ with tab4:
     st.markdown(f"""
 <div class='alert-card alert-blue'>
   <strong>📋 Contenu du fichier exporté :</strong><br>
-  <strong>Un onglet par période chargée</strong> — toutes les familles avec : Rayon · Famille · Segment · Source cible · Acheteur · CA · Taux actuel · Taux N-1 · Cible · Plancher · Dév. N-1 · Dév. Cible · Marge Δ FCFA · Score Impact · Statut · Que faire ?<br>
-  Mise en couleur automatique : 🔴 rouge · 🟡 orange · ✅ vert · Tri par score d'impact décroissant
+  <strong>Un onglet par période</strong> — toutes les familles, triées par score d'impact · Rayon · Famille · Magasin · Segment · CA · Marge · Taux actuel vs N-1 vs Cible · Priorité · Statut · Que faire ?<br>
+  <strong>Onglet Synthèse Magasins</strong> — palmarès magasins avec action recommandée par site<br>
+  <strong>Onglet Plan de Négociation</strong> — familles rouges avec remise nécessaire en FCFA, prêt pour les RDV fournisseurs<br>
+  <strong>Onglet Lexique</strong> — définitions et guide de lecture pour diffusion équipe
 </div>""", unsafe_allow_html=True)
     st.caption(f"Périmètre : {len(periodes_dispo)} période(s) · {len(df)} famille(s) active(s) après filtre seuil · {periode_sel}")
 
@@ -1356,10 +1552,14 @@ with tab4:
                 sub=df[(df['Rayon_court']==rayon)&(df['SF_court']==sf)]
                 if len(sub):
                     r0=sub.iloc[0]
-                    rows_p.append({'Rayon':rayon,'Famille':sf,'Acheteur':r0.get('Acheteur','—'),
-                                   'Taux actuel':fp(r0.get('%Marge'),False),
-                                   'Score Impact':f"{r0.get('Impact_Score',0):,.0f}",
-                                   'Que faire ?':r0.get('Que_faire','—')})
+                    row_p={'Rayon':rayon,'Famille':sf}
+                    if 'Site nom long' in r0.index and pd.notna(r0.get('Site nom long',None)):
+                        row_p['Magasin']=r0.get('Site nom long','—')
+                    row_p.update({'Acheteur':r0.get('Acheteur','—'),
+                                  'Taux actuel':fp(r0.get('%Marge'),False),
+                                  'Score Impact':f"{r0.get('Impact_Score',0):,.0f}",
+                                  'Que faire ?':r0.get('Que_faire','—')})
+                    rows_p.append(row_p)
             st.dataframe(pd.DataFrame(rows_p).sort_values('Score Impact',ascending=False),
                          use_container_width=True, hide_index=True,
                          column_config={'Que faire ?': st.column_config.TextColumn('Que faire ?', width='large')})
