@@ -222,12 +222,28 @@ def load_extraction(file_bytes: bytes, filename: str, ref_bytes=None):
     df = pd.read_excel(raw)
     _validate(df, filename)
 
-    df = df[
-        (df['Sous Famille'] != 'Total') &
+    # ── Suppression de toutes les lignes de total et lignes parasites PBI ──────
+    mask_keep = (
+        # Sous-famille : exclure les totaux et lignes vides
+        df['Sous Famille'].notna() &
+        (df['Sous Famille'].astype(str).str.strip() != 'Total') &
+        (~df['Sous Famille'].astype(str).str.startswith('Filtres', na=False)) &
+
+        # Rayon : garder uniquement les rayons codifiés (ex: 00010 - EPICERIE)
+        df['Rayon'].notna() &
         df['Rayon'].str.startswith('000', na=False) &
         ~df['Rayon'].str.contains('CIGARETTE', na=False) &
+
+        # Site : exclure les lignes Total réseau si la colonne existe
+        ~df.get('Site nom long', pd.Series('', index=df.index)).astype(str).isin(['Total','']) &
+
+        # Famille : exclure les totaux si la colonne existe
+        ~df.get('Famille', pd.Series('', index=df.index)).astype(str).isin(['Total']) &
+
+        # CA : uniquement les lignes avec des ventes réelles
         df['CA'].notna() & (df['CA'] > 0)
-    ].copy()
+    )
+    df = df[mask_keep].copy()
 
     df['SF_court']    = df['Sous Famille'].str.extract(r'\d+ - (.+)')[0]
     df['Rayon_court'] = df['Rayon'].str.extract(r'- (.+)')[0]
