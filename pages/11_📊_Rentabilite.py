@@ -593,6 +593,7 @@ def export_excel(df_all, periodes):
     ws_neg.row_dimensions[1].height = 30
 
     ws_neg.merge_cells('A2:J2')
+    periode_latest = sorted(periodes)[-1]
     cn2 = ws_neg.cell(row=2, column=1,
         value=f'  Periode : {periode_latest}  --  Trie par remise necessaire decroissante  --  Utiliser ce tableau en preparation des rendez-vous fournisseurs')
     cn2.font = Font('Calibri', size=9, italic=True, color='AABBCC')
@@ -612,8 +613,7 @@ def export_excel(df_all, periodes):
         ws_neg.column_dimensions[get_column_letter(j)].width = w
     ws_neg.row_dimensions[3].height = 28
 
-    # Données — période la plus récente uniquement, statut rouge, agrégé par Rayon+Famille+Acheteur
-    periode_latest = sorted(df_all['Periode'].unique())[-1]
+    # Données — période la plus récente uniquement, statut rouge
     df_neg = df_all[
         (df_all['Periode'] == periode_latest) &
         (df_all['Statut'] == '🔴 Action requise')
