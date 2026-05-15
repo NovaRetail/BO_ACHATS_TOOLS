@@ -333,9 +333,9 @@ mat = df_f.groupby(["lib_site", "lib_rayon"]).agg(
 mat["TxMarge"] = (mat["Marge"] / mat["CA"] * 100).where(mat["CA"] > 0)
 mat_pivot = mat.pivot_table(index="lib_rayon", columns="lib_site", values="TxMarge").round(1)
 
-# Article × site (pour blocs format)
+# ── Article × site (pour blocs format) — avec Qté ────────────────────────────
 art_site = df_f[df_f["CA"] > 0].groupby(["Article", "lib_site", "format"]).agg(
-    CA=("CA","sum"), Marge=("Marge","sum")
+    CA=("CA","sum"), Marge=("Marge","sum"), Qte=("Qté Vente","sum")
 ).reset_index()
 art_site["TxMarge_site"] = (art_site["Marge"] / art_site["CA"] * 100).where(art_site["CA"] > 0)
 art_site["lib_court"]    = art_site["lib_site"]
@@ -362,9 +362,11 @@ def build_bloc(article_full, fmt_name):
         return "—"
     parts = []
     for _, r in rows.iterrows():
-        tm = r["TxMarge_site"]
+        tm  = r["TxMarge_site"]
+        qty = r["Qte"]
         if pd.notna(tm):
-            parts.append(f"{r['lib_court']}: {tm:.1f}%")
+            qty_str = f"{int(qty):,}" if pd.notna(qty) else "?"
+            parts.append(f"{r['lib_court']}: {tm:.1f}% | Qty: {qty_str}")
     return "  |  ".join(parts) if parts else "—"
 
 flop100["Bloc_Hyper"]  = flop100["Article"].apply(lambda a: build_bloc(a, "Hyper"))
@@ -690,7 +692,7 @@ with tab3:
             "🟣 SUPECO":  st.column_config.TextColumn("🟣 SUPECO",  width="large"),
         }
     )
-    st.caption("Blocs magasins : triés du taux de marge le plus bas au plus élevé · '—' = article non vendu dans ce format · Format : Magasin: Tx%")
+    st.caption("Blocs magasins : triés du taux de marge le plus bas au plus élevé · '—' = article non vendu dans ce format · Format : Magasin: Tx% | Qty: XX")
 
 # ═══ TAB 4 — EXPORT EXCEL ═════════════════════════════════════════════════════
 with tab4:
@@ -701,7 +703,7 @@ with tab4:
   <strong>Onglet 1 — Synthèse Réseau</strong> : KPIs globaux, résumé par format, palmarès magasins<br>
   <strong>Onglet 2 — Récap par Rayon</strong> : Taux de marge, décomposition HP vs Promo, casse<br>
   <strong>Onglet 3 — Matrice Marge</strong> : Taux de marge croisé Rayon × Magasin<br>
-  <strong>Onglet 4 — Flop 100</strong> : Articles destructeurs avec impact par bloc (Hyper / Market / Supeco)
+  <strong>Onglet 4 — Flop 100</strong> : Articles destructeurs avec impact par bloc (Hyper / Market / Supeco) · Sites en marge négative en <strong style='color:#FF3B30'>gras rouge</strong>
 </div>""", unsafe_allow_html=True)
 
     st.caption(f"Périmètre : {len(sel_site)} magasin(s) · {len(sel_rayon)} rayon(s) · {periode}")
@@ -709,10 +711,14 @@ with tab4:
     if st.button("Générer le fichier Excel", type="primary", key="gen_excel"):
         with st.spinner("Génération du rapport…"):
 
+            from openpyxl.cell.rich_text import CellRichText, TextBlock
+            from openpyxl.cell.text import InlineFont
+
             wb_exp = Workbook()
 
             C_HDR = "1B2A4A"; C_SUB = "2E4B7A"; C_WH = "FFFFFF"; C_DK = "1A1A2E"
             C_HYP = "154360"; C_MKT = "145A32"; C_SUP = "6E2F8A"
+            C_RED = "FF3B30"
 
             def xfill(h): return PatternFill("solid", fgColor=h)
             def xbdr():
@@ -744,6 +750,44 @@ with tab4:
                 c2.fill = xfill(C_HDR); c2.alignment = xlft()
                 ws.row_dimensions[2].height = 16
                 ws.row_dimensions[3].height = 6
+
+            def build_rich_bloc(article_full, fmt_name):
+                """
+                Construit un CellRichText pour un bloc format.
+                Chaque entrée : 'Site: XX% | Qty: YY'
+                Sites à marge négative → gras rouge
+                Sites positifs → normal noir
+                Séparateur '   |   ' entre chaque site
+                """
+                rows = art_site[
+                    (art_site["Article"] == article_full) &
+                    (art_site["format"]  == fmt_name)
+                ].sort_values("TxMarge_site")
+
+                if rows.empty:
+                    return "—"
+
+                font_neg = InlineFont(b=True, color=C_RED, sz=900)     # gras rouge
+                font_ok  = InlineFont(b=False, color=C_DK,  sz=900)    # normal noir
+                font_sep = InlineFont(b=False, color="AAAAAA", sz=900) # séparateur gris
+
+                blocks = []
+                entries = rows.to_dict("records")
+                for idx, r in enumerate(entries):
+                    tm  = r["TxMarge_site"]
+                    qty = r["Qte"]
+                    if pd.isna(tm):
+                        continue
+                    qty_str  = f"{int(qty):,}" if pd.notna(qty) else "?"
+                    txt_site = f"{r['lib_court']}: {tm:.1f}% | Qty: {qty_str}"
+                    fnt = font_neg if tm < 0 else font_ok
+                    blocks.append(TextBlock(fnt, txt_site))
+                    if idx < len(entries) - 1:
+                        blocks.append(TextBlock(font_sep, "   |   "))
+
+                if not blocks:
+                    return "—"
+                return CellRichText(*blocks)
 
             # ── Onglet 1 : Synthèse réseau
             ws1 = wb_exp.active; ws1.title = "Synthèse Réseau"
@@ -883,19 +927,19 @@ with tab4:
 
             # ── Onglet 4 : Flop 100
             ws4 = wb_exp.create_sheet("Flop 100")
-            title_block(ws4, f"FLOP {len(flop100)} — DESTRUCTEURS DE MARGE · Taux de marge par bloc magasin", span=12)
+            title_block(ws4, f"FLOP {len(flop100)} — DESTRUCTEURS DE MARGE · Sites en marge négative en gras rouge", span=12)
             ws4.merge_cells("A3:L3")
             c = ws4.cell(row=3, column=1,
-                value=f"  {nb_flop_neg} articles à marge négative · Pertes : {flop100[flop100['Marge']<0]['Marge'].sum():,.0f} FCFA · Blocs triés du pire au meilleur taux")
+                value=f"  {nb_flop_neg} articles à marge négative · Pertes : {flop100[flop100['Marge']<0]['Marge'].sum():,.0f} FCFA · Format : Site: Tx% | Qty: XX · Blocs triés du pire au meilleur taux")
             c.font = Font("Calibri", size=9, italic=True, color="AABBCC")
             c.fill = xfill(C_HDR); c.alignment = xlft()
             ws4.row_dimensions[3].height = 14
 
             hdrs4  = ["#","Article","Rayon","Famille","CA (FCFA)","Marge (FCFA)","Tx Marge","Pds Promo","Qté",
-                      "🔵 HYPER — Tx marge % par site",
-                      "🟢 MARKET — Tx marge % par site",
-                      "🟣 SUPECO — Tx marge % par site"]
-            wdths4 = [5, 44, 16, 24, 13, 13, 10, 10, 8, 42, 46, 50]
+                      "🔵 HYPER — Tx marge % | Qty par site",
+                      "🟢 MARKET — Tx marge % | Qty par site",
+                      "🟣 SUPECO — Tx marge % | Qty par site"]
+            wdths4 = [5, 44, 16, 24, 13, 13, 10, 10, 8, 46, 50, 54]
 
             bloc_bg = {9: C_HYP, 10: C_MKT, 11: C_SUP}
             for ci6, (h, w) in enumerate(zip(hdrs4, wdths4)):
@@ -917,13 +961,16 @@ with tab4:
                     tm6/100 if pd.notna(tm6) else None,
                     pp6/100 if pd.notna(pp6) else None,
                     int(rd6["Qte"]) if pd.notna(rd6["Qte"]) else None,
-                    rd6["Bloc_Hyper"], rd6["Bloc_Market"], rd6["Bloc_Supeco"],
+                    build_rich_bloc(rd6["Article"], "Hyper"),
+                    build_rich_bloc(rd6["Article"], "Market"),
+                    build_rich_bloc(rd6["Article"], "Supeco"),
                 ]
                 fmts6 = [None,None,None,None,"#,##0","#,##0","0.0%","0.0%","#,##0",None,None,None]
                 for ci6,(v,f6) in enumerate(zip(vals6,fmts6)):
                     col6 = ci6
                     c = ws4.cell(row=r6, column=ci6+1, value=v)
-                    cell_bg = bloc_fill.get(col6, bg6) if v and str(v) != "—" else bg6
+                    # Pour les cellules bloc (col >= 9) : fond coloré si contenu, sinon fond ligne
+                    cell_bg = bloc_fill.get(col6, bg6) if (v and str(v) not in ("—", "")) else bg6
                     c.font  = Font("Calibri", size=10 if ci6<9 else 9, color=C_DK)
                     c.fill  = xfill(cell_bg); c.border = xbdr()
                     if f6: c.number_format = f6
