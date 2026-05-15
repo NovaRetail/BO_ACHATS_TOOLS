@@ -711,14 +711,12 @@ with tab4:
     if st.button("Générer le fichier Excel", type="primary", key="gen_excel"):
         with st.spinner("Génération du rapport…"):
 
-            from openpyxl.cell.rich_text import CellRichText, TextBlock
-            from openpyxl.cell.text import InlineFont
+
 
             wb_exp = Workbook()
 
             C_HDR = "1B2A4A"; C_SUB = "2E4B7A"; C_WH = "FFFFFF"; C_DK = "1A1A2E"
             C_HYP = "154360"; C_MKT = "145A32"; C_SUP = "6E2F8A"
-            C_RED = "FF3B30"
 
             def xfill(h): return PatternFill("solid", fgColor=h)
             def xbdr():
@@ -751,43 +749,7 @@ with tab4:
                 ws.row_dimensions[2].height = 16
                 ws.row_dimensions[3].height = 6
 
-            def build_rich_bloc(article_full, fmt_name):
-                """
-                Construit un CellRichText pour un bloc format.
-                Chaque entrée : 'Site: XX% | Qty: YY'
-                Sites à marge négative → gras rouge
-                Sites positifs → normal noir
-                Séparateur '   |   ' entre chaque site
-                """
-                rows = art_site[
-                    (art_site["Article"] == article_full) &
-                    (art_site["format"]  == fmt_name)
-                ].sort_values("TxMarge_site")
 
-                if rows.empty:
-                    return "—"
-
-                font_neg = InlineFont(b=True, color=C_RED, sz=900)     # gras rouge
-                font_ok  = InlineFont(b=False, color=C_DK,  sz=900)    # normal noir
-                font_sep = InlineFont(b=False, color="AAAAAA", sz=900) # séparateur gris
-
-                blocks = []
-                entries = rows.to_dict("records")
-                for idx, r in enumerate(entries):
-                    tm  = r["TxMarge_site"]
-                    qty = r["Qte"]
-                    if pd.isna(tm):
-                        continue
-                    qty_str  = f"{int(qty):,}" if pd.notna(qty) else "?"
-                    txt_site = f"{r['lib_court']}: {tm:.1f}% | Qty: {qty_str}"
-                    fnt = font_neg if tm < 0 else font_ok
-                    blocks.append(TextBlock(fnt, txt_site))
-                    if idx < len(entries) - 1:
-                        blocks.append(TextBlock(font_sep, "   |   "))
-
-                if not blocks:
-                    return "—"
-                return CellRichText(*blocks)
 
             # ── Onglet 1 : Synthèse réseau
             ws1 = wb_exp.active; ws1.title = "Synthèse Réseau"
@@ -955,45 +917,26 @@ with tab4:
                 r6 = ri6 + 5
                 bg6 = "F7F7F7" if ri6 % 2 == 0 else "FFFFFF"
                 tm6 = rd6["TxMarge"]; pp6 = rd6["PdsPromo"]
-
-                # Colonnes scalaires (0-8)
-                scalar_vals = [
+                vals6 = [
                     rd6["Rang"], rd6["lib_art"], rd6["lib_rayon"], rd6["lib_fam"],
                     rd6["CA"], rd6["Marge"],
                     tm6/100 if pd.notna(tm6) else None,
                     pp6/100 if pd.notna(pp6) else None,
                     int(rd6["Qte"]) if pd.notna(rd6["Qte"]) else None,
+                    rd6["Bloc_Hyper"], rd6["Bloc_Market"], rd6["Bloc_Supeco"],
                 ]
-                scalar_fmts = [None,None,None,None,"#,##0","#,##0","0.0%","0.0%","#,##0"]
-
-                for ci6, (v, f6) in enumerate(zip(scalar_vals, scalar_fmts)):
+                fmts6 = [None,None,None,None,"#,##0","#,##0","0.0%","0.0%","#,##0",None,None,None]
+                for ci6, (v, f6) in enumerate(zip(vals6, fmts6)):
                     c = ws4.cell(row=r6, column=ci6+1, value=v)
-                    c.fill   = xfill(bg6); c.border = xbdr()
+                    cell_bg = bloc_fill.get(ci6, bg6) if (ci6 >= 9 and v and v != "—") else bg6
+                    c.font  = Font("Calibri", size=10 if ci6 < 9 else 9, color=C_DK)
+                    c.fill  = xfill(cell_bg); c.border = xbdr()
                     if f6: c.number_format = f6
-                    if ci6 == 0:
-                        c.font = Font("Calibri", size=10, bold=True, color=C_DK); c.alignment = xctr()
-                    elif ci6 in [4, 5]:
-                        c.font = Font("Calibri", size=10, color=C_DK); c.alignment = xrgt()
-                    elif ci6 in [6, 7, 8]:
-                        c.font = Font("Calibri", size=10, color=C_DK); c.alignment = xctr()
-                    else:
-                        c.font = Font("Calibri", size=10, color=C_DK); c.alignment = xlft(w=(ci6 in [1,3]))
-
-                # Colonnes bloc rich text (9, 10, 11) — Hyper, Market, Supeco
-                for bi, fmt_name in enumerate(["Hyper", "Market", "Supeco"]):
-                    col_idx = 9 + bi
-                    rich_val = build_rich_bloc(rd6["Article"], fmt_name)
-                    cell_bg  = bloc_fill[col_idx] if (rich_val != "—") else bg6
-                    c = ws4.cell(row=r6, column=col_idx+1)
-                    c.value     = rich_val          # CellRichText ou "—"
-                    c.fill      = xfill(cell_bg)
-                    c.border    = xbdr()
-                    c.alignment = xlft(w=True)
-                    # Ne pas assigner c.font sur une cellule CellRichText
-                    # (chaque TextBlock porte son propre InlineFont)
-                    if rich_val == "—":
-                        c.font = Font("Calibri", size=9, color="AAAAAA")
-
+                    if ci6 == 0:         c.font = Font("Calibri", size=10, bold=True, color=C_DK); c.alignment = xctr()
+                    elif ci6 in [4, 5]:  c.alignment = xrgt()
+                    elif ci6 in [6,7,8]: c.alignment = xctr()
+                    elif ci6 >= 9:       c.alignment = xlft(w=True)
+                    else:                c.alignment = xlft(w=(ci6 in [1, 3]))
                 ws4.row_dimensions[r6].height = 30
 
             ws4.freeze_panes = "A5"
