@@ -460,10 +460,11 @@ if not fam_sous_seuil.empty:
 
 # ─── TABS PRINCIPAUX ──────────────────────────────────────────────────────────
 st.markdown("---")
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📊 Synthèse Réseau",
     "🔢 Matrice Rayon × Magasin",
     f"💣 Flop {min(100, len(flop100))}",
+    "🗑️ Analyse Casse",
     "📥 Export Excel",
 ])
 
@@ -694,8 +695,179 @@ with tab3:
     )
     st.caption("Blocs magasins : triés du taux de marge le plus bas au plus élevé · '—' = article non vendu dans ce format · Format : Magasin: Tx% | Qty: XX")
 
-# ═══ TAB 4 — EXPORT EXCEL ═════════════════════════════════════════════════════
+# ═══ TAB 4 — ANALYSE CASSE ════════════════════════════════════════════════════
 with tab4:
+
+    # ── Agrégations casse ─────────────────────────────────────────────────────
+    casse_col_v = "Casse (Valeur)"
+    casse_col_q = "Casse (Qté)"
+
+    agg_casse_site = df_f.groupby(["lib_site", "format"]).agg(
+        CA=("CA", "sum"),
+        Casse_V=(casse_col_v, "sum"),
+        Casse_Q=(casse_col_q, "sum") if casse_col_q in df_f.columns else ("CA", "sum"),
+    ).reset_index()
+    agg_casse_site["TxCasse"] = (agg_casse_site["Casse_V"].abs() / agg_casse_site["CA"] * 100).where(agg_casse_site["CA"] > 0)
+    agg_casse_site = agg_casse_site[agg_casse_site["CA"] > 0].sort_values("TxCasse", ascending=False).reset_index(drop=True)
+
+    agg_casse_rax = df_f.groupby("lib_rayon").agg(
+        CA=("CA", "sum"),
+        Casse_V=(casse_col_v, "sum"),
+    ).reset_index()
+    agg_casse_rax["TxCasse"] = (agg_casse_rax["Casse_V"].abs() / agg_casse_rax["CA"] * 100).where(agg_casse_rax["CA"] > 0)
+    agg_casse_rax = agg_casse_rax.sort_values("TxCasse", ascending=False)
+
+    agg_casse_art = df_f.groupby(["Article", "lib_art", "lib_rayon", "lib_fam"]).agg(
+        CA=("CA", "sum"),
+        Casse_V=(casse_col_v, "sum"),
+        Casse_Q=(casse_col_q, "sum") if casse_col_q in df_f.columns else ("CA", "sum"),
+    ).reset_index()
+    agg_casse_art["TxCasse"] = (agg_casse_art["Casse_V"].abs() / agg_casse_art["CA"] * 100).where(agg_casse_art["CA"] > 0)
+    top30_casse = agg_casse_art[agg_casse_art["Casse_V"].abs() > 0].nlargest(30, "Casse_V").reset_index(drop=True)
+    top30_casse["Rang"] = range(1, len(top30_casse) + 1)
+
+    casse_reseau       = df_f[casse_col_v].sum()
+    tx_casse_reseau    = abs(casse_reseau) / ca_total * 100 if ca_total > 0 else 0
+    nb_sites_alerte    = int((agg_casse_site["TxCasse"] > 1).sum())
+    moy_tx_casse_site  = agg_casse_site["TxCasse"].mean()
+    has_qty            = casse_col_q in df_f.columns
+
+    # ── KPIs ──────────────────────────────────────────────────────────────────
+    st.markdown("<div class='section-label'>Vue globale casse réseau</div>", unsafe_allow_html=True)
+    ck1, ck2, ck3, ck4 = st.columns(4)
+    ck1.metric("Casse Réseau",       fmt(abs(casse_reseau)) + " FCFA",  f"{tx_casse_reseau:.2f}% du CA")
+    ck2.metric("Sites > 1% casse",   str(nb_sites_alerte),              f"sur {len(agg_casse_site)} actifs")
+    ck3.metric("Tx casse moyen",      fmt_pct(moy_tx_casse_site, dec=2), "moyenne par site")
+    ck4.metric("Top rayon casse",
+               agg_casse_rax.iloc[0]["lib_rayon"] if not agg_casse_rax.empty else "—",
+               fmt_pct(agg_casse_rax.iloc[0]["TxCasse"], dec=2) if not agg_casse_rax.empty else "")
+
+    if nb_sites_alerte > 0:
+        noms_alerte = ", ".join([
+            f"{r['lib_site']} ({r['TxCasse']:.1f}%)"
+            for _, r in agg_casse_site[agg_casse_site["TxCasse"] > 1].iterrows()
+        ])
+        st.markdown(f"""
+<div class='alert-card alert-amber'>
+  <strong>🗑️ {nb_sites_alerte} site(s) dépassent le seuil de 1% de casse</strong> : {noms_alerte}<br>
+  <span style='font-size:12px;opacity:.85'>→ Vérifier procédures de démarque, gestion DLC, conditions de stockage.</span>
+</div>""", unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # ── Classement sites ──────────────────────────────────────────────────────
+    st.markdown("<div class='section-label'>Classement des magasins — du taux de casse le plus élevé au plus bas</div>", unsafe_allow_html=True)
+
+    disp_cs = agg_casse_site.copy()
+    disp_cs["Rang"]         = range(1, len(disp_cs) + 1)
+    disp_cs["Magasin"]      = disp_cs["lib_site"]
+    disp_cs["Format"]       = disp_cs["format"]
+    disp_cs["CA (FCFA)"]    = disp_cs["CA"].apply(fmt)
+    disp_cs["Casse (FCFA)"] = disp_cs["Casse_V"].abs().apply(fmt)
+    if has_qty:
+        disp_cs["Casse (Qté)"] = disp_cs["Casse_Q"].apply(lambda x: f"{int(x):,}" if pd.notna(x) else "—")
+    disp_cs["Tx Casse"]     = disp_cs["TxCasse"].apply(lambda x: fmt_pct(x, dec=2))
+    disp_cs["Δ vs Moy."]    = (disp_cs["TxCasse"] - moy_tx_casse_site).apply(fmt_delta)
+
+    cols_cs = ["Rang","Magasin","Format","CA (FCFA)","Casse (FCFA)"]
+    if has_qty: cols_cs.append("Casse (Qté)")
+    cols_cs += ["Tx Casse","Δ vs Moy."]
+
+    st.dataframe(disp_cs[cols_cs], use_container_width=True, hide_index=True,
+        column_config={"Magasin": st.column_config.TextColumn("Magasin", width="medium")})
+
+    try:
+        import plotly.graph_objects as go
+        sc = agg_casse_site.sort_values("TxCasse")
+        bar_colors = []
+        for _, r in sc.iterrows():
+            if r["format"] == "Hyper":    bar_colors.append("#154360")
+            elif r["format"] == "Market": bar_colors.append("#145A32")
+            else:                         bar_colors.append("#6E2F8A")
+        fig_c = go.Figure(go.Bar(
+            x=sc["TxCasse"].tolist(), y=sc["lib_site"].tolist(),
+            orientation="h", marker_color=bar_colors, marker_line_width=0,
+            text=[f"{v:.2f}%" for v in sc["TxCasse"]], textposition="outside",
+        ))
+        fig_c.add_vline(x=1.0, line_width=1.5, line_dash="dot", line_color="#FF3B30",
+                        annotation_text=" Seuil 1%", annotation_font=dict(color="#FF3B30", size=10))
+        fig_c.add_vline(x=moy_tx_casse_site, line_width=1.5, line_dash="dot", line_color="#FF9500",
+                        annotation_text=f" Moy. {moy_tx_casse_site:.2f}%",
+                        annotation_font=dict(color="#FF9500", size=10))
+        fig_c.update_layout(
+            plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+            font=dict(family="-apple-system, Helvetica Neue", color="#3A3A3C", size=11),
+            height=max(280, len(agg_casse_site) * 40 + 60),
+            margin=dict(t=10, b=10, l=10, r=80),
+            xaxis=dict(title="Taux de casse (%)", ticksuffix="%",
+                       showgrid=True, gridcolor="#F2F2F7"),
+            yaxis=dict(showgrid=False, title=""),
+        )
+        st.plotly_chart(fig_c, use_container_width=True)
+        st.caption("🔴 Ligne rouge = seuil 1%  ·  🟠 Ligne orange = moyenne réseau  ·  🔵 Hyper  ·  🟢 Market  ·  🟣 Supeco")
+    except ImportError:
+        pass
+
+    st.markdown("---")
+
+    # ── Récap par rayon ───────────────────────────────────────────────────────
+    st.markdown("<div class='section-label'>Casse par rayon</div>", unsafe_allow_html=True)
+    disp_cr = agg_casse_rax.copy()
+    disp_cr["Rayon"]        = disp_cr["lib_rayon"]
+    disp_cr["CA (FCFA)"]    = disp_cr["CA"].apply(fmt)
+    disp_cr["Casse (FCFA)"] = disp_cr["Casse_V"].abs().apply(fmt)
+    disp_cr["Tx Casse"]     = disp_cr["TxCasse"].apply(lambda x: fmt_pct(x, dec=2))
+    disp_cr["% Casse Réseau"] = (disp_cr["Casse_V"].abs() / abs(casse_reseau) * 100).apply(fmt_pct)
+    st.dataframe(disp_cr[["Rayon","CA (FCFA)","Casse (FCFA)","Tx Casse","% Casse Réseau"]],
+        use_container_width=True, hide_index=True,
+        column_config={"Rayon": st.column_config.TextColumn("Rayon", width="medium")})
+
+    st.markdown("---")
+
+    # ── Top 30 articles ───────────────────────────────────────────────────────
+    st.markdown("<div class='section-label'>Top 30 articles — valeur de casse la plus élevée</div>", unsafe_allow_html=True)
+
+    c30f1, c30f2 = st.columns(2)
+    with c30f1:
+        filtre_rax_c = st.selectbox("Rayon", ["Tous"] + sorted(top30_casse["lib_rayon"].dropna().unique().tolist()), key="c_rayon")
+    with c30f2:
+        filtre_seuil_c = st.selectbox("Seuil Tx Casse", ["Tous", "> 1%", "> 2%", "> 5%"], key="c_seuil")
+
+    df_top30 = top30_casse.copy()
+    if filtre_rax_c != "Tous":
+        df_top30 = df_top30[df_top30["lib_rayon"] == filtre_rax_c]
+    if filtre_seuil_c == "> 1%":
+        df_top30 = df_top30[df_top30["TxCasse"] > 1]
+    elif filtre_seuil_c == "> 2%":
+        df_top30 = df_top30[df_top30["TxCasse"] > 2]
+    elif filtre_seuil_c == "> 5%":
+        df_top30 = df_top30[df_top30["TxCasse"] > 5]
+
+    disp_t30 = df_top30.copy()
+    disp_t30["#"]             = disp_t30["Rang"]
+    disp_t30["Article"]       = disp_t30["lib_art"]
+    disp_t30["Rayon"]         = disp_t30["lib_rayon"]
+    disp_t30["Famille"]       = disp_t30["lib_fam"]
+    disp_t30["CA (FCFA)"]     = disp_t30["CA"].apply(fmt)
+    disp_t30["Casse (FCFA)"]  = disp_t30["Casse_V"].abs().apply(fmt)
+    if has_qty:
+        disp_t30["Casse (Qté)"] = disp_t30["Casse_Q"].apply(lambda x: f"{int(x):,}" if pd.notna(x) else "—")
+    disp_t30["Tx Casse"]      = disp_t30["TxCasse"].apply(lambda x: fmt_pct(x, dec=2))
+
+    cols_t30 = ["#","Article","Rayon","Famille","CA (FCFA)","Casse (FCFA)"]
+    if has_qty: cols_t30.append("Casse (Qté)")
+    cols_t30.append("Tx Casse")
+
+    st.markdown(f"<div style='font-size:12px;color:#8E8E93;margin-bottom:8px'>{len(disp_t30)} article(s) affichés</div>", unsafe_allow_html=True)
+    st.dataframe(disp_t30[cols_t30], use_container_width=True, hide_index=True,
+        column_config={
+            "#":       st.column_config.NumberColumn("#", width=40),
+            "Article": st.column_config.TextColumn("Article", width="large"),
+        })
+    st.caption("Classé par valeur de casse décroissante · Tx Casse = Casse (valeur) ÷ CA article")
+
+# ═══ TAB 5 — EXPORT EXCEL ═════════════════════════════════════════════════════
+with tab5:
     st.markdown("<div class='section-label'>Export Excel — Rapport complet</div>", unsafe_allow_html=True)
     st.markdown("""
 <div class='alert-card alert-blue'>
@@ -703,7 +875,8 @@ with tab4:
   <strong>Onglet 1 — Synthèse Réseau</strong> : KPIs globaux, résumé par format, palmarès magasins<br>
   <strong>Onglet 2 — Récap par Rayon</strong> : Taux de marge, décomposition HP vs Promo, casse<br>
   <strong>Onglet 3 — Matrice Marge</strong> : Taux de marge croisé Rayon × Magasin<br>
-  <strong>Onglet 4 — Flop 100</strong> : Articles destructeurs avec impact par bloc (Hyper / Market / Supeco) · Sites en marge négative en <strong style='color:#FF3B30'>gras rouge</strong>
+  <strong>Onglet 4 — Flop 100</strong> : Articles destructeurs avec impact par bloc (Hyper / Market / Supeco) · Format : Site: Tx% | Qty: XX<br>
+  <strong>Onglet 5 — Analyse Casse</strong> : Classement sites par taux de casse · Top 30 articles · Récap par rayon
 </div>""", unsafe_allow_html=True)
 
     st.caption(f"Périmètre : {len(sel_site)} magasin(s) · {len(sel_rayon)} rayon(s) · {periode}")
@@ -889,7 +1062,7 @@ with tab4:
 
             # ── Onglet 4 : Flop 100
             ws4 = wb_exp.create_sheet("Flop 100")
-            title_block(ws4, f"FLOP {len(flop100)} — DESTRUCTEURS DE MARGE · Sites en marge négative en gras rouge", span=12)
+            title_block(ws4, f"FLOP {len(flop100)} — DESTRUCTEURS DE MARGE · Format : Site: Tx% | Qty: XX · triés du pire au meilleur", span=12)
             ws4.merge_cells("A3:L3")
             c = ws4.cell(row=3, column=1,
                 value=f"  {nb_flop_neg} articles à marge négative · Pertes : {flop100[flop100['Marge']<0]['Marge'].sum():,.0f} FCFA · Format : Site: Tx% | Qty: XX · Blocs triés du pire au meilleur taux")
@@ -940,6 +1113,108 @@ with tab4:
                 ws4.row_dimensions[r6].height = 30
 
             ws4.freeze_panes = "A5"
+
+            # ── Onglet 5 : Analyse Casse
+            ws5 = wb_exp.create_sheet("Analyse Casse")
+            title_block(ws5, "ANALYSE CASSE RÉSEAU", span=8)
+
+            # KPIs casse
+            kpi_casse = [
+                ("Casse Réseau (FCFA)",  f"{abs(casse_reseau):,.0f}"),
+                ("Tx Casse Réseau",      f"{tx_casse_reseau:.2f}%"),
+                ("Sites > 1% casse",     str(nb_sites_alerte)),
+                ("Tx Casse Moyen",       f"{moy_tx_casse_site:.2f}%"),
+            ]
+            for ci_k, (lbl, val) in enumerate(kpi_casse):
+                ck = ws5.cell(row=4, column=ci_k+1, value=lbl)
+                ck.font = Font("Calibri", size=9, bold=True, color=C_WH)
+                ck.fill = xfill(C_SUB); ck.alignment = xctr(); ck.border = xbdr()
+                ck2 = ws5.cell(row=5, column=ci_k+1, value=val)
+                ck2.font = Font("Calibri", size=12, bold=True, color=C_DK)
+                ck2.fill = xfill("FFFFFF"); ck2.alignment = xctr(); ck2.border = xbdr()
+                ws5.column_dimensions[get_column_letter(ci_k+1)].width = 22
+            ws5.row_dimensions[4].height = 20; ws5.row_dimensions[5].height = 28
+
+            # Classement sites
+            r5s = 7
+            ws5.merge_cells(start_row=r5s, start_column=1, end_row=r5s, end_column=7)
+            c = ws5.cell(row=r5s, column=1, value="  CLASSEMENT MAGASINS — taux de casse décroissant")
+            c.font = Font("Calibri", size=10, bold=True, color=C_WH)
+            c.fill = xfill(C_SUB); c.alignment = xlft(); ws5.row_dimensions[r5s].height = 22; r5s += 1
+
+            hdrs_cs = ["Rang","Magasin","Format","CA (FCFA)","Casse (FCFA)","Casse (Qté)","Tx Casse"]
+            wdths_cs = [5, 28, 10, 16, 16, 14, 12]
+            write_header_row(ws5, r5s, hdrs_cs, wdths_cs); r5s += 1
+
+            for ri_s, (_, sd) in enumerate(agg_casse_site.iterrows()):
+                bg_s = "FFF8F0" if sd["TxCasse"] > 1 else ("F7F7F7" if ri_s % 2 == 0 else "FFFFFF")
+                casse_q_val = int(sd["Casse_Q"]) if has_qty and pd.notna(sd.get("Casse_Q")) else None
+                vals_s = [ri_s+1, sd["lib_site"], sd["format"],
+                          sd["CA"], abs(sd["Casse_V"]),
+                          casse_q_val,
+                          sd["TxCasse"]/100 if pd.notna(sd["TxCasse"]) else None]
+                fmts_s = [None,None,None,"#,##0","#,##0","#,##0","0.00%"]
+                for ci_s, (v, f_s) in enumerate(zip(vals_s, fmts_s)):
+                    c = ws5.cell(row=r5s, column=ci_s+1, value=v)
+                    c.font = Font("Calibri", size=10, color=C_DK)
+                    c.fill = xfill(bg_s); c.border = xbdr()
+                    if f_s: c.number_format = f_s
+                    c.alignment = xctr() if ci_s == 0 else xrgt() if ci_s in [3,4,5] else xctr()
+                ws5.row_dimensions[r5s].height = 20; r5s += 1
+
+            # Récap rayon
+            r5s += 1
+            ws5.merge_cells(start_row=r5s, start_column=1, end_row=r5s, end_column=5)
+            c = ws5.cell(row=r5s, column=1, value="  CASSE PAR RAYON")
+            c.font = Font("Calibri", size=10, bold=True, color=C_WH)
+            c.fill = xfill(C_SUB); c.alignment = xlft(); ws5.row_dimensions[r5s].height = 22; r5s += 1
+
+            write_header_row(ws5, r5s, ["Rayon","CA (FCFA)","Casse (FCFA)","Tx Casse","% Casse Réseau"],
+                             [22, 16, 16, 12, 16]); r5s += 1
+            for ri_r, (_, rd) in enumerate(agg_casse_rax.iterrows()):
+                bg_r = "F7F7F7" if ri_r % 2 == 0 else "FFFFFF"
+                pct_res = abs(rd["Casse_V"]) / abs(casse_reseau) if casse_reseau != 0 else 0
+                vals_r = [rd["lib_rayon"], rd["CA"], abs(rd["Casse_V"]),
+                          rd["TxCasse"]/100 if pd.notna(rd["TxCasse"]) else None, pct_res]
+                fmts_r = [None,"#,##0","#,##0","0.00%","0.0%"]
+                for ci_r, (v, f_r) in enumerate(zip(vals_r, fmts_r)):
+                    c = ws5.cell(row=r5s, column=ci_r+1, value=v)
+                    c.font = Font("Calibri", size=10, color=C_DK)
+                    c.fill = xfill(bg_r); c.border = xbdr()
+                    if f_r: c.number_format = f_r
+                    c.alignment = xlft() if ci_r == 0 else xrgt() if ci_r in [1,2] else xctr()
+                ws5.row_dimensions[r5s].height = 20; r5s += 1
+
+            # Top 30 articles
+            r5s += 1
+            ws5.merge_cells(start_row=r5s, start_column=1, end_row=r5s, end_column=8)
+            c = ws5.cell(row=r5s, column=1, value="  TOP 30 ARTICLES — valeur de casse la plus élevée")
+            c.font = Font("Calibri", size=10, bold=True, color=C_WH)
+            c.fill = xfill(C_SUB); c.alignment = xlft(); ws5.row_dimensions[r5s].height = 22; r5s += 1
+
+            hdrs_a = ["#","Article","Rayon","Famille","CA (FCFA)","Casse (FCFA)","Casse (Qté)","Tx Casse"]
+            wdths_a = [5, 44, 18, 24, 16, 16, 14, 12]
+            write_header_row(ws5, r5s, hdrs_a, wdths_a); r5s += 1
+
+            for ri_a, (_, ra) in enumerate(top30_casse.iterrows()):
+                bg_a = "F7F7F7" if ri_a % 2 == 0 else "FFFFFF"
+                casse_q_a = int(ra["Casse_Q"]) if has_qty and pd.notna(ra.get("Casse_Q")) else None
+                vals_a = [ra["Rang"], ra["lib_art"], ra["lib_rayon"], ra["lib_fam"],
+                          ra["CA"], abs(ra["Casse_V"]), casse_q_a,
+                          ra["TxCasse"]/100 if pd.notna(ra["TxCasse"]) else None]
+                fmts_a = [None,None,None,None,"#,##0","#,##0","#,##0","0.00%"]
+                for ci_a, (v, f_a) in enumerate(zip(vals_a, fmts_a)):
+                    c = ws5.cell(row=r5s, column=ci_a+1, value=v)
+                    c.font = Font("Calibri", size=10, color=C_DK)
+                    c.fill = xfill(bg_a); c.border = xbdr()
+                    if f_a: c.number_format = f_a
+                    if ci_a == 0:        c.alignment = xctr()
+                    elif ci_a in [4,5,6]: c.alignment = xrgt()
+                    elif ci_a == 7:      c.alignment = xctr()
+                    else:                c.alignment = xlft(w=(ci_a in [1,3]))
+                ws5.row_dimensions[r5s].height = 20; r5s += 1
+
+            ws5.freeze_panes = "A4"
 
             buf = BytesIO()
             wb_exp.save(buf)
