@@ -955,30 +955,45 @@ with tab4:
                 r6 = ri6 + 5
                 bg6 = "F7F7F7" if ri6 % 2 == 0 else "FFFFFF"
                 tm6 = rd6["TxMarge"]; pp6 = rd6["PdsPromo"]
-                vals6 = [
+
+                # Colonnes scalaires (0-8)
+                scalar_vals = [
                     rd6["Rang"], rd6["lib_art"], rd6["lib_rayon"], rd6["lib_fam"],
                     rd6["CA"], rd6["Marge"],
                     tm6/100 if pd.notna(tm6) else None,
                     pp6/100 if pd.notna(pp6) else None,
                     int(rd6["Qte"]) if pd.notna(rd6["Qte"]) else None,
-                    build_rich_bloc(rd6["Article"], "Hyper"),
-                    build_rich_bloc(rd6["Article"], "Market"),
-                    build_rich_bloc(rd6["Article"], "Supeco"),
                 ]
-                fmts6 = [None,None,None,None,"#,##0","#,##0","0.0%","0.0%","#,##0",None,None,None]
-                for ci6,(v,f6) in enumerate(zip(vals6,fmts6)):
-                    col6 = ci6
+                scalar_fmts = [None,None,None,None,"#,##0","#,##0","0.0%","0.0%","#,##0"]
+
+                for ci6, (v, f6) in enumerate(zip(scalar_vals, scalar_fmts)):
                     c = ws4.cell(row=r6, column=ci6+1, value=v)
-                    # Pour les cellules bloc (col >= 9) : fond coloré si contenu, sinon fond ligne
-                    cell_bg = bloc_fill.get(col6, bg6) if (v and str(v) not in ("—", "")) else bg6
-                    c.font  = Font("Calibri", size=10 if ci6<9 else 9, color=C_DK)
-                    c.fill  = xfill(cell_bg); c.border = xbdr()
+                    c.fill   = xfill(bg6); c.border = xbdr()
                     if f6: c.number_format = f6
-                    if ci6 == 0:         c.font = Font("Calibri", size=10, bold=True, color=C_DK); c.alignment = xctr()
-                    elif ci6 in [4,5]:   c.alignment = xrgt()
-                    elif ci6 in [6,7,8]: c.alignment = xctr()
-                    elif ci6 >= 9:       c.alignment = xlft(w=True)
-                    else:                c.alignment = xlft(w=(ci6 in [1,3]))
+                    if ci6 == 0:
+                        c.font = Font("Calibri", size=10, bold=True, color=C_DK); c.alignment = xctr()
+                    elif ci6 in [4, 5]:
+                        c.font = Font("Calibri", size=10, color=C_DK); c.alignment = xrgt()
+                    elif ci6 in [6, 7, 8]:
+                        c.font = Font("Calibri", size=10, color=C_DK); c.alignment = xctr()
+                    else:
+                        c.font = Font("Calibri", size=10, color=C_DK); c.alignment = xlft(w=(ci6 in [1,3]))
+
+                # Colonnes bloc rich text (9, 10, 11) — Hyper, Market, Supeco
+                for bi, fmt_name in enumerate(["Hyper", "Market", "Supeco"]):
+                    col_idx = 9 + bi
+                    rich_val = build_rich_bloc(rd6["Article"], fmt_name)
+                    cell_bg  = bloc_fill[col_idx] if (rich_val != "—") else bg6
+                    c = ws4.cell(row=r6, column=col_idx+1)
+                    c.value     = rich_val          # CellRichText ou "—"
+                    c.fill      = xfill(cell_bg)
+                    c.border    = xbdr()
+                    c.alignment = xlft(w=True)
+                    # Ne pas assigner c.font sur une cellule CellRichText
+                    # (chaque TextBlock porte son propre InlineFont)
+                    if rich_val == "—":
+                        c.font = Font("Calibri", size=9, color="AAAAAA")
+
                 ws4.row_dimensions[r6].height = 30
 
             ws4.freeze_panes = "A5"
