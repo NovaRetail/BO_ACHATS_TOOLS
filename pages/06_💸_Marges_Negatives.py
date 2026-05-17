@@ -1,25 +1,45 @@
+
 """
-06_💸_Marges_Negatives.py — SmartBuyer Hub
-Diagnostic Rentabilité Réseau · Flop 100 · Analyse par format et rayon
+12_🏪_Bascule_XD.py — SmartBuyer Hub
+Commando XD · Analyse DL vers Cross-Docking
+Version corrigée :
+- upload uniquement dans la sidebar
+- fichier à un seul onglet : lecture automatique du premier onglet
+- alias corrigé pour "Qté rec" / "Qte rec"
+- landing page explicative au style SmartBuyer
+- charte visuelle inspirée des apps SmartBuyer existantes
 """
 
-import streamlit as st
-import pandas as pd
-import numpy as np
+from __future__ import annotations
+
+import io
 import re
-from io import BytesIO
-from openpyxl import Workbook
-from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
-from openpyxl.utils import get_column_letter
+import sys
+import importlib.util
+import unicodedata
+from datetime import timedelta
+
+import numpy as np
+import pandas as pd
+import streamlit as st
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CONFIG PAGE
+# ═══════════════════════════════════════════════════════════════════════════════
 
 st.set_page_config(
-    page_title="Marges Négatives · SmartBuyer",
-    page_icon="💸",
+    page_title="Bascule XD · SmartBuyer",
+    page_icon="🏪",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# ─── CHARTE SMARTBUYER ────────────────────────────────────────────────────────
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CHARTE SMARTBUYER
+# ═══════════════════════════════════════════════════════════════════════════════
+
 st.markdown("""
 <style>
 html, body, [class*="css"] {
@@ -28,7 +48,7 @@ html, body, [class*="css"] {
     background-color: #F2F2F7;
 }
 .stApp { background: #F2F2F7; }
-.main .block-container { padding-top: 1.8rem; max-width: 1300px; }
+.main .block-container { padding-top: 1.8rem; max-width: 1350px; }
 [data-testid="stSidebar"] { background: #F2F2F7 !important; border-right: 0.5px solid #D1D1D6 !important; }
 [data-testid="stMetric"] { background: #FFFFFF !important; border: 0.5px solid #E5E5EA !important; border-radius: 12px !important; padding: 16px 18px !important; }
 [data-testid="stMetricLabel"] { font-size: 11px !important; font-weight: 500 !important; color: #8E8E93 !important; text-transform: uppercase !important; letter-spacing: 0.04em !important; }
@@ -40,12 +60,13 @@ html, body, [class*="css"] {
 [data-testid="stDataFrame"] th { background: #F2F2F7 !important; font-size: 11px !important; font-weight: 600 !important; color: #8E8E93 !important; text-transform: uppercase !important; letter-spacing: 0.04em !important; }
 [data-testid="stFileUploader"] { border: 1.5px dashed #D1D1D6 !important; border-radius: 10px !important; background: #F9F9FB !important; }
 .stDownloadButton > button { background: #007AFF !important; color: white !important; border: none !important; border-radius: 8px !important; font-weight: 500 !important; font-size: 13px !important; padding: 10px 24px !important; width: 100% !important; }
+.stButton > button[kind="primary"] { background: #007AFF !important; border: none !important; border-radius: 8px !important; font-weight: 600 !important; }
 hr { border-color: #E5E5EA !important; margin: 1rem 0 !important; }
 
 .page-title   { font-size: 28px; font-weight: 700; color: #1C1C1E; letter-spacing: -0.03em; margin: 0; }
 .page-caption { font-size: 13px; color: #8E8E93; margin-top: 3px; margin-bottom: 1.5rem; }
 .section-label { font-size: 11px; font-weight: 600; color: #8E8E93; text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 10px; }
-.alert-card  { padding: 12px 16px; border-radius: 10px; margin-bottom: 8px; font-size: 13px; line-height: 1.5; border-left: 3px solid; }
+.alert-card  { padding: 12px 16px; border-radius: 10px; margin-bottom: 8px; font-size: 13px; line-height: 1.5; border-left: 3px solid; background: #FFFFFF; }
 .alert-red   { background: #FFF2F2; border-color: #FF3B30; color: #3A0000; }
 .alert-amber { background: #FFFBF0; border-color: #FF9500; color: #3A2000; }
 .alert-green { background: #F0FFF4; border-color: #34C759; color: #003A10; }
@@ -65,94 +86,1333 @@ hr { border-color: #E5E5EA !important; margin: 1rem 0 !important; }
 .col-required { background: #F0F8FF; border: 0.5px solid #B3D9FF; border-radius: 8px; padding: 10px 14px; margin-bottom: 6px; display: flex; align-items: flex-start; gap: 10px; }
 .col-name { font-size: 13px; font-weight: 600; color: #0066CC; font-family: monospace; }
 .col-desc { font-size: 12px; color: #3A3A3C; margin-top: 1px; }
+.card { background:#FFFFFF;border:0.5px solid #E5E5EA;border-radius:12px;padding:16px;margin-bottom:10px; }
+.small-muted { font-size:12px;color:#8E8E93; }
 </style>
 """, unsafe_allow_html=True)
 
-# ─── HELPERS ──────────────────────────────────────────────────────────────────
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PARAMÈTRES MÉTIER
+# ═══════════════════════════════════════════════════════════════════════════════
+
+DEFAULT_START_DATE = pd.Timestamp("2026-01-01")
+DEFAULT_XD_THRESHOLD = 100_000
+DEFAULT_PLATFORM_COST_PER_PACKAGE = 90
+DEFAULT_MIN_ORDERS = 5
+
+HYPERS = {"10202", "10203", "10301"}
+MARKETS = {"10604", "10206", "10208", "10209", "10705"}
+SUPECO = {"10601", "10602", "10603", "10605"}
+
+DAYS_FR = {
+    0: "Lundi",
+    1: "Mardi",
+    2: "Mercredi",
+    3: "Jeudi",
+    4: "Vendredi",
+    5: "Samedi",
+    6: "Dimanche",
+}
+DAY_TO_NUM = {v: k for k, v in DAYS_FR.items()}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# HELPERS GÉNÉRAUX
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def package_installed(package_name: str) -> bool:
+    return importlib.util.find_spec(package_name) is not None
+
+
 def fmt(n):
-    if pd.isna(n) or n is None: return "—"
+    if pd.isna(n) or n is None:
+        return "—"
+    try:
+        n = float(n)
+    except Exception:
+        return "—"
     a = abs(n)
-    if a >= 1_000_000: return f"{n/1_000_000:.1f} M"
-    if a >= 1_000:     return f"{int(n/1_000)} K"
-    return f"{int(n):,}"
+    if a >= 1_000_000:
+        return f"{n/1_000_000:.1f} M"
+    if a >= 1_000:
+        return f"{int(n/1_000)} K"
+    return f"{int(n):,}".replace(",", " ")
+
+
+def fmt_xof(n):
+    if pd.isna(n) or n is None:
+        return "—"
+    return f"{float(n):,.0f} FCFA".replace(",", " ")
+
 
 def fmt_pct(v, dec=1):
-    if pd.isna(v) or v is None: return "—"
-    return f"{v:.{dec}f}%"
+    if pd.isna(v) or v is None:
+        return "—"
+    return f"{float(v):.{dec}f}%"
 
-def fmt_delta(v):
-    if pd.isna(v) or v is None: return "—"
-    return f"{v:+.1f} pts"
 
-def get_format(site_name):
-    s = str(site_name)
-    if "Supeco" in s: return "Supeco"
-    if "Hyper"  in s: return "Hyper"
-    return "Market"
+def normalize_text(value) -> str:
+    if value is None:
+        return ""
+    value = str(value).strip().lower()
+    value = unicodedata.normalize("NFKD", value)
+    value = "".join(c for c in value if not unicodedata.combining(c))
+    value = re.sub(r"[^a-z0-9]+", "", value)
+    return value
 
-def short_name(s):
-    s = str(s)
-    return s.split(" - ", 1)[-1].strip() if " - " in s else s
 
-def extract_periode(df_raw):
+def find_column(df: pd.DataFrame, aliases: list[str]) -> str | None:
+    normalized_cols = {normalize_text(c): c for c in df.columns}
+    for alias in aliases:
+        key = normalize_text(alias)
+        if key in normalized_cols:
+            return normalized_cols[key]
+    return None
+
+
+def detect_columns(df: pd.DataFrame) -> dict:
+    """
+    Détection robuste des colonnes.
+    Correction clé : ajout de "Qté rec" / "Qte rec" pour éviter l'erreur qte_rec.
+    """
+    aliases = {
+        "fou": [
+            "Fou", "FOU", "Code fournisseur", "Fournisseur",
+            "Code fourn", "Code fourn.", "Code Four", "Four."
+        ],
+        "nom_fourn": [
+            "Nom fourn,", "Nom fourn", "Nom fournisseur",
+            "Libellé fournisseur", "Libelle fournisseur", "Nom fourn.",
+            "Nom four", "Fournisseur libellé", "Nom Four."
+        ],
+        "site": [
+            "Site", "Code site", "Magasin", "Code magasin",
+            "Etablissement", "Établissement", "Code établissement"
+        ],
+        "code": [
+            "Code", "Code article", "Article", "Code produit",
+            "SKU", "Code EAN", "Référence", "Reference"
+        ],
+        "n_cde": [
+            "N° Cde", "N Cde", "No Cde", "Num Cde",
+            "Numero commande", "Numéro commande", "N° commande",
+            "Commande", "No commande", "N commande"
+        ],
+        "date_cde": [
+            "Date de commande", "Date commande", "Dt Cde",
+            "Date Cde", "Date cmd", "Date Cmd", "Dt commande"
+        ],
+        "dt_rec": [
+            "Dt Rec", "Date réception", "Date reception",
+            "Date de réception", "Date de reception",
+            "Date rec", "Date Rec", "Dt réception", "Dt reception"
+        ],
+        "qte_cde": [
+            "Qté cde", "Qte cde", "Quantité commandée",
+            "Quantite commandee", "Qte commande", "Qté commandée",
+            "Qte Cde", "Qté commande", "Qte cdee"
+        ],
+        "qte_rec": [
+            "Qté rec", "Qte rec", "Qté reçue", "Qte recue",
+            "Quantité reçue", "Quantite recue", "Qte reception",
+            "Qté réception", "Qte Rec", "Qté Rec", "Qté réceptionnée",
+            "Qte receptionnee"
+        ],
+        "px_revient": [
+            "Px revient", "Prix revient", "Prix de revient",
+            "PR", "Px Revient", "Prix achat", "Prix d'achat", "PA"
+        ],
+        "colis": [
+            "Colis", "Nb colis", "Nombre colis", "PCB",
+            "Nb Colis", "Nombre de colis", "Nb. colis"
+        ],
+        "sit": [
+            "Sit", "Situation", "Statut", "Statut commande",
+            "Code situation", "Statut Cde", "Code Sit"
+        ],
+    }
+    return {key: find_column(df, names) for key, names in aliases.items()}
+
+
+def clean_numeric(series: pd.Series) -> pd.Series:
+    if pd.api.types.is_numeric_dtype(series):
+        return pd.to_numeric(series, errors="coerce")
+
+    s = series.astype(str).str.strip()
+    s = s.str.replace("\u00a0", "", regex=False)
+    s = s.str.replace(" ", "", regex=False)
+    s = s.str.replace(",", ".", regex=False)
+    s = s.replace({
+        "": np.nan,
+        "nan": np.nan,
+        "NaN": np.nan,
+        "None": np.nan,
+        "NULL": np.nan,
+        "-": np.nan,
+    })
+    return pd.to_numeric(s, errors="coerce")
+
+
+def parse_date_series(series: pd.Series) -> pd.Series:
+    dt = pd.to_datetime(series, errors="coerce", dayfirst=True)
+
+    numeric = pd.to_numeric(series, errors="coerce")
+    mask_excel_serial = dt.isna() & numeric.between(20_000, 80_000)
+
+    if mask_excel_serial.any():
+        dt.loc[mask_excel_serial] = pd.to_datetime(
+            numeric.loc[mask_excel_serial],
+            unit="D",
+            origin="1899-12-30",
+            errors="coerce",
+        )
+    return dt
+
+
+def safe_div(num, den):
     try:
-        for val in df_raw.iloc[:, 0].astype(str):
-            m = re.search(r"après le (\d{2}/\d{2}/\d{4}) et est avant le (\d{2}/\d{2}/\d{4})", val)
-            if m:
-                from datetime import datetime
-                d1 = datetime.strptime(m.group(1), "%d/%m/%Y")
-                d2 = datetime.strptime(m.group(2), "%d/%m/%Y")
-                nb = (d2 - d1).days
-                return f"{m.group(1)} → {m.group(2)}", nb
-    except: pass
-    return "Période inconnue", 1
+        if den is None or pd.isna(den) or den == 0:
+            return np.nan
+        return num / den
+    except Exception:
+        return np.nan
 
-# ─── CHARGEMENT ───────────────────────────────────────────────────────────────
-@st.cache_data(show_spinner=False)
-def load_data(byt, fname):
-    ext = fname.lower().rsplit(".", 1)[-1]
-    if ext in ("xlsx", "xls"):
-        df = pd.read_excel(BytesIO(byt), dtype=str)
+
+def mode_day(series: pd.Series) -> str:
+    s = pd.to_datetime(series, errors="coerce").dropna()
+    if s.empty:
+        return "N/A"
+    m = s.dt.dayofweek.mode()
+    if m.empty:
+        return "N/A"
+    return DAYS_FR.get(int(m.iloc[0]), "N/A")
+
+
+def classify_group(site) -> str:
+    if pd.isna(site):
+        return "Site hors groupe"
+    site = str(site).strip().split(".")[0]
+    if site in HYPERS:
+        return "Hypers"
+    if site in MARKETS:
+        return "Markets"
+    if site in SUPECO:
+        return "Supeco"
+    return "Site hors groupe"
+
+
+def join_unique(values) -> str:
+    vals = pd.Series(values).dropna().astype(str).unique().tolist()
+    vals = [v for v in vals if v and v.lower() != "nan"]
+    return " / ".join(sorted(vals)) if vals else "N/A"
+
+
+def yes_no(value: bool) -> str:
+    return "Oui" if bool(value) else "Non"
+
+
+def compute_current_cadence(cdes_mois: float) -> str:
+    if pd.isna(cdes_mois):
+        return "N/A"
+    if cdes_mois >= 20:
+        return "Hebdo"
+    if cdes_mois >= 8:
+        return "Bi-mensuel"
+    return "Mensuel"
+
+
+def get_cycles_from_cadence(cadence: str) -> int:
+    if cadence == "Hebdo":
+        return 4
+    if cadence == "Bi-mensuel":
+        return 2
+    if cadence == "Mensuel":
+        return 1
+    return 0
+
+
+def compute_xd_cadence(colis_xd_mois: float) -> tuple[str, int, float, str]:
+    if pd.isna(colis_xd_mois) or colis_xd_mois <= 0:
+        return "N/A", 0, 0, "N/A"
+
+    if colis_xd_mois > 3000:
+        cadence = "Hebdo"
+    elif colis_xd_mois >= 1000:
+        cadence = "Bi-mensuel"
     else:
-        for enc in ("utf-8-sig", "utf-8", "latin-1"):
-            try:
-                df = pd.read_csv(BytesIO(byt), sep=";", encoding=enc, dtype=str)
-                break
-            except: continue
+        cadence = "Mensuel"
 
-    periode, nb_jours = extract_periode(df)
+    cycles = get_cycles_from_cadence(cadence)
+    colis_livraison = colis_xd_mois / cycles
 
-    # ── FIX : normalisation du nom "CA Promo" (le PBI exporte "CA Promo", pas "CA HT Promo")
-    if "CA Promo" in df.columns and "CA HT Promo" not in df.columns:
-        df = df.rename(columns={"CA Promo": "CA HT Promo"})
+    if cadence == "Mensuel" and colis_livraison > 500:
+        cadence = "Bi-mensuel"
+        cycles = 2
+        colis_livraison = colis_xd_mois / cycles
 
-    num_cols = ["CA", "Marge", "CA Hors Promo", "Marge Hors Promo",
-                "CA HT Promo", "Marge Promo", "Qté Vente",
-                "Casse (Valeur)", "Casse (Qté)", "%Marge", "%CA Poids Promo"]
-    for col in num_cols:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
+    if cadence == "Bi-mensuel" and colis_livraison > 600:
+        cadence = "Hebdo"
+        cycles = 4
+        colis_livraison = colis_xd_mois / cycles
 
-    df["lib_art"]    = df["Article"].apply(       lambda s: short_name(s) if pd.notna(s) else None)
-    df["code_art"]   = df["Article"].apply(       lambda s: str(s).split(" - ", 1)[0].strip() if pd.notna(s) and " - " in str(s) else None)
-    df["lib_site"]   = df["Site nom long"].apply( lambda s: short_name(s) if pd.notna(s) else None)
-    df["lib_rayon"]  = df["Rayon"].apply(         lambda s: short_name(s) if pd.notna(s) else None)
-    df["lib_fam"]    = df["Famille"].apply(       lambda s: short_name(s) if pd.notna(s) else None)
-    df["format"]     = df["Site nom long"].apply( lambda s: get_format(s) if pd.notna(s) else None)
+    if colis_livraison < 500:
+        alerte = "🟢 < 500"
+    elif colis_livraison < 1000:
+        alerte = "🟠 500-999"
+    else:
+        alerte = "🔴 >= 1000"
 
-    df_clean = df[
-        df["lib_art"].notna()  & (df["lib_art"]  != "Total") &
-        df["lib_site"].notna() & (df["lib_site"] != "Total") &
-        df["lib_rayon"].notna()&
-        ~df["Rayon"].astype(str).str.startswith("Filtres") &
-        (df["lib_rayon"] != "Total") &
-        df["lib_fam"].notna()  & (df["lib_fam"]  != "Total")
+    return cadence, cycles, colis_livraison, alerte
+
+
+def compute_cutoff_day(livraison_day: str, lead_time_days) -> str:
+    if livraison_day in ["N/A", "", None] or pd.isna(lead_time_days):
+        return "N/A"
+    base = DAY_TO_NUM.get(livraison_day)
+    if base is None:
+        return "N/A"
+    try:
+        lt = int(round(float(lead_time_days)))
+    except Exception:
+        return "N/A"
+
+    cutoff = base - lt
+    if cutoff >= 0:
+        return DAYS_FR[cutoff]
+
+    while cutoff < 0:
+        cutoff += 7
+    return f"S-1 {DAYS_FR[cutoff]}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# LECTURE FICHIER — UN SEUL ONGLET
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def get_file_extension(filename: str) -> str:
+    return filename.lower().rsplit(".", 1)[-1].strip()
+
+
+def check_engine_available(filename: str):
+    ext = get_file_extension(filename)
+
+    if ext == "xlsb" and not package_installed("pyxlsb"):
+        raise ImportError(
+            "Le fichier est au format .xlsb mais la librairie pyxlsb n'est pas installée. "
+            "Ajoute pyxlsb dans requirements.txt ou convertis le fichier en .xlsx."
+        )
+
+    if ext == "xls" and not package_installed("xlrd"):
+        raise ImportError(
+            "Le fichier est au format .xls mais la librairie xlrd n'est pas installée. "
+            "Ajoute xlrd dans requirements.txt ou convertis le fichier en .xlsx."
+        )
+
+    if ext == "xlsx" and not package_installed("openpyxl"):
+        raise ImportError(
+            "Le fichier est au format .xlsx mais la librairie openpyxl n'est pas installée. "
+            "Ajoute openpyxl dans requirements.txt."
+        )
+
+
+def get_excel_engine(filename: str) -> str:
+    ext = get_file_extension(filename)
+    if ext == "xlsb":
+        return "pyxlsb"
+    if ext == "xls":
+        return "xlrd"
+    return "openpyxl"
+
+
+@st.cache_data(show_spinner=False)
+def read_input_file(file_bytes: bytes, filename: str) -> pd.DataFrame:
+    """
+    Le fichier ne contient qu'un onglet : on lit automatiquement le premier onglet.
+    Pas de selectbox d'onglet.
+    """
+    ext = get_file_extension(filename)
+    buffer = io.BytesIO(file_bytes)
+
+    if ext == "csv":
+        for encoding in ["utf-8-sig", "utf-8", "latin1"]:
+            for sep in [None, ";", ",", "\t"]:
+                try:
+                    buffer.seek(0)
+                    return pd.read_csv(buffer, encoding=encoding, sep=sep, engine="python", dtype=str)
+                except Exception:
+                    continue
+        raise ValueError("Impossible de lire le CSV. Vérifie l'encodage ou le séparateur.")
+
+    check_engine_available(filename)
+    engine = get_excel_engine(filename)
+    return pd.read_excel(buffer, sheet_name=0, engine=engine, dtype=str)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PRÉPARATION DONNÉES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def prepare_data(raw_df: pd.DataFrame, start_date: pd.Timestamp, mapping: dict) -> tuple[pd.DataFrame, dict]:
+    df = raw_df.copy()
+    initial_rows = len(df)
+
+    required = [
+        "fou", "nom_fourn", "site", "code", "n_cde",
+        "date_cde", "dt_rec", "qte_cde", "qte_rec",
+        "px_revient", "colis", "sit"
+    ]
+
+    missing = [field for field in required if mapping.get(field) is None]
+    if missing:
+        readable_missing = {
+            "fou": "Fou / Code fournisseur",
+            "nom_fourn": "Nom fourn, / Nom fournisseur",
+            "site": "Site",
+            "code": "Code / Code article",
+            "n_cde": "N° Cde",
+            "date_cde": "Date de commande",
+            "dt_rec": "Dt Rec / Date réception",
+            "qte_cde": "Qté cde",
+            "qte_rec": "Qté rec / Qté reçue",
+            "px_revient": "Px revient",
+            "colis": "Colis",
+            "sit": "Sit",
+        }
+        msg = "\n".join([f"- {readable_missing.get(m, m)}" for m in missing])
+        available = "\n".join([f"- {c}" for c in df.columns])
+
+        raise ValueError(
+            "Colonnes obligatoires non détectées :\n"
+            f"{msg}\n\n"
+            "Colonnes disponibles dans ton fichier :\n"
+            f"{available}\n\n"
+            "Solution : corrige l'alias dans detect_columns() ou renomme la colonne dans le fichier source."
+        )
+
+    df = df.rename(columns={
+        mapping["fou"]: "Fou",
+        mapping["nom_fourn"]: "Nom fournisseur",
+        mapping["site"]: "Site",
+        mapping["code"]: "Code article",
+        mapping["n_cde"]: "N° Cde",
+        mapping["date_cde"]: "Date de commande",
+        mapping["dt_rec"]: "Dt Rec",
+        mapping["qte_cde"]: "Qté cde",
+        mapping["qte_rec"]: "Qté rec",
+        mapping["px_revient"]: "Px revient",
+        mapping["colis"]: "Colis",
+        mapping["sit"]: "Sit",
+    })
+
+    df["Fou"] = df["Fou"].astype(str).str.strip()
+    df["Nom fournisseur"] = df["Nom fournisseur"].astype(str).str.strip()
+    df["Site"] = df["Site"].astype(str).str.strip().str.split(".").str[0]
+    df["Code article"] = df["Code article"].astype(str).str.strip()
+    df["N° Cde"] = df["N° Cde"].astype(str).str.strip()
+
+    df["Date de commande"] = parse_date_series(df["Date de commande"])
+    df["Dt Rec"] = parse_date_series(df["Dt Rec"])
+
+    df["Qté cde"] = clean_numeric(df["Qté cde"])
+    df["Qté rec"] = clean_numeric(df["Qté rec"])
+    df["Px revient"] = clean_numeric(df["Px revient"])
+    df["Colis"] = clean_numeric(df["Colis"]).fillna(0)
+
+    df["Sit brut"] = df["Sit"].astype(str).str.strip()
+    df["Sit clean"] = (
+        df["Sit brut"]
+        .str.replace(".0", "", regex=False)
+        .str.extract(r"(\d+)", expand=False)
+        .fillna(df["Sit brut"])
+    )
+
+    qte_missing_or_zero = int(df["Qté cde"].isna().sum() + df["Qté cde"].fillna(0).eq(0).sum())
+    px_missing = int(df["Px revient"].isna().sum())
+    date_cde_missing = int(df["Date de commande"].isna().sum())
+    dt_rec_missing = int(df["Dt Rec"].isna().sum())
+
+    df = df[df["Date de commande"].notna()].copy()
+    df = df[df["Date de commande"] >= start_date].copy()
+
+    if df.empty:
+        raise ValueError(
+            "Aucune ligne disponible après filtre de date. "
+            "Vérifie la date de début d’analyse ou le format de la colonne Date de commande."
+        )
+
+    last_date = df["Date de commande"].max()
+    nb_days = max((last_date - start_date).days + 1, 1)
+    nb_months = max(nb_days / 30.44, 1 / 30.44)
+
+    df["Groupe magasin"] = df["Site"].apply(classify_group)
+    df["Valeur commande"] = df["Qté cde"].fillna(0) * df["Px revient"].fillna(0)
+    df["BC unique"] = (
+        df["N° Cde"].astype(str)
+        + "|"
+        + df["Site"].astype(str)
+        + "|"
+        + df["Fou"].astype(str)
+    )
+    df["Fournisseur key"] = df["Fou"].astype(str) + "|" + df["Nom fournisseur"].astype(str)
+    df["Sit95 flag"] = df["Sit clean"].astype(str).eq("95")
+    df["Lead time brut"] = (df["Dt Rec"] - df["Date de commande"]).dt.days
+    df["Lead time valide"] = df["Lead time brut"].where(
+        (df["Lead time brut"] >= 0) & (df["Lead time brut"] <= 30)
+    )
+
+    site_hors_groupe = sorted(
+        df.loc[df["Groupe magasin"].eq("Site hors groupe"), "Site"]
+        .dropna()
+        .astype(str)
+        .unique()
+        .tolist()
+    )
+
+    quality = {
+        "lignes_initiales": initial_rows,
+        "lignes_apres_filtre_date": len(df),
+        "date_debut_analyse": start_date,
+        "date_fin_analyse": last_date,
+        "nb_mois_analyse": nb_months,
+        "methode_nb_mois": "Nombre de jours entre date début et date fin / 30,44",
+        "qte_cde_manquante_ou_nulle": qte_missing_or_zero,
+        "px_revient_manquant": px_missing,
+        "date_commande_manquante": date_cde_missing,
+        "dt_rec_manquante": dt_rec_missing,
+        "sites_hors_groupe": ", ".join(site_hors_groupe) if site_hors_groupe else "Aucun",
+    }
+
+    return df, quality
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ANALYSE FOURNISSEURS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def aggregate_group_metrics(df: pd.DataFrame, nb_months: float) -> pd.DataFrame:
+    rows = []
+    for (fkey, group), g in df.groupby(["Fournisseur key", "Groupe magasin"], dropna=False):
+        bc_count = g["BC unique"].nunique()
+        qte_cde = g["Qté cde"].fillna(0).sum()
+        qte_rec = g["Qté rec"].fillna(0).sum()
+        sit95_bc = g.loc[g["Sit95 flag"], "BC unique"].nunique()
+        colis_total = g["Colis"].fillna(0).sum()
+
+        rows.append({
+            "Fournisseur key": fkey,
+            "Groupe magasin": group,
+            "BC": bc_count,
+            "Colis": colis_total,
+            "Colis/mois": colis_total / nb_months,
+            "TS%": safe_div(qte_rec, qte_cde) * 100,
+            "%Sit95": safe_div(sit95_bc, bc_count) * 100,
+            "Actif": bc_count > 0,
+        })
+    return pd.DataFrame(rows)
+
+
+def get_metric_for_group(group_metrics: pd.DataFrame, fkey: str, group: str, metric: str):
+    sub = group_metrics[
+        (group_metrics["Fournisseur key"].eq(fkey))
+        & (group_metrics["Groupe magasin"].eq(group))
+    ]
+    return np.nan if sub.empty else sub.iloc[0][metric]
+
+
+def is_group_active(group_metrics: pd.DataFrame, fkey: str, group: str) -> bool:
+    sub = group_metrics[
+        (group_metrics["Fournisseur key"].eq(fkey))
+        & (group_metrics["Groupe magasin"].eq(group))
+    ]
+    return False if sub.empty else bool(sub.iloc[0]["Actif"])
+
+
+def is_group_defective(group_metrics: pd.DataFrame, fkey: str, group: str) -> bool:
+    if not is_group_active(group_metrics, fkey, group):
+        return False
+    ts = get_metric_for_group(group_metrics, fkey, group, "TS%")
+    sit = get_metric_for_group(group_metrics, fkey, group, "%Sit95")
+    ts_bad = False if pd.isna(ts) else ts < 60
+    sit_bad = False if pd.isna(sit) else sit > 30
+    return ts_bad or sit_bad
+
+
+def is_group_correct(group_metrics: pd.DataFrame, fkey: str, group: str) -> bool:
+    if not is_group_active(group_metrics, fkey, group):
+        return False
+    ts = get_metric_for_group(group_metrics, fkey, group, "TS%")
+    sit = get_metric_for_group(group_metrics, fkey, group, "%Sit95")
+    if pd.isna(ts) or pd.isna(sit):
+        return False
+    return ts >= 60 and sit <= 30
+
+
+def build_supplier_state(
+    df: pd.DataFrame,
+    quality: dict,
+    xd_threshold: float,
+    min_orders: int,
+    platform_cost_per_package: float,
+) -> pd.DataFrame:
+
+    nb_months = quality["nb_mois_analyse"]
+    last_date = quality["date_fin_analyse"]
+    last_60_start = last_date - timedelta(days=60)
+    group_metrics = aggregate_group_metrics(df, nb_months)
+
+    couple = (
+        df.groupby(["Fournisseur key", "Site"], dropna=False)
+        .agg(
+            valeur_cde=("Valeur commande", "sum"),
+            nb_bc=("BC unique", "nunique"),
+        )
+        .reset_index()
+    )
+    couple["valeur_moyenne_livraison"] = couple["valeur_cde"] / couple["nb_bc"].replace(0, np.nan)
+
+    below_threshold = (
+        couple[couple["valeur_moyenne_livraison"] < xd_threshold]
+        .groupby("Fournisseur key")
+        .agg(nb_couples_sous_seuil=("Site", "nunique"))
+        .reset_index()
+    )
+    total_couples = (
+        couple.groupby("Fournisseur key")
+        .agg(nb_couples_total=("Site", "nunique"))
+        .reset_index()
+    )
+
+    rows = []
+    for fkey, g in df.groupby("Fournisseur key", dropna=False):
+        fou = g["Fou"].iloc[0]
+        nom = g["Nom fournisseur"].iloc[0]
+        nb_bc = g["BC unique"].nunique()
+        nb_refs = g["Code article"].nunique()
+        nb_sites = g["Site"].nunique()
+        groupes_presents = join_unique(g["Groupe magasin"])
+        cdes_mois = nb_bc / nb_months
+
+        qte_cde = g["Qté cde"].fillna(0).sum()
+        qte_rec = g["Qté rec"].fillna(0).sum()
+        sit95_bc = g.loc[g["Sit95 flag"], "BC unique"].nunique()
+
+        ts_global = safe_div(qte_rec, qte_cde) * 100
+        sit95_global = safe_div(sit95_bc, nb_bc) * 100
+
+        colis_total = g["Colis"].fillna(0).sum()
+        colis_mois = colis_total / nb_months
+        colis_cde_moyen = safe_div(colis_total, nb_bc)
+
+        valeur_totale = g["Valeur commande"].sum()
+        valeur_moyenne_bc = safe_div(valeur_totale, nb_bc)
+
+        last_order = g["Date de commande"].max()
+        recent_order = bool(last_order >= last_60_start)
+
+        total_couple_match = total_couples[total_couples["Fournisseur key"].eq(fkey)]
+        nb_couples_total = int(total_couple_match["nb_couples_total"].iloc[0]) if not total_couple_match.empty else 0
+
+        below_match = below_threshold[below_threshold["Fournisseur key"].eq(fkey)]
+        nb_couples_sous_seuil = int(below_match["nb_couples_sous_seuil"].iloc[0]) if not below_match.empty else 0
+        pct_couples_sous_seuil = safe_div(nb_couples_sous_seuil, nb_couples_total) * 100
+
+        if nb_bc < min_orders:
+            categorie = "Sans données suffisantes"
+        elif nb_couples_sous_seuil >= 1:
+            categorie = "Candidat XD"
+        else:
+            categorie = "Hors périmètre XD"
+
+        hypers_active = is_group_active(group_metrics, fkey, "Hypers")
+        hypers_def = is_group_defective(group_metrics, fkey, "Hypers")
+        hypers_correct = is_group_correct(group_metrics, fkey, "Hypers")
+        markets_def = is_group_defective(group_metrics, fkey, "Markets")
+        supeco_def = is_group_defective(group_metrics, fkey, "Supeco")
+        ms_def = markets_def or supeco_def
+
+        if categorie != "Candidat XD":
+            decision = "Non applicable"
+            flag = "Non applicable"
+            raison = "Fournisseur non candidat XD selon les règles de périmètre."
+        else:
+            ts_is_zero = not pd.isna(ts_global) and np.isclose(ts_global, 0)
+            sit_is_100 = not pd.isna(sit95_global) and np.isclose(sit95_global, 100)
+
+            if ts_is_zero and sit_is_100 and not recent_order:
+                decision = "Inactif probable"
+                flag = "Inactif"
+                raison = "TS global = 0%, Sit95 global = 100%, aucune commande dans les 60 derniers jours."
+            elif ts_is_zero and sit_is_100 and recent_order:
+                decision = "Litige probable"
+                flag = "Litige"
+                raison = "TS global = 0%, Sit95 global = 100%, commandes encore actives sur les 60 derniers jours."
+            elif hypers_active and hypers_def and ms_def:
+                decision = "XD Total"
+                flag = "Actif"
+                raison = "Hypers défaillants et Markets/Supeco défaillants : bascule globale recommandée."
+            elif (not hypers_active or hypers_correct) and ms_def:
+                decision = "XD Markets+Supeco"
+                flag = "Actif"
+                raison = "Hypers absents ou corrects, mais Markets/Supeco défaillants : bascule petits formats."
+            else:
+                decision = "DL — Surveiller"
+                flag = "À surveiller"
+                raison = "Candidat XD au seuil valeur, mais performance service acceptable ou bascule non prioritaire."
+
+        ts_hypers = get_metric_for_group(group_metrics, fkey, "Hypers", "TS%")
+        ts_markets = get_metric_for_group(group_metrics, fkey, "Markets", "TS%")
+        ts_supeco = get_metric_for_group(group_metrics, fkey, "Supeco", "TS%")
+
+        sit_hypers = get_metric_for_group(group_metrics, fkey, "Hypers", "%Sit95")
+        sit_markets = get_metric_for_group(group_metrics, fkey, "Markets", "%Sit95")
+        sit_supeco = get_metric_for_group(group_metrics, fkey, "Supeco", "%Sit95")
+
+        colis_hypers_mois = get_metric_for_group(group_metrics, fkey, "Hypers", "Colis/mois")
+        colis_markets_mois = get_metric_for_group(group_metrics, fkey, "Markets", "Colis/mois")
+        colis_supeco_mois = get_metric_for_group(group_metrics, fkey, "Supeco", "Colis/mois")
+        colis_hors_groupe_mois = get_metric_for_group(group_metrics, fkey, "Site hors groupe", "Colis/mois")
+
+        colis_hypers_mois = 0 if pd.isna(colis_hypers_mois) else colis_hypers_mois
+        colis_markets_mois = 0 if pd.isna(colis_markets_mois) else colis_markets_mois
+        colis_supeco_mois = 0 if pd.isna(colis_supeco_mois) else colis_supeco_mois
+        colis_hors_groupe_mois = 0 if pd.isna(colis_hors_groupe_mois) else colis_hors_groupe_mois
+
+        if decision == "XD Total":
+            colis_xd_mois = colis_hypers_mois + colis_markets_mois + colis_supeco_mois + colis_hors_groupe_mois
+        elif decision == "XD Markets+Supeco":
+            colis_xd_mois = colis_markets_mois + colis_supeco_mois
+        else:
+            colis_xd_mois = 0
+
+        cost_xd_month = colis_xd_mois * platform_cost_per_package
+        cost_xd_year = cost_xd_month * 12
+
+        rows.append({
+            "Fournisseur key": fkey,
+            "Code fournisseur": fou,
+            "Nom fournisseur": nom,
+            "Catégorie périmètre": categorie,
+            "Décision XD": decision,
+            "Flag statut": flag,
+            "Nb références": nb_refs,
+            "Nb magasins actifs": nb_sites,
+            "Groupes présents": groupes_presents,
+            "Nb BC uniques": nb_bc,
+            "Cdes/mois": cdes_mois,
+            "Jour de commande dominant": mode_day(g["Date de commande"]),
+            "Jour de réception dominant": mode_day(g["Dt Rec"]),
+            "Lead time médian (j)": g["Lead time valide"].median(),
+            "Colis/cde moyen": colis_cde_moyen,
+            "Colis/mois": colis_mois,
+            "Colis Hypers/mois": colis_hypers_mois,
+            "Colis Markets/mois": colis_markets_mois,
+            "Colis Supeco/mois": colis_supeco_mois,
+            "Colis hors groupe/mois": colis_hors_groupe_mois,
+            "Colis XD/mois": colis_xd_mois,
+            "Valeur commande totale": valeur_totale,
+            "Valeur moyenne BC": valeur_moyenne_bc,
+            "Nb couples fournisseur/magasin < seuil": nb_couples_sous_seuil,
+            "% couples fournisseur/magasin < seuil": pct_couples_sous_seuil,
+            "TS% global": ts_global,
+            "TS% Hypers": ts_hypers,
+            "TS% Markets": ts_markets,
+            "TS% Supeco": ts_supeco,
+            "%Sit95 global": sit95_global,
+            "%Sit95 Hypers": sit_hypers,
+            "%Sit95 Markets": sit_markets,
+            "%Sit95 Supeco": sit_supeco,
+            "Dernière date de commande": last_order,
+            "Commande dans les 60 derniers jours": yes_no(recent_order),
+            "Coût traitement XD/mois": cost_xd_month,
+            "Coût traitement XD/an": cost_xd_year,
+            "Raison de décision": raison,
+        })
+
+    suppliers = pd.DataFrame(rows)
+    if not suppliers.empty:
+        suppliers = suppliers.sort_values("Cdes/mois", ascending=False).reset_index(drop=True)
+    return suppliers
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PLAN XD + CHARGE QUAI
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def assign_delivery_days(plan: pd.DataFrame) -> pd.DataFrame:
+    plan = plan.copy()
+    plan["Jour livraison XD"] = "N/A"
+
+    hebdo_idx = plan[plan["Cadence XD"].eq("Hebdo")].sort_values("Colis XD/mois", ascending=False).index
+    charges_hebdo = {"Lundi": 0.0, "Mercredi": 0.0}
+    for idx in hebdo_idx:
+        day = min(charges_hebdo, key=charges_hebdo.get)
+        plan.loc[idx, "Jour livraison XD"] = day
+        charges_hebdo[day] += plan.loc[idx, "Colis XD/mois"] / 4
+
+    bim_idx = plan[plan["Cadence XD"].eq("Bi-mensuel")].sort_values("Colis XD/mois", ascending=False).index
+    charges_bim = {"Jeudi": 0.0, "Vendredi": 0.0}
+    for idx in bim_idx:
+        day = min(charges_bim, key=charges_bim.get)
+        plan.loc[idx, "Jour livraison XD"] = day
+        charges_bim[day] += plan.loc[idx, "Colis XD/mois"] / 2
+
+    mens_idx = plan[plan["Cadence XD"].eq("Mensuel")].sort_values("Colis XD/mois", ascending=False).index
+    charges_mens = {"Lundi": 0.0, "Mercredi": 0.0, "Jeudi": 0.0, "Vendredi": 0.0}
+    for idx in mens_idx:
+        day = min(charges_mens, key=charges_mens.get)
+        plan.loc[idx, "Jour livraison XD"] = day
+        charges_mens[day] += plan.loc[idx, "Colis XD/mois"]
+
+    return plan
+
+
+def build_smoothing_plan(suppliers: pd.DataFrame, platform_cost_per_package: float) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
+    plan = suppliers[suppliers["Décision XD"].isin(["XD Total", "XD Markets+Supeco"])].copy()
+
+    if plan.empty:
+        charge = pd.DataFrame(columns=[
+            "Jour", "Colis/semaine simulés", "Nombre de fournisseurs",
+            "Nombre de réceptions", "Charge moyenne par réception",
+            "Coût traitement XD/semaine", "Dépassement seuil 800 colis/jour", "Alerte"
+        ])
+        stats = {"charge_max": 0, "charge_min": 0, "ratio_pic_creux": 0, "flag_ratio": "N/A", "total_cost_month": 0, "total_cost_year": 0}
+        return plan, charge, stats
+
+    plan["Groupes basculés XD"] = np.where(plan["Décision XD"].eq("XD Total"), "Tous groupes actifs", "Markets / Supeco")
+    plan["Groupes maintenus DL"] = np.where(plan["Décision XD"].eq("XD Markets+Supeco"), "Hypers", "Aucun")
+    plan["Cadence actuelle"] = plan["Cdes/mois"].apply(compute_current_cadence)
+    plan["Jour de commande actuel"] = plan["Jour de commande dominant"]
+    plan["Jour de livraison actuel"] = plan["Jour de réception dominant"]
+    plan["BC/mois actuel"] = plan["Cdes/mois"]
+    plan["Colis/mois actuel"] = plan["Colis/mois"]
+    plan["Colis/cde actuel"] = plan["Colis/cde moyen"]
+
+    cadence_data = plan["Colis XD/mois"].apply(compute_xd_cadence)
+    plan["Cadence XD"] = cadence_data.apply(lambda x: x[0])
+    plan["Cycles XD/mois"] = cadence_data.apply(lambda x: x[1])
+    plan["Colis/livraison XD"] = cadence_data.apply(lambda x: x[2])
+    plan["Alerte colis"] = cadence_data.apply(lambda x: x[3])
+
+    plan = assign_delivery_days(plan)
+
+    plan["Jour cut-off"] = plan.apply(
+        lambda r: compute_cutoff_day(r["Jour livraison XD"], r["Lead time médian (j)"]),
+        axis=1,
+    )
+    plan["BC XD/mois"] = plan["Cycles XD/mois"]
+    plan["Réduction BC/mois"] = plan["BC/mois actuel"] - plan["BC XD/mois"]
+    plan["% réduction BC/mois"] = plan["Réduction BC/mois"] / plan["BC/mois actuel"].replace(0, np.nan) * 100
+    plan["Coût traitement plateforme / colis"] = platform_cost_per_package
+    plan["Coût traitement XD/mois"] = plan["Colis XD/mois"] * platform_cost_per_package
+    plan["Coût traitement XD/an"] = plan["Coût traitement XD/mois"] * 12
+    plan["Coût traitement XD/livraison"] = plan["Colis/livraison XD"] * platform_cost_per_package
+    plan["Coût traitement XD par cycle"] = plan["Coût traitement XD/livraison"]
+    plan["Colis Hypers maintenus DL"] = np.where(plan["Décision XD"].eq("XD Markets+Supeco"), plan["Colis Hypers/mois"], 0)
+    plan["Coût théorique Hypers exclu XD"] = plan["Colis Hypers maintenus DL"] * platform_cost_per_package
+
+    charge_rows = []
+    for day in ["Lundi", "Mercredi", "Jeudi", "Vendredi"]:
+        sub = plan[plan["Jour livraison XD"].eq(day)].copy()
+        weekly_packages = 0.0
+        receptions = 0.0
+
+        for _, r in sub.iterrows():
+            cycles = r["Cycles XD/mois"]
+            if cycles > 0:
+                weekly_packages += r["Colis XD/mois"] / 4
+                receptions += max(cycles / 4, 0.25)
+
+        nb_suppliers = sub["Code fournisseur"].nunique()
+        avg_per_reception = safe_div(weekly_packages, receptions)
+        cost_week = weekly_packages * platform_cost_per_package
+        over_800 = weekly_packages > 800
+        alert = "🟢" if weekly_packages < 500 else ("🟠" if weekly_packages < 800 else "🔴")
+
+        charge_rows.append({
+            "Jour": day,
+            "Colis/semaine simulés": weekly_packages,
+            "Nombre de fournisseurs": nb_suppliers,
+            "Nombre de réceptions": receptions,
+            "Charge moyenne par réception": avg_per_reception,
+            "Coût traitement XD/semaine": cost_week,
+            "Dépassement seuil 800 colis/jour": yes_no(over_800),
+            "Alerte": alert,
+        })
+
+    charge = pd.DataFrame(charge_rows)
+    non_zero = charge.loc[charge["Colis/semaine simulés"] > 0, "Colis/semaine simulés"]
+
+    if non_zero.empty:
+        charge_max, charge_min, ratio = 0, 0, 0
+    else:
+        charge_max = non_zero.max()
+        charge_min = non_zero.min()
+        ratio = safe_div(charge_max, charge_min)
+
+    stats = {
+        "charge_max": charge_max,
+        "charge_min": charge_min,
+        "ratio_pic_creux": ratio,
+        "flag_ratio": "OK" if ratio <= 3 else "À lisser",
+        "total_cost_month": plan["Coût traitement XD/mois"].sum(),
+        "total_cost_year": plan["Coût traitement XD/an"].sum(),
+    }
+
+    export_cols = [
+        "Code fournisseur", "Nom fournisseur", "Décision XD", "Groupes basculés XD", "Groupes maintenus DL",
+        "Cadence actuelle", "Jour de commande actuel", "Jour de livraison actuel", "Lead time médian (j)",
+        "Colis/cde actuel", "BC/mois actuel", "Colis/mois actuel",
+        "Colis XD/mois", "Cadence XD", "Cycles XD/mois", "Colis/livraison XD", "Alerte colis",
+        "Jour livraison XD", "Jour cut-off", "BC XD/mois", "Réduction BC/mois", "% réduction BC/mois",
+        "Coût traitement plateforme / colis", "Coût traitement XD/mois", "Coût traitement XD/an",
+        "Coût traitement XD/livraison", "Coût traitement XD par cycle",
+        "Colis Hypers maintenus DL", "Coût théorique Hypers exclu XD",
+    ]
+
+    return plan[export_cols].reset_index(drop=True), charge, stats
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# À STATUER + BDD ARTICLES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def build_to_decide(suppliers: pd.DataFrame) -> pd.DataFrame:
+    subset = suppliers[
+        suppliers["Décision XD"].isin(["DL — Surveiller", "Litige probable", "Inactif probable"])
+        | suppliers["Catégorie périmètre"].eq("Hors périmètre XD")
+        | suppliers["Catégorie périmètre"].eq("Sans données suffisantes")
     ].copy()
 
-    return df_clean, periode, nb_jours
+    rows = []
+    for _, r in subset.iterrows():
+        if r["Catégorie périmètre"] == "Hors périmètre XD":
+            decision = "Hors périmètre XD"
+            reason = "Tous les couples fournisseur/magasin sont au-dessus ou égaux au seuil XD."
+            action = "Maintien DL ; revoir uniquement si baisse de valeur commande ou dégradation TS."
+        elif r["Catégorie périmètre"] == "Sans données suffisantes":
+            decision = "Sans données suffisantes"
+            reason = "Moins de 5 BC uniques sur la période."
+            action = "Compléter l’historique avant décision ; surveiller les prochaines commandes."
+        elif r["Décision XD"] == "DL — Surveiller":
+            decision = "DL — Surveiller"
+            reason = r["Raison de décision"]
+            action = "Revoir dans 3 mois avec suivi TS%, Sit95 et valeur moyenne commande."
+        elif r["Décision XD"] == "Litige probable":
+            decision = "Litige probable"
+            reason = r["Raison de décision"]
+            action = "Escalader aux Achats / clarifier litige fournisseur / bloquer commandes si nécessaire."
+        elif r["Décision XD"] == "Inactif probable":
+            decision = "Inactif probable"
+            reason = r["Raison de décision"]
+            action = "Vérifier référencement / suspendre ou nettoyer base fournisseur."
+        else:
+            decision = r["Décision XD"]
+            reason = r["Raison de décision"]
+            action = "À analyser."
+
+        rows.append({
+            "Code fournisseur": r["Code fournisseur"],
+            "Nom fournisseur": r["Nom fournisseur"],
+            "Catégorie périmètre": r["Catégorie périmètre"],
+            "Décision XD": decision,
+            "Raison principale": reason,
+            "TS% global": r["TS% global"],
+            "%Sit95 global": r["%Sit95 global"],
+            "Cdes/mois": r["Cdes/mois"],
+            "Colis/mois": r["Colis/mois"],
+            "Coût traitement XD/mois": 0,
+            "Coût traitement XD/an": 0,
+            "Dernière date de commande": r["Dernière date de commande"],
+            "Action recommandée": action,
+        })
+
+    return pd.DataFrame(rows)
 
 
-# ─── SIDEBAR ──────────────────────────────────────────────────────────────────
+def build_article_db(df: pd.DataFrame, suppliers: pd.DataFrame, platform_cost_per_package: float) -> pd.DataFrame:
+    agg = (
+        df.groupby(["Fournisseur key", "Fou", "Nom fournisseur", "Code article"], dropna=False)
+        .agg(
+            nb_magasins=("Site", "nunique"),
+            groupes=("Groupe magasin", join_unique),
+            qte_commandee=("Qté cde", "sum"),
+            qte_recue=("Qté rec", "sum"),
+            valeur_commande=("Valeur commande", "sum"),
+            colis_total=("Colis", "sum"),
+            nb_bc=("BC unique", "nunique"),
+            derniere_commande=("Date de commande", "max"),
+        )
+        .reset_index()
+    )
+    agg["TS% article"] = agg["qte_recue"] / agg["qte_commandee"].replace(0, np.nan) * 100
+
+    article_group = (
+        df.groupby(["Fournisseur key", "Code article", "Groupe magasin"], dropna=False)
+        .agg(colis=("Colis", "sum"))
+        .reset_index()
+    )
+
+    ms_colis = (
+        article_group[article_group["Groupe magasin"].isin(["Markets", "Supeco"])]
+        .groupby(["Fournisseur key", "Code article"])
+        .agg(colis_ms=("colis", "sum"))
+        .reset_index()
+    )
+    all_xd_colis = (
+        article_group
+        .groupby(["Fournisseur key", "Code article"])
+        .agg(colis_all=("colis", "sum"))
+        .reset_index()
+    )
+
+    agg = agg.merge(ms_colis, on=["Fournisseur key", "Code article"], how="left")
+    agg = agg.merge(all_xd_colis, on=["Fournisseur key", "Code article"], how="left")
+    agg["colis_ms"] = agg["colis_ms"].fillna(0)
+    agg["colis_all"] = agg["colis_all"].fillna(0)
+
+    sup_info = suppliers[["Fournisseur key", "Catégorie périmètre", "Décision XD"]].drop_duplicates()
+    agg = agg.merge(sup_info, on="Fournisseur key", how="left")
+
+    def groups_switched(decision):
+        if decision == "XD Total":
+            return "Tous groupes actifs"
+        if decision == "XD Markets+Supeco":
+            return "Markets / Supeco"
+        return "Aucun"
+
+    def article_cost(row):
+        if row["Décision XD"] == "XD Total":
+            return row["colis_all"] * platform_cost_per_package
+        if row["Décision XD"] == "XD Markets+Supeco":
+            return row["colis_ms"] * platform_cost_per_package
+        return 0
+
+    agg["Groupes basculés XD"] = agg["Décision XD"].apply(groups_switched)
+    agg["Coût traitement XD article théorique"] = agg.apply(article_cost, axis=1)
+    agg["Commentaire"] = np.where(
+        agg["Décision XD"].isin(["XD Total", "XD Markets+Supeco"]),
+        "Article rattaché à un fournisseur basculé XD.",
+        "Article rattaché à un fournisseur non basculé XD.",
+    )
+
+    final = agg.rename(columns={
+        "Fou": "Code fournisseur",
+        "nb_magasins": "Nb magasins où l’article est commandé",
+        "groupes": "Groupes magasins présents",
+        "qte_commandee": "Qté commandée totale",
+        "qte_recue": "Qté reçue totale",
+        "valeur_commande": "Valeur commande totale article",
+        "colis_total": "Colis total article",
+        "nb_bc": "Nb BC article",
+        "derniere_commande": "Dernière date de commande article",
+        "Catégorie périmètre": "Catégorie périmètre fournisseur",
+        "Décision XD": "Décision XD fournisseur",
+    })
+
+    cols = [
+        "Code fournisseur", "Nom fournisseur", "Code article",
+        "Nb magasins où l’article est commandé", "Groupes magasins présents",
+        "Qté commandée totale", "Qté reçue totale", "TS% article",
+        "Valeur commande totale article", "Colis total article", "Nb BC article",
+        "Dernière date de commande article", "Catégorie périmètre fournisseur",
+        "Décision XD fournisseur", "Groupes basculés XD",
+        "Coût traitement XD article théorique", "Commentaire",
+    ]
+
+    final = final[cols].copy()
+    if not final.empty:
+        final = final.sort_values(["Code fournisseur", "Valeur commande totale article"], ascending=[True, False])
+    return final
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CONTRÔLES + EXPORT EXCEL
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def build_control_sheet(
+    suppliers: pd.DataFrame,
+    plan: pd.DataFrame,
+    charge_stats: dict,
+    quality: dict,
+    platform_cost_per_package: float,
+) -> pd.DataFrame:
+
+    total_suppliers = suppliers["Fournisseur key"].nunique()
+    sans_data = int((suppliers["Catégorie périmètre"] == "Sans données suffisantes").sum())
+    candidats = int((suppliers["Catégorie périmètre"] == "Candidat XD").sum())
+    hors = int((suppliers["Catégorie périmètre"] == "Hors périmètre XD").sum())
+
+    sum_categories = sans_data + candidats + hors
+    diff_categories = total_suppliers - sum_categories
+
+    candidate_decisions = suppliers.loc[suppliers["Catégorie périmètre"].eq("Candidat XD"), "Décision XD"]
+    xd_total = int((candidate_decisions == "XD Total").sum())
+    xd_ms = int((candidate_decisions == "XD Markets+Supeco").sum())
+    dl_surv = int((candidate_decisions == "DL — Surveiller").sum())
+    litige = int((candidate_decisions == "Litige probable").sum())
+    inactif = int((candidate_decisions == "Inactif probable").sum())
+
+    sum_decisions = xd_total + xd_ms + dl_surv + litige + inactif
+    diff_decisions = candidats - sum_decisions
+
+    plan_count = len(plan)
+    expected_plan = xd_total + xd_ms
+    total_colis_xd_mois = plan["Colis XD/mois"].sum() if not plan.empty else 0
+    total_cost_month = total_colis_xd_mois * platform_cost_per_package
+    total_cost_year = total_cost_month * 12
+    financial_check = np.isclose(total_cost_month, charge_stats.get("total_cost_month", 0))
+
+    rows = [
+        ["Synthèse fournisseurs", "Nombre total de fournisseurs uniques", total_suppliers],
+        ["Synthèse fournisseurs", "Sans données suffisantes", sans_data],
+        ["Synthèse fournisseurs", "Candidats XD", candidats],
+        ["Synthèse fournisseurs", "Hors périmètre XD", hors],
+        ["Synthèse fournisseurs", "Somme catégories", sum_categories],
+        ["Synthèse fournisseurs", "Écart catégories", diff_categories],
+        ["Synthèse fournisseurs", "Flag contrôle fournisseurs", "OK" if diff_categories == 0 else "ÉCART À CORRIGER"],
+
+        ["Décisions candidats XD", "XD Total", xd_total],
+        ["Décisions candidats XD", "XD Markets+Supeco", xd_ms],
+        ["Décisions candidats XD", "DL — Surveiller", dl_surv],
+        ["Décisions candidats XD", "Litige probable", litige],
+        ["Décisions candidats XD", "Inactif probable", inactif],
+        ["Décisions candidats XD", "Total décisions candidats", sum_decisions],
+        ["Décisions candidats XD", "Écart décisions", diff_decisions],
+        ["Décisions candidats XD", "Flag contrôle décisions", "OK" if diff_decisions == 0 else "ÉCART À CORRIGER"],
+
+        ["Plan de lissage", "Fournisseurs dans plan de lissage", plan_count],
+        ["Plan de lissage", "XD Total + XD Markets+Supeco attendus", expected_plan],
+        ["Plan de lissage", "Flag contrôle plan", "OK" if plan_count == expected_plan else "ÉCART À CORRIGER"],
+        ["Plan de lissage", "Ratio pic/creux charge quai", charge_stats.get("ratio_pic_creux", 0)],
+        ["Plan de lissage", "Flag ratio charge quai", charge_stats.get("flag_ratio", "N/A")],
+
+        ["Contrôle financier XD", "Total colis XD/mois", total_colis_xd_mois],
+        ["Contrôle financier XD", "Coût unitaire traitement plateforme", platform_cost_per_package],
+        ["Contrôle financier XD", "Coût total traitement XD/mois", total_cost_month],
+        ["Contrôle financier XD", "Coût total traitement XD/an", total_cost_year],
+        ["Contrôle financier XD", "Vérification coût = colis × coût unitaire", "OK" if financial_check else "ÉCART À CORRIGER"],
+
+        ["Contrôle qualité données", "Lignes initiales", quality["lignes_initiales"]],
+        ["Contrôle qualité données", "Lignes après filtre date", quality["lignes_apres_filtre_date"]],
+        ["Contrôle qualité données", "Date début analyse", quality["date_debut_analyse"]],
+        ["Contrôle qualité données", "Date fin analyse", quality["date_fin_analyse"]],
+        ["Contrôle qualité données", "Nombre de mois analyse", quality["nb_mois_analyse"]],
+        ["Contrôle qualité données", "Méthode nombre de mois", quality["methode_nb_mois"]],
+        ["Contrôle qualité données", "Qté cde manquante ou nulle", quality["qte_cde_manquante_ou_nulle"]],
+        ["Contrôle qualité données", "Px revient manquant", quality["px_revient_manquant"]],
+        ["Contrôle qualité données", "Date commande manquante", quality["date_commande_manquante"]],
+        ["Contrôle qualité données", "Dt Rec manquante", quality["dt_rec_manquante"]],
+        ["Contrôle qualité données", "Sites hors groupe", quality["sites_hors_groupe"]],
+    ]
+
+    return pd.DataFrame(rows, columns=["Section", "Indicateur", "Valeur"])
+
+
+def write_excel(
+    control: pd.DataFrame,
+    suppliers: pd.DataFrame,
+    plan: pd.DataFrame,
+    charge: pd.DataFrame,
+    to_decide: pd.DataFrame,
+    article_db: pd.DataFrame,
+) -> bytes:
+
+    output = io.BytesIO()
+
+    with pd.ExcelWriter(output, engine="xlsxwriter", datetime_format="dd/mm/yyyy") as writer:
+        control.to_excel(writer, sheet_name="1_Controle_exhaustivite", index=False)
+
+        suppliers_export = suppliers.drop(columns=["Fournisseur key"], errors="ignore")
+        suppliers_export.to_excel(writer, sheet_name="2_Etat_DL_complet", index=False)
+
+        plan.to_excel(writer, sheet_name="3_Plan_lissage_XD", index=False, startrow=0)
+        start_charge = len(plan) + 4
+        charge.to_excel(writer, sheet_name="3_Plan_lissage_XD", index=False, startrow=start_charge)
+
+        to_decide.to_excel(writer, sheet_name="4_A_statuer", index=False)
+        article_db.to_excel(writer, sheet_name="5_BDD_articles", index=False)
+
+        workbook = writer.book
+        fmt_header = workbook.add_format({
+            "bold": True,
+            "bg_color": "#1F4E78",
+            "font_color": "white",
+            "border": 1,
+            "align": "center",
+            "valign": "vcenter",
+        })
+        fmt_header_orange = workbook.add_format({
+            "bold": True,
+            "bg_color": "#F4B183",
+            "font_color": "black",
+            "border": 1,
+            "align": "center",
+            "valign": "vcenter",
+        })
+        fmt_money = workbook.add_format({"num_format": '#,##0 "FCFA"'})
+        fmt_num = workbook.add_format({"num_format": "#,##0.0"})
+        fmt_date = workbook.add_format({"num_format": "dd/mm/yyyy"})
+        fmt_red = workbook.add_format({"bg_color": "#FFC7CE", "font_color": "#9C0006"})
+        fmt_orange = workbook.add_format({"bg_color": "#FCE4D6", "font_color": "#9C6500"})
+        fmt_green = workbook.add_format({"bg_color": "#C6EFCE", "font_color": "#006100"})
+
+        all_sheets = {
+            "1_Controle_exhaustivite": control,
+            "2_Etat_DL_complet": suppliers_export,
+            "4_A_statuer": to_decide,
+            "5_BDD_articles": article_db,
+        }
+
+        for sheet_name, df_sheet in all_sheets.items():
+            ws = writer.sheets[sheet_name]
+            ws.freeze_panes(1, 0)
+
+            if not df_sheet.empty:
+                ws.autofilter(0, 0, len(df_sheet), max(len(df_sheet.columns) - 1, 0))
+
+            for col_num, col_name in enumerate(df_sheet.columns):
+                ws.write(0, col_num, col_name, fmt_header)
+                width = min(max(len(str(col_name)) + 2, 12), 42)
+                lower = str(col_name).lower()
+
+                if "coût" in lower or "valeur" in lower or "prix" in lower:
+                    ws.set_column(col_num, col_num, width, fmt_money)
+                elif "date" in lower:
+                    ws.set_column(col_num, col_num, width, fmt_date)
+                elif "ts%" in lower or "%sit" in lower or "%" in lower or "colis" in lower or "bc" in lower:
+                    ws.set_column(col_num, col_num, width, fmt_num)
+                else:
+                    ws.set_column(col_num, col_num, width)
+
+        ws_plan = writer.sheets["3_Plan_lissage_XD"]
+        ws_plan.freeze_panes(1, 0)
+
+        if not plan.empty:
+            ws_plan.autofilter(0, 0, len(plan), max(len(plan.columns) - 1, 0))
+
+        for col_num, col_name in enumerate(plan.columns):
+            header_fmt = fmt_header_orange if "Coût" in str(col_name) else fmt_header
+            ws_plan.write(0, col_num, col_name, header_fmt)
+            width = min(max(len(str(col_name)) + 2, 12), 42)
+            lower = str(col_name).lower()
+
+            if "coût" in lower:
+                ws_plan.set_column(col_num, col_num, width, fmt_money)
+            elif "date" in lower:
+                ws_plan.set_column(col_num, col_num, width, fmt_date)
+            elif "colis" in lower or "bc" in lower or "%" in lower or "réduction" in lower:
+                ws_plan.set_column(col_num, col_num, width, fmt_num)
+            else:
+                ws_plan.set_column(col_num, col_num, width)
+
+        for col_num, col_name in enumerate(charge.columns):
+            ws_plan.write(start_charge, col_num, col_name, fmt_header)
+            width = min(max(len(str(col_name)) + 2, 12), 42)
+            if "coût" in str(col_name).lower():
+                ws_plan.set_column(col_num, col_num, width, fmt_money)
+            else:
+                ws_plan.set_column(col_num, col_num, width)
+
+        if not plan.empty and "Alerte colis" in plan.columns:
+            alert_col = list(plan.columns).index("Alerte colis")
+            ws_plan.conditional_format(1, alert_col, len(plan), alert_col, {
+                "type": "text", "criteria": "containing", "value": "🔴", "format": fmt_red
+            })
+            ws_plan.conditional_format(1, alert_col, len(plan), alert_col, {
+                "type": "text", "criteria": "containing", "value": "🟠", "format": fmt_orange
+            })
+            ws_plan.conditional_format(1, alert_col, len(plan), alert_col, {
+                "type": "text", "criteria": "containing", "value": "🟢", "format": fmt_green
+            })
+
+    output.seek(0)
+    return output.read()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PIPELINE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@st.cache_data(show_spinner=False)
+def run_analysis_cached(
+    file_bytes: bytes,
+    filename: str,
+    start_date,
+    xd_threshold: float,
+    min_orders: int,
+    platform_cost_per_package: float,
+) -> dict:
+
+    raw_df = read_input_file(file_bytes, filename)
+    mapping = detect_columns(raw_df)
+    df, quality = prepare_data(raw_df, pd.Timestamp(start_date), mapping)
+
+    suppliers = build_supplier_state(
+        df=df,
+        quality=quality,
+        xd_threshold=xd_threshold,
+        min_orders=min_orders,
+        platform_cost_per_package=platform_cost_per_package,
+    )
+
+    plan, charge, charge_stats = build_smoothing_plan(
+        suppliers=suppliers,
+        platform_cost_per_package=platform_cost_per_package,
+    )
+
+    to_decide = build_to_decide(suppliers)
+
+    article_db = build_article_db(
+        df=df,
+        suppliers=suppliers,
+        platform_cost_per_package=platform_cost_per_package,
+    )
+
+    control = build_control_sheet(
+        suppliers=suppliers,
+        plan=plan,
+        charge_stats=charge_stats,
+        quality=quality,
+        platform_cost_per_package=platform_cost_per_package,
+    )
+
+    excel_bytes = write_excel(
+        control=control,
+        suppliers=suppliers,
+        plan=plan,
+        charge=charge,
+        to_decide=to_decide,
+        article_db=article_db,
+    )
+
+    return {
+        "raw_df": raw_df,
+        "mapping": mapping,
+        "df": df,
+        "quality": quality,
+        "suppliers": suppliers,
+        "plan": plan,
+        "charge": charge,
+        "charge_stats": charge_stats,
+        "to_decide": to_decide,
+        "article_db": article_db,
+        "control": control,
+        "excel_bytes": excel_bytes,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SIDEBAR
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def safe_page_link(page: str, label: str):
+    try:
+        st.page_link(page, label=label)
+    except Exception:
+        pass
+
+
 with st.sidebar:
     st.markdown("""
 <div style='margin-bottom:18px'>
@@ -162,1067 +1422,358 @@ with st.sidebar:
     st.markdown("---")
 
     st.markdown("<div style='font-size:11px;font-weight:600;color:#8E8E93;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px'>Navigation</div>", unsafe_allow_html=True)
-    st.page_link("app.py",                                       label="🏠  Accueil")
-    st.page_link("pages/01_📊_Analyse_Scoring_ABC.py",           label="📊  Scoring ABC")
-    st.page_link("pages/02_📈_Ventes_PBI.py",                    label="📈  Ventes PBI")
-    st.page_link("pages/03_📦_Detention_Top_CA.py",              label="📦  Détention Top CA")
-    st.page_link("pages/04_💸_Performance_Promo.py",             label="💸  Performance Promo")
-    st.page_link("pages/05_🏪_Suivi_Implantation.py",            label="🏪  Suivi Implantation")
-    st.page_link("pages/06_💸_Marges_Negatives.py",              label="💸  Marges Négatives")
+    safe_page_link("app.py", "🏠  Accueil")
+    safe_page_link("pages/01_📊_Analyse_Scoring_ABC.py", "📊  Scoring ABC")
+    safe_page_link("pages/02_📈_Ventes_PBI.py", "📈  Ventes PBI")
+    safe_page_link("pages/03_📦_Detention_Top_CA.py", "📦  Détention Top CA")
+    safe_page_link("pages/04_💸_Performance_Promo.py", "💸  Performance Promo")
+    safe_page_link("pages/05_🏪_Suivi_Implantation.py", "🏪  Suivi Implantation")
+    safe_page_link("pages/06_💸_Marges_Negatives.py", "💸  Marges Négatives")
+    st.markdown("<div style='font-size:13px;font-weight:600;color:#007AFF;margin-top:6px'>🏪  Bascule XD</div>", unsafe_allow_html=True)
+
+    st.markdown("---")
+    st.markdown("<div style='font-size:11px;font-weight:600;color:#8E8E93;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px'>Import fichier</div>", unsafe_allow_html=True)
+
+    uploaded_file = st.file_uploader(
+        "Cahier d’entrée commandes",
+        type=["xlsx", "xlsb", "xls", "csv"],
+        key="xd_file",
+        help="Le fichier doit contenir un seul onglet. Le premier onglet sera lu automatiquement.",
+    )
+
+    st.caption("Format attendu : fichier unique avec un seul onglet de données.")
     st.markdown("---")
 
-    st.markdown("<div style='font-size:11px;font-weight:600;color:#8E8E93;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px'>Import fichier</div>", unsafe_allow_html=True)
-    f_pbi = st.file_uploader("Export PBI ventes (Excel)", type=["xlsx", "xls", "csv"], key="pbi_marge")
+    st.markdown("<div style='font-size:11px;font-weight:600;color:#8E8E93;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px'>Paramètres</div>", unsafe_allow_html=True)
 
-# ─── HEADER PAGE ──────────────────────────────────────────────────────────────
-st.markdown("<div class='page-title'>💸 Diagnostic Rentabilité Réseau</div>", unsafe_allow_html=True)
-st.markdown("<div class='page-caption'>Analyse des marges · Flop 100 destructeurs · Décomposition par format (Hyper / Market / Supeco) · Fuites de valeur</div>", unsafe_allow_html=True)
+    start_date = st.date_input("Date début analyse", value=DEFAULT_START_DATE.date())
+    xd_threshold = st.number_input(
+        "Seuil XD valeur moyenne",
+        min_value=0,
+        value=DEFAULT_XD_THRESHOLD,
+        step=10_000,
+        help="Règle stricte : candidat si valeur moyenne fournisseur/magasin < seuil.",
+    )
+    min_orders = st.number_input("Minimum BC données suffisantes", min_value=1, value=DEFAULT_MIN_ORDERS, step=1)
+    platform_cost = st.number_input("Coût plateforme / colis", min_value=0, value=DEFAULT_PLATFORM_COST_PER_PACKAGE, step=10)
 
-# ─── ÉCRAN D'ACCUEIL ──────────────────────────────────────────────────────────
-if not f_pbi:
+    launch = False
+    if uploaded_file is not None:
+        st.markdown("---")
+        launch = st.button("🚀 Lancer l’analyse", type="primary", use_container_width=True)
+
+    st.markdown("---")
+    st.caption(f"Python : {sys.version.split()[0]}")
+    if package_installed("pyxlsb"):
+        st.caption("✅ pyxlsb installé : lecture .xlsb OK")
+    else:
+        st.caption("⚠️ pyxlsb absent : convertir .xlsb en .xlsx ou ajouter pyxlsb")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# HEADER PAGE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+st.markdown("<div class='page-title'>🏪 Commando XD — Bascule DL vers Cross-Docking</div>", unsafe_allow_html=True)
+st.markdown("<div class='page-caption'>Analyse fournisseurs · seuil petites commandes · taux de service · plan de lissage plateforme · coût XD à 90 FCFA / colis</div>", unsafe_allow_html=True)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# LANDING PAGE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+if uploaded_file is None:
     st.markdown("---")
     st.markdown("""
 <div class='alert-card alert-blue'>
   <strong>ℹ️ À quoi sert ce module ?</strong><br>
-  Ce module réalise un <strong>diagnostic complet de la rentabilité réseau</strong> à partir d'un export PBI ventes.
-  Il identifie précisément <strong>où se perdent les marges</strong> : par rayon, par format de magasin, par article.
-  <br><br>
-  <strong>1. Vue réseau globale</strong> — KPIs, synthèse par format et par rayon, palmarès magasins<br>
-  <strong>2. Matrice rayon × magasin</strong> — Taux de marge croisé pour repérer les combinaisons critiques<br>
-  <strong>3. Flop 100</strong> — Articles destructeurs de marge avec impact par site (Hyper / Market / Supeco)<br>
-  <strong>4. Analyse des fuites</strong> — Effet promo, casse, familles sous seuil de rentabilité
-</div>""", unsafe_allow_html=True)
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown("<div class='section-label'>Les 5 indicateurs de fuite de valeur analysés</div>", unsafe_allow_html=True)
+  Ce module analyse le flux <strong>Direct Livraison fournisseur → magasin</strong> pour identifier les fournisseurs à basculer vers une
+  <strong>plateforme de Cross-Docking XD</strong>. L’objectif est de réduire les petites commandes non rentables,
+  massifier les flux, améliorer le taux de service et lisser les réceptions plateforme.
+</div>
+""", unsafe_allow_html=True)
 
     c1, c2 = st.columns(2)
-    indics = [
-        ("📉", "Marge négative", "#FF3B30",
-         "Articles dont la marge brute est inférieure à 0",
-         "Marge = CA − (PA × Qté)",
-         "Signal immédiat : le magasin perd de l'argent sur chaque unité vendue."),
-        ("🔀", "Effet promo sur la marge", "#FF9500",
-         "Écart entre marge hors promo et marge sous promotion",
-         "Δ = Tx marge HP − Tx marge Promo",
-         "Mesure l'érosion de marge causée par la mécanique promotionnelle."),
-        ("🏪", "Écart de rentabilité par format", "#AF52DE",
-         "Différence de taux de marge entre Hypers, Markets et Supecos",
-         "Tx marge format vs moyenne réseau",
-         "Identifie le format qui dégrade la rentabilité globale."),
-        ("🗑️", "Taux de casse", "#8E8E93",
-         "Valeur perdue en démarque sur le CA total",
-         "Casse (valeur) ÷ CA × 100",
-         "Un taux > 1% sur un site est un signal d'alerte opérationnel."),
-        ("📦", "Familles sous seuil", "#007AFF",
-         "Familles de produits à marge structurellement basse (< 8%)",
-         "Tx marge famille sur la période",
-         "Ces familles absorbent du CA sans générer de marge suffisante pour couvrir les charges."),
+
+    with c1:
+        st.markdown("<div class='section-label'>Logique métier appliquée</div>", unsafe_allow_html=True)
+        st.markdown(f"""
+<div class='card'>
+  <div style='font-size:14px;font-weight:700;color:#1C1C1E;margin-bottom:8px'>🎯 Seuil XD</div>
+  <div style='font-size:12px;color:#3A3A3C;line-height:1.5'>
+    Un couple <strong>Fournisseur / Magasin</strong> devient candidat si sa valeur moyenne de livraison est
+    <strong>strictement inférieure à {DEFAULT_XD_THRESHOLD:,.0f} FCFA</strong>.<br>
+    La règle est donc : <code>valeur moyenne &lt; seuil</code>. Une valeur exactement égale au seuil n’est pas candidate.
+  </div>
+</div>
+<div class='card'>
+  <div style='font-size:14px;font-weight:700;color:#1C1C1E;margin-bottom:8px'>📦 Coût plateforme</div>
+  <div style='font-size:12px;color:#3A3A3C;line-height:1.5'>
+    Le budget XD est calculé uniquement sur les colis réellement basculés :<br>
+    <code>Coût XD/mois = Colis XD/mois × {DEFAULT_PLATFORM_COST_PER_PACKAGE} FCFA</code>
+  </div>
+</div>
+<div class='card'>
+  <div style='font-size:14px;font-weight:700;color:#1C1C1E;margin-bottom:8px'>🧾 Livrables Excel</div>
+  <div style='font-size:12px;color:#3A3A3C;line-height:1.5'>
+    1. Contrôle exhaustivité<br>
+    2. État DL complet<br>
+    3. Plan de lissage XD<br>
+    4. À statuer<br>
+    5. BDD articles
+  </div>
+</div>
+""".replace(",", " "), unsafe_allow_html=True)
+
+    with c2:
+        st.markdown("<div class='section-label'>Groupes magasins</div>", unsafe_allow_html=True)
+        st.markdown("""
+<div class='format-card format-hyper'>
+  <span class='badge badge-hyper'>Hypers</span>
+  <div class='small-muted' style='margin-top:6px'>Sites : 10202 · 10203 · 10301</div>
+</div>
+<div class='format-card format-market'>
+  <span class='badge badge-market'>Markets</span>
+  <div class='small-muted' style='margin-top:6px'>Sites : 10604 · 10206 · 10208 · 10209 · 10705</div>
+</div>
+<div class='format-card format-supeco'>
+  <span class='badge badge-supeco'>Supeco</span>
+  <div class='small-muted' style='margin-top:6px'>Sites : 10601 · 10602 · 10603 · 10605</div>
+</div>
+""", unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("<div class='section-label'>Fonctionnement</div>", unsafe_allow_html=True)
+        st.markdown("""
+<div class='alert-card alert-green'>
+  <strong>1.</strong> Charge le cahier d’entrée dans la sidebar.<br>
+  <strong>2.</strong> Vérifie les paramètres : seuil XD, coût colis, date de début.<br>
+  <strong>3.</strong> Clique sur <strong>Lancer l’analyse</strong>.<br>
+  <strong>4.</strong> Télécharge le fichier Excel final.
+</div>
+""", unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("<div class='section-label'>Colonnes attendues dans le fichier</div>", unsafe_allow_html=True)
+
+    cols_expected = [
+        ("Fou", "Code fournisseur"),
+        ("Nom fourn,", "Nom fournisseur"),
+        ("Site", "Code magasin"),
+        ("Code", "Code article"),
+        ("N° Cde", "Numéro de commande"),
+        ("Date de commande", "Date de création de commande"),
+        ("Dt Rec", "Date de réception"),
+        ("Qté cde", "Quantité commandée"),
+        ("Qté rec", "Quantité reçue — alias accepté : Qté reçue / Qte rec"),
+        ("Px revient", "Prix de revient"),
+        ("Colis", "Nombre de colis / PCB réel"),
+        ("Sit", "Statut commande, dont 95 pour totalement non livrée"),
     ]
-    for i, (ico, titre, color, desc, formule, interp) in enumerate(indics):
-        with (c1 if i % 2 == 0 else c2):
+
+    col_left, col_right = st.columns(2)
+    for i, (name, desc) in enumerate(cols_expected):
+        target = col_left if i % 2 == 0 else col_right
+        with target:
             st.markdown(f"""
-<div style='background:#FFFFFF;border:0.5px solid #E5E5EA;border-radius:12px;
-            padding:16px;border-left:3px solid {color};margin-bottom:10px'>
-  <div style='display:flex;align-items:center;gap:8px;margin-bottom:8px'>
-    <span style='font-size:18px'>{ico}</span>
-    <span style='font-size:14px;font-weight:600;color:#1C1C1E'>{titre}</span>
+<div class='col-required'>
+  <div style='font-size:16px'>▪️</div>
+  <div>
+    <div class='col-name'>{name}</div>
+    <div class='col-desc'>{desc}</div>
   </div>
-  <div style='font-size:12px;color:#3A3A3C;margin-bottom:4px'>{desc}</div>
-  <div style='font-size:11px;color:{color};font-family:monospace;background:#F9F9FB;
-              padding:4px 8px;border-radius:6px;margin-bottom:6px'>{formule}</div>
-  <div style='font-size:11px;color:#8E8E93;font-style:italic'>{interp}</div>
-</div>""", unsafe_allow_html=True)
+</div>
+""", unsafe_allow_html=True)
 
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown("<div class='section-label'>Fichier attendu</div>", unsafe_allow_html=True)
+    st.info("⬅️ Charge le fichier dans la sidebar pour lancer l’analyse.")
+    st.stop()
+
+
+if not launch:
     st.markdown("""
-<div class='col-required'><div style='font-size:16px'>📊</div>
-<div><div class='col-name'>Export PBI ventes réseau</div>
-<div class='col-desc'>Excel · Axes : Rayon / Famille / Article / Site nom long · Colonnes : CA, Marge, CA Promo, Marge Promo, CA Hors Promo, Marge Hors Promo, Qté Vente, Casse (Valeur)</div>
-<div class='col-desc' style='margin-top:4px'>Le fichier doit inclure tous les formats de magasins (Hyper, Market, Supeco) pour une analyse réseau complète.</div>
-</div></div>""", unsafe_allow_html=True)
-
-    st.info("⬆️ Charge le fichier export PBI dans la sidebar pour lancer le diagnostic.")
-    st.stop()
-
-# ─── CHARGEMENT & CALCULS ─────────────────────────────────────────────────────
-with st.spinner("Lecture et analyse des données…"):
-    df, periode, nb_jours = load_data(f_pbi.read(), f_pbi.name)
-
-if df.empty:
-    st.error("Fichier vide ou colonnes non reconnues. Vérifier le format de l'export PBI.")
-    st.stop()
-
-# ── Filtres sidebar ────────────────────────────────────────────────────────────
-with st.sidebar:
-    st.markdown("---")
-    st.markdown("<div style='font-size:11px;font-weight:600;color:#8E8E93;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px'>Filtres</div>", unsafe_allow_html=True)
-
-    formats_dispo = sorted(df["format"].dropna().unique())
-    sel_format = st.multiselect("Format magasin", formats_dispo, default=formats_dispo)
-
-    rayons_dispo = sorted(df["lib_rayon"].dropna().unique())
-    sel_rayon = st.multiselect("Rayon", rayons_dispo, default=rayons_dispo)
-
-    sites_dispo = sorted(df[df["format"].isin(sel_format)]["lib_site"].dropna().unique())
-    sel_site = st.multiselect("Magasin", sites_dispo, default=sites_dispo)
-
-    st.markdown("---")
-    st.caption(f"**Période :** {periode}")
-    st.caption(f"**Durée :** {nb_jours} jour(s)")
-
-df_f = df[
-    df["format"].isin(sel_format) &
-    df["lib_rayon"].isin(sel_rayon) &
-    df["lib_site"].isin(sel_site)
-].copy()
-
-if df_f.empty:
-    st.warning("Aucune donnée pour la sélection en cours.")
-    st.stop()
-
-# ── Agrégations principales ────────────────────────────────────────────────────
-sites_actifs = df_f[df_f["CA"] > 0]["lib_site"].unique()
-nb_sites_actifs = len(sites_actifs)
-
-# Par format
-agg_fmt = df_f.groupby("format").agg(
-    CA=("CA","sum"), Marge=("Marge","sum"),
-    CA_Promo=("CA HT Promo","sum"), CA_HP=("CA Hors Promo","sum"),
-    Marge_HP=("Marge Hors Promo","sum"), Marge_Promo=("Marge Promo","sum"),
-    Casse=("Casse (Valeur)","sum")
-).reset_index()
-agg_fmt["TxMarge"]       = (agg_fmt["Marge"] / agg_fmt["CA"] * 100).where(agg_fmt["CA"] > 0)
-agg_fmt["PdsPromo"]      = (agg_fmt["CA_Promo"] / agg_fmt["CA"] * 100).where(agg_fmt["CA"] > 0)
-agg_fmt["TxMarge_HP"]    = (agg_fmt["Marge_HP"] / agg_fmt["CA_HP"] * 100).where(agg_fmt["CA_HP"] > 0)
-agg_fmt["TxMarge_Promo"] = (agg_fmt["Marge_Promo"] / agg_fmt["CA_Promo"] * 100).where(agg_fmt["CA_Promo"] > 0)
-agg_fmt["TxCasse"]       = (agg_fmt["Casse"].abs() / agg_fmt["CA"] * 100).where(agg_fmt["CA"] > 0)
-agg_fmt = agg_fmt.sort_values("TxMarge", ascending=False)
-
-# Par rayon
-agg_rax = df_f.groupby("lib_rayon").agg(
-    CA=("CA","sum"), Marge=("Marge","sum"),
-    CA_Promo=("CA HT Promo","sum"), CA_HP=("CA Hors Promo","sum"),
-    Marge_HP=("Marge Hors Promo","sum"), Marge_Promo=("Marge Promo","sum"),
-    Casse=("Casse (Valeur)","sum")
-).reset_index()
-agg_rax["TxMarge"]       = (agg_rax["Marge"] / agg_rax["CA"] * 100).where(agg_rax["CA"] > 0)
-agg_rax["PdsPromo"]      = (agg_rax["CA_Promo"] / agg_rax["CA"] * 100).where(agg_rax["CA"] > 0)
-agg_rax["TxMarge_HP"]    = (agg_rax["Marge_HP"] / agg_rax["CA_HP"] * 100).where(agg_rax["CA_HP"] > 0)
-agg_rax["TxMarge_Promo"] = (agg_rax["Marge_Promo"] / agg_rax["CA_Promo"] * 100).where(agg_rax["CA_Promo"] > 0)
-agg_rax["TxCasse"]       = (agg_rax["Casse"].abs() / agg_rax["CA"] * 100).where(agg_rax["CA"] > 0)
-agg_rax["PoidsCA"]       = (agg_rax["CA"] / agg_rax["CA"].sum() * 100)
-agg_rax = agg_rax.sort_values("TxMarge")
-
-# Par magasin
-agg_site = df_f.groupby(["lib_site","format"]).agg(
-    CA=("CA","sum"), Marge=("Marge","sum"),
-    CA_Promo=("CA HT Promo","sum"), Casse=("Casse (Valeur)","sum")
-).reset_index()
-agg_site["TxMarge"]  = (agg_site["Marge"] / agg_site["CA"] * 100).where(agg_site["CA"] > 0)
-agg_site["PdsPromo"] = (agg_site["CA_Promo"] / agg_site["CA"] * 100).where(agg_site["CA"] > 0)
-agg_site["TxCasse"]  = (agg_site["Casse"].abs() / agg_site["CA"] * 100).where(agg_site["CA"] > 0)
-agg_site = agg_site[agg_site["CA"] > 0].sort_values("TxMarge", ascending=False).reset_index(drop=True)
-moy_marge_site = agg_site["TxMarge"].mean()
-
-# Matrice rayon × site
-mat = df_f.groupby(["lib_site", "lib_rayon"]).agg(
-    CA=("CA","sum"), Marge=("Marge","sum")
-).reset_index()
-mat["TxMarge"] = (mat["Marge"] / mat["CA"] * 100).where(mat["CA"] > 0)
-mat_pivot = mat.pivot_table(index="lib_rayon", columns="lib_site", values="TxMarge").round(1)
-
-# ── Article × site (pour blocs format) — avec Qté ────────────────────────────
-art_site = df_f[df_f["CA"] > 0].groupby(["Article", "lib_site", "format"]).agg(
-    CA=("CA","sum"), Marge=("Marge","sum"), Qte=("Qté Vente","sum")
-).reset_index()
-art_site["TxMarge_site"] = (art_site["Marge"] / art_site["CA"] * 100).where(art_site["CA"] > 0)
-art_site["lib_court"]    = art_site["lib_site"]
-
-# Agrégation article globale
-agg_art = df_f.groupby(["Article", "lib_art", "lib_rayon", "lib_fam"]).agg(
-    CA=("CA","sum"), Marge=("Marge","sum"),
-    CA_Promo=("CA HT Promo","sum"), Qte=("Qté Vente","sum")
-).reset_index()
-agg_art["TxMarge"]  = (agg_art["Marge"] / agg_art["CA"] * 100).where(agg_art["CA"] > 0)
-agg_art["PdsPromo"] = (agg_art["CA_Promo"] / agg_art["CA"] * 100).where(agg_art["CA"] > 0)
-
-# Flop 100 : pire taux de marge, seuil CA > 5 000 FCFA
-flop100 = agg_art[agg_art["CA"] > 5000].nsmallest(100, "TxMarge").copy()
-flop100 = flop100.reset_index(drop=True)
-flop100["Rang"] = range(1, len(flop100) + 1)
-
-def build_bloc(article_full, fmt_name):
-    rows = art_site[
-        (art_site["Article"] == article_full) &
-        (art_site["format"]  == fmt_name)
-    ].sort_values("TxMarge_site")
-    if rows.empty:
-        return "—"
-    parts = []
-    for _, r in rows.iterrows():
-        tm  = r["TxMarge_site"]
-        qty = r["Qte"]
-        if pd.notna(tm):
-            qty_str = f"{int(qty):,}" if pd.notna(qty) else "?"
-            parts.append(f"{r['lib_court']}: {tm:.1f}% | Qty: {qty_str}")
-    return "  |  ".join(parts) if parts else "—"
-
-flop100["Bloc_Hyper"]  = flop100["Article"].apply(lambda a: build_bloc(a, "Hyper"))
-flop100["Bloc_Market"] = flop100["Article"].apply(lambda a: build_bloc(a, "Market"))
-flop100["Bloc_Supeco"] = flop100["Article"].apply(lambda a: build_bloc(a, "Supeco"))
-
-# KPIs globaux
-ca_total     = df_f["CA"].sum()
-marge_total  = df_f["Marge"].sum()
-ca_promo     = df_f["CA HT Promo"].sum()
-ca_hp        = df_f["CA Hors Promo"].sum()
-m_promo      = df_f["Marge Promo"].sum()
-m_hp         = df_f["Marge Hors Promo"].sum()
-casse_total  = df_f["Casse (Valeur)"].sum()
-tx_marge     = marge_total / ca_total * 100  if ca_total > 0 else 0
-tx_m_promo   = m_promo / ca_promo * 100      if ca_promo > 0 else 0
-tx_m_hp      = m_hp / ca_hp * 100            if ca_hp > 0    else 0
-poids_promo  = ca_promo / ca_total * 100     if ca_total > 0 else 0
-delta_hp_p   = tx_m_hp - tx_m_promo
-tx_casse     = abs(casse_total) / ca_total * 100 if ca_total > 0 else 0
-nb_art_neg   = int((agg_art["TxMarge"] < 0).sum())
-nb_flop_neg  = int((flop100["TxMarge"] < 0).sum())
-
-# ─── KPIs GLOBAUX ─────────────────────────────────────────────────────────────
-st.markdown(f"<div class='section-label'>{nb_sites_actifs} magasin(s) actifs · {len(sel_rayon)} rayon(s) · {periode}</div>", unsafe_allow_html=True)
-
-k1, k2, k3, k4, k5, k6 = st.columns(6)
-k1.metric("CA Réseau",         fmt(ca_total),              "FCFA")
-k2.metric("Marge Brute",       fmt(marge_total),            "FCFA")
-k3.metric("Taux de Marge",     fmt_pct(tx_marge),          f"HP {fmt_pct(tx_m_hp)}")
-k4.metric("Effet Promo",       f"−{delta_hp_p:.1f} pts",   f"promo {fmt_pct(tx_m_promo)} vs HP {fmt_pct(tx_m_hp)}")
-k5.metric("Poids Promo",       fmt_pct(poids_promo),        fmt(ca_promo) + " FCFA")
-k6.metric("Casse Réseau",      fmt_pct(tx_casse, dec=2),   fmt(abs(casse_total)) + " FCFA")
-
-# ─── ALERTES ──────────────────────────────────────────────────────────────────
-st.markdown("---")
-st.markdown("<div class='section-label'>Signaux critiques réseau</div>", unsafe_allow_html=True)
-
-supeco_row = agg_fmt[agg_fmt["format"] == "Supeco"]
-hyper_row  = agg_fmt[agg_fmt["format"] == "Hyper"]
-if not supeco_row.empty and not hyper_row.empty:
-    tm_sup = supeco_row["TxMarge"].values[0]
-    tm_hyp = hyper_row["TxMarge"].values[0]
-    ecart  = tm_hyp - tm_sup
-    ca_sup = supeco_row["CA"].values[0]
-    if tm_sup < 10:
-        st.markdown(f"""
-<div class='alert-card alert-purple'>
-  <strong>🏪 Format Supeco : taux de marge {tm_sup:.1f}%</strong>
-  — écart de {ecart:.1f} pts vs Hypers ({tm_hyp:.1f}%)<br>
-  CA concerné : <strong>{fmt(ca_sup)} FCFA</strong>
-  · Poids promo Supeco : {supeco_row['PdsPromo'].values[0]:.1f}%<br>
-  <span style='font-size:12px;opacity:.85'>→ Mix produit défavorable et sur-pression promotionnelle dans les Supecos à retravailler.</span>
-</div>""", unsafe_allow_html=True)
-
-if nb_art_neg > 0:
-    st.markdown(f"""
-<div class='alert-card alert-red'>
-  <strong>🔴 {nb_art_neg} article(s) à marge négative sur le réseau</strong>
-  · {nb_flop_neg} dans le Flop 100<br>
-  <span style='font-size:12px;opacity:.85'>→ Chaque vente de ces articles génère une perte nette. Vérification PA / PV / mécanique promo urgente.</span>
-</div>""", unsafe_allow_html=True)
-
-if delta_hp_p > 5:
-    st.markdown(f"""
-<div class='alert-card alert-amber'>
-  <strong>⚠️ La promotion dégrade la marge de {delta_hp_p:.1f} pts</strong>
-  — Hors promo : {fmt_pct(tx_m_hp)} · Sous promo : {fmt_pct(tx_m_promo)}<br>
-  <span style='font-size:12px;opacity:.85'>→ Revoir les conditions d'achat promo ou réviser les prix de vente promotionnels.</span>
-</div>""", unsafe_allow_html=True)
-
-sites_casse = agg_site[agg_site["TxCasse"] > 1].sort_values("TxCasse", ascending=False)
-if not sites_casse.empty:
-    noms = ", ".join([f"{r['lib_site']} ({r['TxCasse']:.1f}%)" for _, r in sites_casse.iterrows()])
-    st.markdown(f"""
-<div class='alert-card alert-amber'>
-  <strong>🗑️ Taux de casse anormal sur {len(sites_casse)} site(s)</strong> : {noms}<br>
-  <span style='font-size:12px;opacity:.85'>→ Vérifier les procédures de démarque. Un taux > 1% du CA indique un problème opérationnel.</span>
-</div>""", unsafe_allow_html=True)
-
-agg_fam = df_f.groupby("lib_fam").agg(CA=("CA","sum"), Marge=("Marge","sum")).reset_index()
-agg_fam["TxMarge"] = (agg_fam["Marge"] / agg_fam["CA"] * 100).where(agg_fam["CA"] > 0)
-fam_sous_seuil = agg_fam[(agg_fam["TxMarge"] < 8) & (agg_fam["CA"] > 500_000)]
-if not fam_sous_seuil.empty:
-    noms_fam = ", ".join([f"{r['lib_fam']} ({r['TxMarge']:.1f}%)" for _, r in fam_sous_seuil.iterrows()])
-    st.markdown(f"""
 <div class='alert-card alert-blue'>
-  <strong>📦 {len(fam_sous_seuil)} famille(s) sous 8% de marge</strong> (CA > 500K) : {noms_fam}<br>
-  <span style='font-size:12px;opacity:.85'>→ Ces familles absorbent du volume sans générer de marge suffisante pour couvrir les charges.</span>
-</div>""", unsafe_allow_html=True)
+  Fichier chargé. Clique maintenant sur <strong>🚀 Lancer l’analyse</strong> dans la sidebar pour démarrer le traitement.
+</div>
+""", unsafe_allow_html=True)
+    st.stop()
 
-# ─── TABS PRINCIPAUX ──────────────────────────────────────────────────────────
-st.markdown("---")
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "📊 Synthèse Réseau",
-    "🔢 Matrice Rayon × Magasin",
-    f"💣 Flop {min(100, len(flop100))}",
-    "🗑️ Analyse Casse",
-    "📥 Export Excel",
-])
 
-# ═══ TAB 1 — SYNTHÈSE RÉSEAU ══════════════════════════════════════════════════
-with tab1:
+# ═══════════════════════════════════════════════════════════════════════════════
+# EXÉCUTION
+# ═══════════════════════════════════════════════════════════════════════════════
 
-    st.markdown("<div class='section-label'>Performance par format de magasin</div>", unsafe_allow_html=True)
+try:
+    file_bytes = uploaded_file.getvalue()
+    filename = uploaded_file.name
 
-    fmt_cols = st.columns(len(agg_fmt))
-    fmt_colors = {"Hyper": ("#154360","#EFF6FF","#B3D9FF"),
-                  "Market":("#145A32","#F0FFF4","#A8E6BF"),
-                  "Supeco":("#6E2F8A","#F5F0FF","#D9B3FF")}
-    for i, (_, row) in enumerate(agg_fmt.iterrows()):
-        fc, bg, border = fmt_colors.get(row["format"], ("#3A3A3C","#F9F9FB","#CCCCCC"))
-        with fmt_cols[i]:
-            st.markdown(f"""
-<div style='background:{bg};border:1px solid {border};border-radius:12px;padding:16px;margin-bottom:8px'>
-  <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:10px'>
-    <span style='font-size:15px;font-weight:700;color:{fc}'>{row["format"]}</span>
-    <span style='font-size:11px;color:#8E8E93'>{fmt(row["CA"])} FCFA</span>
-  </div>
-  <div style='font-size:26px;font-weight:700;color:{fc};letter-spacing:-0.02em'>{fmt_pct(row["TxMarge"])}</div>
-  <div style='font-size:11px;color:#8E8E93;margin-top:2px'>Taux de marge</div>
-  <hr style='margin:10px 0;border-color:{border}'>
-  <div style='display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px'>
-    <div><span style='color:#8E8E93'>Promo</span><br><strong>{fmt_pct(row.get("TxMarge_Promo"))}</strong></div>
-    <div><span style='color:#8E8E93'>Hors promo</span><br><strong>{fmt_pct(row.get("TxMarge_HP"))}</strong></div>
-    <div><span style='color:#8E8E93'>Pds promo</span><br><strong>{fmt_pct(row["PdsPromo"])}</strong></div>
-    <div><span style='color:#8E8E93'>Casse</span><br><strong>{fmt_pct(row["TxCasse"], dec=2)}</strong></div>
-  </div>
-</div>""", unsafe_allow_html=True)
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    st.markdown("<div class='section-label'>Récapitulatif par rayon — Fond de rayon vs Promotion</div>", unsafe_allow_html=True)
-    disp_rax = agg_rax.copy()
-    disp_rax["Rayon"]           = disp_rax["lib_rayon"]
-    disp_rax["CA (FCFA)"]       = disp_rax["CA"].apply(fmt)
-    disp_rax["Poids CA"]        = disp_rax["PoidsCA"].apply(lambda x: fmt_pct(x))
-    disp_rax["Marge (FCFA)"]    = disp_rax["Marge"].apply(fmt)
-    disp_rax["Tx Marge"]        = disp_rax["TxMarge"].apply(fmt_pct)
-    disp_rax["Tx Marge HP"]     = disp_rax["TxMarge_HP"].apply(fmt_pct)
-    disp_rax["Tx Marge Promo"]  = disp_rax["TxMarge_Promo"].apply(fmt_pct)
-    disp_rax["Pds Promo"]       = disp_rax["PdsPromo"].apply(fmt_pct)
-    disp_rax["Tx Casse"]        = disp_rax["TxCasse"].apply(lambda x: fmt_pct(x, dec=2))
-    disp_rax["Écart HP−Promo"]  = (disp_rax["TxMarge_HP"] - disp_rax["TxMarge_Promo"]).apply(
-        lambda x: fmt_delta(x) if pd.notna(x) else "—")
-
-    st.dataframe(
-        disp_rax[["Rayon","CA (FCFA)","Poids CA","Marge (FCFA)","Tx Marge",
-                  "Tx Marge HP","Tx Marge Promo","Écart HP−Promo","Pds Promo","Tx Casse"]],
-        use_container_width=True, hide_index=True,
-        column_config={"Rayon": st.column_config.TextColumn("Rayon", width="medium")}
-    )
-    st.caption("Écart HP−Promo : différence entre le taux de marge hors promo et sous promotion — mesure l'érosion causée par la mécanique promotionnelle.")
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    st.markdown("<div class='section-label'>Palmarès magasins — Classé par taux de marge décroissant</div>", unsafe_allow_html=True)
-
-    disp_site = agg_site.copy()
-    disp_site["Rang"]       = range(1, len(disp_site) + 1)
-    disp_site["Magasin"]    = disp_site["lib_site"]
-    disp_site["Format"]     = disp_site["format"]
-    disp_site["CA (FCFA)"]  = disp_site["CA"].apply(fmt)
-    disp_site["Marge"]      = disp_site["Marge"].apply(fmt)
-    disp_site["Tx Marge"]   = disp_site["TxMarge"].apply(fmt_pct)
-    disp_site["Pds Promo"]  = disp_site["PdsPromo"].apply(fmt_pct)
-    disp_site["Tx Casse"]   = disp_site["TxCasse"].apply(lambda x: fmt_pct(x, dec=2))
-    disp_site["Δ vs Moy."]  = (disp_site["TxMarge"] - moy_marge_site).apply(fmt_delta)
-
-    st.dataframe(
-        disp_site[["Rang","Magasin","Format","CA (FCFA)","Marge","Tx Marge","Pds Promo","Tx Casse","Δ vs Moy."]],
-        use_container_width=True, hide_index=True,
-        column_config={
-            "Magasin": st.column_config.TextColumn("Magasin", width="medium"),
-            "Format":  st.column_config.TextColumn("Format",  width="small"),
-        }
-    )
-
-    try:
-        import plotly.graph_objects as go
-        s = agg_site.sort_values("TxMarge")
-        colors_bar = []
-        for _, r in s.iterrows():
-            if r["format"] == "Hyper":    colors_bar.append("#154360")
-            elif r["format"] == "Market": colors_bar.append("#145A32")
-            else:                         colors_bar.append("#6E2F8A")
-
-        fig = go.Figure(go.Bar(
-            x=s["TxMarge"].tolist(),
-            y=s["lib_site"].tolist(),
-            orientation="h",
-            marker_color=colors_bar,
-            marker_line_width=0,
-            text=[f"{v:.1f}%" for v in s["TxMarge"]],
-            textposition="outside",
-        ))
-        fig.add_vline(x=moy_marge_site, line_width=1.5, line_dash="dot", line_color="#FF9500",
-                      annotation_text=f" Moy. {moy_marge_site:.1f}%",
-                      annotation_font=dict(color="#FF9500", size=10))
-        fig.update_layout(
-            plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-            font=dict(family="-apple-system, Helvetica Neue", color="#3A3A3C", size=11),
-            height=max(280, len(agg_site) * 40 + 60),
-            margin=dict(t=10, b=10, l=10, r=70),
-            xaxis=dict(title="Taux de marge (%)", ticksuffix="%",
-                       showgrid=True, gridcolor="#F2F2F7", range=[0, max(s["TxMarge"]) * 1.25]),
-            yaxis=dict(showgrid=False, title=""),
+    with st.spinner("Lecture du fichier et calcul Commando XD…"):
+        result = run_analysis_cached(
+            file_bytes=file_bytes,
+            filename=filename,
+            start_date=start_date,
+            xd_threshold=float(xd_threshold),
+            min_orders=int(min_orders),
+            platform_cost_per_package=float(platform_cost),
         )
-        st.plotly_chart(fig, use_container_width=True)
-        st.caption("🔵 Hyper  ·  🟢 Market  ·  🟣 Supeco  ·  Ligne pointillée = moyenne réseau")
-    except ImportError:
-        pass
 
-# ═══ TAB 2 — MATRICE RAYON × MAGASIN ══════════════════════════════════════════
-with tab2:
-    st.markdown("<div class='section-label'>Taux de marge (%) par combinaison Rayon × Magasin</div>", unsafe_allow_html=True)
-    st.caption("Lecture : chaque cellule = taux de marge brute pour ce rayon dans ce magasin · Une cellule vide = aucune vente ce jour-là")
+    raw_df = result["raw_df"]
+    mapping = result["mapping"]
+    suppliers = result["suppliers"]
+    plan = result["plan"]
+    charge = result["charge"]
+    control = result["control"]
+    stats = result["charge_stats"]
+    quality = result["quality"]
+    excel_bytes = result["excel_bytes"]
 
-    if not mat_pivot.empty:
-        mat_display = mat_pivot.copy()
-        for col in mat_display.columns:
-            mat_display[col] = mat_display[col].apply(
-                lambda x: f"{x:.1f}%" if pd.notna(x) else "—"
-            )
-        st.dataframe(mat_display, use_container_width=True)
+    total_suppliers = suppliers["Fournisseur key"].nunique()
+    candidats = int((suppliers["Catégorie périmètre"] == "Candidat XD").sum())
+    xd_total = int((suppliers["Décision XD"] == "XD Total").sum())
+    xd_ms = int((suppliers["Décision XD"] == "XD Markets+Supeco").sum())
+    dl_surv = int((suppliers["Décision XD"] == "DL — Surveiller").sum())
+    litige = int((suppliers["Décision XD"] == "Litige probable").sum())
+    inactif = int((suppliers["Décision XD"] == "Inactif probable").sum())
+    hors = int((suppliers["Catégorie périmètre"] == "Hors périmètre XD").sum())
+    sans_data = int((suppliers["Catégorie périmètre"] == "Sans données suffisantes").sum())
 
-        try:
-            import plotly.graph_objects as go
+    total_colis_xd = plan["Colis XD/mois"].sum() if not plan.empty else 0
+    total_cost_month = total_colis_xd * float(platform_cost)
+    total_cost_year = total_cost_month * 12
 
-            sites_ordered  = mat_pivot.columns.tolist()
-            rayons_ordered = mat_pivot.index.tolist()
-            z      = mat_pivot.values.tolist()
-            text_z = [[f"{v:.1f}%" if pd.notna(v) else "—" for v in row] for row in z]
+    st.markdown(f"<div class='section-label'>{quality['lignes_apres_filtre_date']:,} ligne(s) analysée(s) · période : {quality['date_debut_analyse'].strftime('%d/%m/%Y')} → {quality['date_fin_analyse'].strftime('%d/%m/%Y')}</div>".replace(",", " "), unsafe_allow_html=True)
 
-            fig_h = go.Figure(go.Heatmap(
-                z=z, x=sites_ordered, y=rayons_ordered,
-                text=text_z, texttemplate="%{text}",
-                textfont=dict(size=12, family="-apple-system, Helvetica Neue"),
-                colorscale=[
-                    [0.0,  "#C0392B"], [0.25, "#E74C3C"], [0.45, "#F39C12"],
-                    [0.60, "#F0E68C"], [0.75, "#A8D5A2"], [1.0,  "#27AE60"],
-                ],
-                showscale=True,
-                colorbar=dict(title="Tx Marge %", ticksuffix="%", len=0.8),
-                zmin=0, zmax=30,
-            ))
-            fig_h.update_layout(
-                plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-                font=dict(family="-apple-system, Helvetica Neue", color="#3A3A3C", size=11),
-                height=max(250, len(rayons_ordered) * 80 + 80),
-                margin=dict(t=20, b=60, l=20, r=20),
-                xaxis=dict(tickangle=-35, tickfont=dict(size=10)),
-                yaxis=dict(tickfont=dict(size=11)),
-            )
-            st.plotly_chart(fig_h, use_container_width=True)
-            st.caption("🔴 < 10%  ·  🟠 10–15%  ·  🟡 15–20%  ·  🟢 20–25%  ·  ✅ > 25%")
-        except ImportError:
-            pass
-    else:
-        st.info("Pas de données suffisantes pour construire la matrice.")
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Fournisseurs", f"{total_suppliers:,.0f}".replace(",", " "))
+    k2.metric("Candidats XD", f"{candidats:,.0f}".replace(",", " "))
+    k3.metric("XD Total", f"{xd_total:,.0f}".replace(",", " "))
+    k4.metric("XD M+S", f"{xd_ms:,.0f}".replace(",", " "))
 
-# ═══ TAB 3 — FLOP 100 ═════════════════════════════════════════════════════════
-with tab3:
-    st.markdown(f"""
-<div class='alert-card alert-red'>
-  <strong>💣 {nb_flop_neg} article(s) à marge négative dans le Flop {len(flop100)}</strong>
-  · Pertes cumulées : <strong>{fmt(flop100[flop100['Marge']<0]['Marge'].sum())} FCFA</strong>
-  · CA concerné : <strong>{fmt(flop100['CA'].sum())} FCFA</strong><br>
-  <span style='font-size:12px;opacity:.85'>
-    Chaque bloc de magasins est trié du pire au meilleur taux de marge.
-    Un site absent d'un bloc = article non vendu dans ce format sur la période.
-  </span>
-</div>""", unsafe_allow_html=True)
+    k5, k6, k7, k8 = st.columns(4)
+    k5.metric("DL Surveiller", f"{dl_surv:,.0f}".replace(",", " "))
+    k6.metric("Litiges", f"{litige:,.0f}".replace(",", " "))
+    k7.metric("Inactifs", f"{inactif:,.0f}".replace(",", " "))
+    k8.metric("Hors périmètre", f"{hors:,.0f}".replace(",", " "))
 
-    fc1, fc2, fc3 = st.columns(3)
-    with fc1:
-        filtre_rayon_f = st.selectbox("Rayon", ["Tous"] + sorted(flop100["lib_rayon"].dropna().unique().tolist()), key="f100_rayon")
-    with fc2:
-        filtre_marge = st.selectbox("Statut marge", ["Tous", "Négatif uniquement", "< 3%", "< 8%"], key="f100_marge")
-    with fc3:
-        filtre_promo = st.selectbox("Promo", ["Tous", "100% sous promo", "Hors promo uniquement"], key="f100_promo")
+    f1, f2, f3, f4 = st.columns(4)
+    f1.metric("Sans données", f"{sans_data:,.0f}".replace(",", " "))
+    f2.metric("Colis XD/mois", f"{total_colis_xd:,.0f}".replace(",", " "))
+    f3.metric("Coût XD/mois", fmt_xof(total_cost_month))
+    f4.metric("Coût XD/an", fmt_xof(total_cost_year))
 
-    df_flop = flop100.copy()
-    if filtre_rayon_f != "Tous":
-        df_flop = df_flop[df_flop["lib_rayon"] == filtre_rayon_f]
-    if filtre_marge == "Négatif uniquement":
-        df_flop = df_flop[df_flop["TxMarge"] < 0]
-    elif filtre_marge == "< 3%":
-        df_flop = df_flop[df_flop["TxMarge"] < 3]
-    elif filtre_marge == "< 8%":
-        df_flop = df_flop[df_flop["TxMarge"] < 8]
-    if filtre_promo == "100% sous promo":
-        df_flop = df_flop[df_flop["PdsPromo"] >= 99.9]
-    elif filtre_promo == "Hors promo uniquement":
-        df_flop = df_flop[df_flop["PdsPromo"].fillna(0) < 1]
+    st.markdown("---")
 
-    st.markdown(f"<div style='font-size:12px;color:#8E8E93;margin-bottom:8px'>{len(df_flop)} article(s) affichés</div>", unsafe_allow_html=True)
-
-    disp_flop = df_flop.copy()
-    disp_flop["#"]              = disp_flop["Rang"]
-    disp_flop["Article"]        = disp_flop["lib_art"]
-    disp_flop["Rayon"]          = disp_flop["lib_rayon"]
-    disp_flop["Famille"]        = disp_flop["lib_fam"]
-    disp_flop["CA (FCFA)"]      = disp_flop["CA"].apply(fmt)
-    disp_flop["Marge (FCFA)"]   = disp_flop["Marge"].apply(fmt)
-    disp_flop["Tx Marge"]       = disp_flop["TxMarge"].apply(fmt_pct)
-    disp_flop["Pds Promo"]      = disp_flop["PdsPromo"].apply(lambda x: fmt_pct(x) if pd.notna(x) else "—")
-    disp_flop["Qté"]            = disp_flop["Qte"].apply(lambda x: f"{int(x):,}" if pd.notna(x) else "—")
-    disp_flop["🔵 HYPER"]       = disp_flop["Bloc_Hyper"]
-    disp_flop["🟢 MARKET"]      = disp_flop["Bloc_Market"]
-    disp_flop["🟣 SUPECO"]      = disp_flop["Bloc_Supeco"]
-
-    st.dataframe(
-        disp_flop[["#","Article","Rayon","Famille","CA (FCFA)","Marge (FCFA)",
-                   "Tx Marge","Pds Promo","Qté","🔵 HYPER","🟢 MARKET","🟣 SUPECO"]],
-        use_container_width=True, hide_index=True,
-        column_config={
-            "#":          st.column_config.NumberColumn("#",        width=40),
-            "Article":    st.column_config.TextColumn("Article",    width="large"),
-            "Rayon":      st.column_config.TextColumn("Rayon",      width="medium"),
-            "Famille":    st.column_config.TextColumn("Famille",    width="medium"),
-            "🔵 HYPER":   st.column_config.TextColumn("🔵 HYPER",   width="large"),
-            "🟢 MARKET":  st.column_config.TextColumn("🟢 MARKET",  width="large"),
-            "🟣 SUPECO":  st.column_config.TextColumn("🟣 SUPECO",  width="large"),
-        }
-    )
-    st.caption("Blocs magasins : triés du taux de marge le plus bas au plus élevé · '—' = article non vendu dans ce format · Format : Magasin: Tx% | Qty: XX")
-
-# ═══ TAB 4 — ANALYSE CASSE ════════════════════════════════════════════════════
-with tab4:
-
-    # ── Agrégations casse ─────────────────────────────────────────────────────
-    casse_col_v = "Casse (Valeur)"
-    casse_col_q = "Casse (Qté)"
-
-    agg_casse_site = df_f.groupby(["lib_site", "format"]).agg(
-        CA=("CA", "sum"),
-        Casse_V=(casse_col_v, "sum"),
-        Casse_Q=(casse_col_q, "sum") if casse_col_q in df_f.columns else ("CA", "sum"),
-    ).reset_index()
-    agg_casse_site["TxCasse"] = (agg_casse_site["Casse_V"].abs() / agg_casse_site["CA"] * 100).where(agg_casse_site["CA"] > 0)
-    agg_casse_site = agg_casse_site[agg_casse_site["CA"] > 0].sort_values("TxCasse", ascending=False).reset_index(drop=True)
-
-    agg_casse_rax = df_f.groupby("lib_rayon").agg(
-        CA=("CA", "sum"),
-        Casse_V=(casse_col_v, "sum"),
-    ).reset_index()
-    agg_casse_rax["TxCasse"] = (agg_casse_rax["Casse_V"].abs() / agg_casse_rax["CA"] * 100).where(agg_casse_rax["CA"] > 0)
-    agg_casse_rax = agg_casse_rax.sort_values("TxCasse", ascending=False)
-
-    agg_casse_art = df_f.groupby(["Article", "lib_art", "lib_rayon", "lib_fam"]).agg(
-        CA=("CA", "sum"),
-        Casse_V=(casse_col_v, "sum"),
-        Casse_Q=(casse_col_q, "sum") if casse_col_q in df_f.columns else ("CA", "sum"),
-    ).reset_index()
-    agg_casse_art["TxCasse"] = (agg_casse_art["Casse_V"].abs() / agg_casse_art["CA"] * 100).where(agg_casse_art["CA"] > 0)
-    top30_casse = agg_casse_art[agg_casse_art["Casse_V"].abs() > 0].nlargest(30, "Casse_V").reset_index(drop=True)
-    top30_casse["Rang"] = range(1, len(top30_casse) + 1)
-
-    casse_reseau       = df_f[casse_col_v].sum()
-    tx_casse_reseau    = abs(casse_reseau) / ca_total * 100 if ca_total > 0 else 0
-    nb_sites_alerte    = int((agg_casse_site["TxCasse"] > 1).sum())
-    moy_tx_casse_site  = agg_casse_site["TxCasse"].mean()
-    has_qty            = casse_col_q in df_f.columns
-
-    # ── KPIs ──────────────────────────────────────────────────────────────────
-    st.markdown("<div class='section-label'>Vue globale casse réseau</div>", unsafe_allow_html=True)
-    ck1, ck2, ck3, ck4 = st.columns(4)
-    ck1.metric("Casse Réseau",       fmt(abs(casse_reseau)) + " FCFA",  f"{tx_casse_reseau:.2f}% du CA")
-    ck2.metric("Sites > 1% casse",   str(nb_sites_alerte),              f"sur {len(agg_casse_site)} actifs")
-    ck3.metric("Tx casse moyen",      fmt_pct(moy_tx_casse_site, dec=2), "moyenne par site")
-    ck4.metric("Top rayon casse",
-               agg_casse_rax.iloc[0]["lib_rayon"] if not agg_casse_rax.empty else "—",
-               fmt_pct(agg_casse_rax.iloc[0]["TxCasse"], dec=2) if not agg_casse_rax.empty else "")
-
-    if nb_sites_alerte > 0:
-        noms_alerte = ", ".join([
-            f"{r['lib_site']} ({r['TxCasse']:.1f}%)"
-            for _, r in agg_casse_site[agg_casse_site["TxCasse"] > 1].iterrows()
-        ])
+    # Alertes principales
+    if quality["sites_hors_groupe"] != "Aucun":
         st.markdown(f"""
 <div class='alert-card alert-amber'>
-  <strong>🗑️ {nb_sites_alerte} site(s) dépassent le seuil de 1% de casse</strong> : {noms_alerte}<br>
-  <span style='font-size:12px;opacity:.85'>→ Vérifier procédures de démarque, gestion DLC, conditions de stockage.</span>
-</div>""", unsafe_allow_html=True)
+  <strong>⚠️ Sites hors groupe détectés</strong><br>
+  {quality["sites_hors_groupe"]}<br>
+  <span style='font-size:12px;opacity:.85'>Ces sites restent inclus dans l’analyse fournisseur, mais ne sont pas rattachés à Hypers / Markets / Supeco.</span>
+</div>
+""", unsafe_allow_html=True)
 
-    st.markdown("---")
+    if stats.get("flag_ratio") == "À lisser":
+        st.markdown(f"""
+<div class='alert-card alert-amber'>
+  <strong>⚠️ Charge quai à lisser</strong><br>
+  Ratio pic/creux : <strong>{stats.get("ratio_pic_creux", 0):.2f}x</strong> — objectif ≤ 3x.
+</div>
+""", unsafe_allow_html=True)
+    else:
+        st.markdown(f"""
+<div class='alert-card alert-green'>
+  <strong>✅ Contrôle charge quai</strong><br>
+  Ratio pic/creux : <strong>{stats.get("ratio_pic_creux", 0):.2f}x</strong>.
+</div>
+""", unsafe_allow_html=True)
 
-    # ── Classement sites ──────────────────────────────────────────────────────
-    st.markdown("<div class='section-label'>Classement des magasins — du taux de casse le plus élevé au plus bas</div>", unsafe_allow_html=True)
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "✅ Contrôles",
+        "📦 État DL complet",
+        "🚚 Plan XD",
+        "🏭 Charge quai",
+        "📥 Export",
+    ])
 
-    disp_cs = agg_casse_site.copy()
-    disp_cs["Rang"]         = range(1, len(disp_cs) + 1)
-    disp_cs["Magasin"]      = disp_cs["lib_site"]
-    disp_cs["Format"]       = disp_cs["format"]
-    disp_cs["CA (FCFA)"]    = disp_cs["CA"].apply(fmt)
-    disp_cs["Casse (FCFA)"] = disp_cs["Casse_V"].abs().apply(fmt)
-    if has_qty:
-        disp_cs["Casse (Qté)"] = disp_cs["Casse_Q"].apply(lambda x: f"{int(x):,}" if pd.notna(x) else "—")
-    disp_cs["Tx Casse"]     = disp_cs["TxCasse"].apply(lambda x: fmt_pct(x, dec=2))
-    disp_cs["Δ vs Moy."]    = (disp_cs["TxCasse"] - moy_tx_casse_site).apply(fmt_delta)
+    with tab1:
+        st.markdown("<div class='section-label'>Contrôle d’exhaustivité et qualité données</div>", unsafe_allow_html=True)
+        st.dataframe(control, use_container_width=True, hide_index=True)
 
-    cols_cs = ["Rang","Magasin","Format","CA (FCFA)","Casse (FCFA)"]
-    if has_qty: cols_cs.append("Casse (Qté)")
-    cols_cs += ["Tx Casse","Δ vs Moy."]
-
-    st.dataframe(disp_cs[cols_cs], use_container_width=True, hide_index=True,
-        column_config={"Magasin": st.column_config.TextColumn("Magasin", width="medium")})
-
-    try:
-        import plotly.graph_objects as go
-        sc = agg_casse_site.sort_values("TxCasse")
-        bar_colors = []
-        for _, r in sc.iterrows():
-            if r["format"] == "Hyper":    bar_colors.append("#154360")
-            elif r["format"] == "Market": bar_colors.append("#145A32")
-            else:                         bar_colors.append("#6E2F8A")
-        fig_c = go.Figure(go.Bar(
-            x=sc["TxCasse"].tolist(), y=sc["lib_site"].tolist(),
-            orientation="h", marker_color=bar_colors, marker_line_width=0,
-            text=[f"{v:.2f}%" for v in sc["TxCasse"]], textposition="outside",
-        ))
-        fig_c.add_vline(x=1.0, line_width=1.5, line_dash="dot", line_color="#FF3B30",
-                        annotation_text=" Seuil 1%", annotation_font=dict(color="#FF3B30", size=10))
-        fig_c.add_vline(x=moy_tx_casse_site, line_width=1.5, line_dash="dot", line_color="#FF9500",
-                        annotation_text=f" Moy. {moy_tx_casse_site:.2f}%",
-                        annotation_font=dict(color="#FF9500", size=10))
-        fig_c.update_layout(
-            plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-            font=dict(family="-apple-system, Helvetica Neue", color="#3A3A3C", size=11),
-            height=max(280, len(agg_casse_site) * 40 + 60),
-            margin=dict(t=10, b=10, l=10, r=80),
-            xaxis=dict(title="Taux de casse (%)", ticksuffix="%",
-                       showgrid=True, gridcolor="#F2F2F7"),
-            yaxis=dict(showgrid=False, title=""),
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("<div class='section-label'>Détection automatique des colonnes</div>", unsafe_allow_html=True)
+        st.dataframe(
+            pd.DataFrame([
+                {"Champ attendu": k, "Colonne détectée": v if v else "NON DÉTECTÉE"}
+                for k, v in mapping.items()
+            ]),
+            use_container_width=True,
+            hide_index=True,
         )
-        st.plotly_chart(fig_c, use_container_width=True)
-        st.caption("🔴 Ligne rouge = seuil 1%  ·  🟠 Ligne orange = moyenne réseau  ·  🔵 Hyper  ·  🟢 Market  ·  🟣 Supeco")
-    except ImportError:
-        pass
 
-    st.markdown("---")
+        with st.expander("Aperçu des 20 premières lignes du fichier"):
+            st.dataframe(raw_df.head(20), use_container_width=True)
 
-    # ── Récap par rayon ───────────────────────────────────────────────────────
-    st.markdown("<div class='section-label'>Casse par rayon</div>", unsafe_allow_html=True)
-    disp_cr = agg_casse_rax.copy()
-    disp_cr["Rayon"]        = disp_cr["lib_rayon"]
-    disp_cr["CA (FCFA)"]    = disp_cr["CA"].apply(fmt)
-    disp_cr["Casse (FCFA)"] = disp_cr["Casse_V"].abs().apply(fmt)
-    disp_cr["Tx Casse"]     = disp_cr["TxCasse"].apply(lambda x: fmt_pct(x, dec=2))
-    disp_cr["% Casse Réseau"] = (disp_cr["Casse_V"].abs() / abs(casse_reseau) * 100).apply(fmt_pct)
-    st.dataframe(disp_cr[["Rayon","CA (FCFA)","Casse (FCFA)","Tx Casse","% Casse Réseau"]],
-        use_container_width=True, hide_index=True,
-        column_config={"Rayon": st.column_config.TextColumn("Rayon", width="medium")})
+    with tab2:
+        st.markdown("<div class='section-label'>État actuel Direct Livraison — un fournisseur par ligne</div>", unsafe_allow_html=True)
+        st.dataframe(
+            suppliers.drop(columns=["Fournisseur key"], errors="ignore"),
+            use_container_width=True,
+            hide_index=True,
+        )
 
-    st.markdown("---")
+    with tab3:
+        st.markdown("<div class='section-label'>Plan de lissage XD — fournisseurs basculés</div>", unsafe_allow_html=True)
+        if plan.empty:
+            st.info("Aucun fournisseur avec décision XD Total ou XD Markets+Supeco.")
+        else:
+            st.dataframe(plan, use_container_width=True, hide_index=True)
 
-    # ── Top 30 articles ───────────────────────────────────────────────────────
-    st.markdown("<div class='section-label'>Top 30 articles — valeur de casse la plus élevée</div>", unsafe_allow_html=True)
+    with tab4:
+        st.markdown("<div class='section-label'>Simulation de charge quai</div>", unsafe_allow_html=True)
+        st.dataframe(charge, use_container_width=True, hide_index=True)
+        st.caption(f"Ratio pic/creux : {stats.get('ratio_pic_creux', 0):.2f} — {stats.get('flag_ratio', 'N/A')}")
 
-    c30f1, c30f2 = st.columns(2)
-    with c30f1:
-        filtre_rax_c = st.selectbox("Rayon", ["Tous"] + sorted(top30_casse["lib_rayon"].dropna().unique().tolist()), key="c_rayon")
-    with c30f2:
-        filtre_seuil_c = st.selectbox("Seuil Tx Casse", ["Tous", "> 1%", "> 2%", "> 5%"], key="c_seuil")
-
-    df_top30 = top30_casse.copy()
-    if filtre_rax_c != "Tous":
-        df_top30 = df_top30[df_top30["lib_rayon"] == filtre_rax_c]
-    if filtre_seuil_c == "> 1%":
-        df_top30 = df_top30[df_top30["TxCasse"] > 1]
-    elif filtre_seuil_c == "> 2%":
-        df_top30 = df_top30[df_top30["TxCasse"] > 2]
-    elif filtre_seuil_c == "> 5%":
-        df_top30 = df_top30[df_top30["TxCasse"] > 5]
-
-    disp_t30 = df_top30.copy()
-    disp_t30["#"]             = disp_t30["Rang"]
-    disp_t30["Article"]       = disp_t30["lib_art"]
-    disp_t30["Rayon"]         = disp_t30["lib_rayon"]
-    disp_t30["Famille"]       = disp_t30["lib_fam"]
-    disp_t30["CA (FCFA)"]     = disp_t30["CA"].apply(fmt)
-    disp_t30["Casse (FCFA)"]  = disp_t30["Casse_V"].abs().apply(fmt)
-    if has_qty:
-        disp_t30["Casse (Qté)"] = disp_t30["Casse_Q"].apply(lambda x: f"{int(x):,}" if pd.notna(x) else "—")
-    disp_t30["Tx Casse"]      = disp_t30["TxCasse"].apply(lambda x: fmt_pct(x, dec=2))
-
-    cols_t30 = ["#","Article","Rayon","Famille","CA (FCFA)","Casse (FCFA)"]
-    if has_qty: cols_t30.append("Casse (Qté)")
-    cols_t30.append("Tx Casse")
-
-    st.markdown(f"<div style='font-size:12px;color:#8E8E93;margin-bottom:8px'>{len(disp_t30)} article(s) affichés</div>", unsafe_allow_html=True)
-    st.dataframe(disp_t30[cols_t30], use_container_width=True, hide_index=True,
-        column_config={
-            "#":       st.column_config.NumberColumn("#", width=40),
-            "Article": st.column_config.TextColumn("Article", width="large"),
-        })
-    st.caption("Classé par valeur de casse décroissante · Tx Casse = Casse (valeur) ÷ CA article")
-
-# ═══ TAB 5 — EXPORT EXCEL ═════════════════════════════════════════════════════
-with tab5:
-    st.markdown("<div class='section-label'>Export Excel — Rapport complet</div>", unsafe_allow_html=True)
-    st.markdown("""
+    with tab5:
+        st.markdown("""
 <div class='alert-card alert-blue'>
   <strong>📋 Contenu du fichier exporté :</strong><br>
-  <strong>Onglet 1 — Synthèse Réseau</strong> : KPIs globaux, résumé par format, palmarès magasins<br>
-  <strong>Onglet 2 — Récap par Rayon</strong> : Taux de marge, décomposition HP vs Promo, casse<br>
-  <strong>Onglet 3 — Matrice Marge</strong> : Taux de marge croisé Rayon × Magasin<br>
-  <strong>Onglet 4 — Flop 100</strong> : Articles destructeurs avec impact par bloc (Hyper / Market / Supeco) · Format : Site: Tx% | Qty: XX<br>
-  <strong>Onglet 5 — Analyse Casse</strong> : Classement sites par taux de casse · Top 30 articles · Récap par rayon
-</div>""", unsafe_allow_html=True)
-
-    st.caption(f"Périmètre : {len(sel_site)} magasin(s) · {len(sel_rayon)} rayon(s) · {periode}")
-
-    if st.button("Générer le fichier Excel", type="primary", key="gen_excel"):
-        with st.spinner("Génération du rapport…"):
-
-
-
-            wb_exp = Workbook()
-
-            C_HDR = "1B2A4A"; C_SUB = "2E4B7A"; C_WH = "FFFFFF"; C_DK = "1A1A2E"
-            C_HYP = "154360"; C_MKT = "145A32"; C_SUP = "6E2F8A"
-
-            def xfill(h): return PatternFill("solid", fgColor=h)
-            def xbdr():
-                s = Side(style="thin", color="CCCCCC")
-                return Border(left=s, right=s, top=s, bottom=s)
-            def xctr(): return Alignment(horizontal="center", vertical="center", wrap_text=True)
-            def xrgt(): return Alignment(horizontal="right",  vertical="center")
-            def xlft(w=False): return Alignment(horizontal="left", vertical="center", wrap_text=w)
-
-            def write_header_row(ws, row_num, headers, widths, bg=C_SUB):
-                for i, (h, w) in enumerate(zip(headers, widths)):
-                    c = ws.cell(row=row_num, column=i+1, value=h)
-                    c.font      = Font("Calibri", size=10, bold=True, color=C_WH)
-                    c.fill      = xfill(bg)
-                    c.alignment = xctr()
-                    c.border    = xbdr()
-                    ws.column_dimensions[get_column_letter(i+1)].width = w
-                ws.row_dimensions[row_num].height = 24
-
-            def title_block(ws, txt, span=10):
-                ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=span)
-                c = ws.cell(row=1, column=1, value=txt)
-                c.font = Font("Calibri", size=13, bold=True, color=C_WH)
-                c.fill = xfill(C_HDR); c.alignment = xctr()
-                ws.row_dimensions[1].height = 30
-                ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=span)
-                c2 = ws.cell(row=2, column=1, value=f"  Période : {periode}  ·  {nb_jours} jour(s)")
-                c2.font = Font("Calibri", size=9, italic=True, color="AABBCC")
-                c2.fill = xfill(C_HDR); c2.alignment = xlft()
-                ws.row_dimensions[2].height = 16
-                ws.row_dimensions[3].height = 6
-
-
-
-            # ── Onglet 1 : Synthèse réseau
-            ws1 = wb_exp.active; ws1.title = "Synthèse Réseau"
-            title_block(ws1, "DIAGNOSTIC RENTABILITÉ RÉSEAU — SYNTHÈSE", span=8)
-
-            r = 4
-            kpi_data = [
-                ("CA Réseau (FCFA)",    f"{ca_total:,.0f}"),
-                ("Marge Brute (FCFA)",  f"{marge_total:,.0f}"),
-                ("Taux de Marge",       f"{tx_marge:.1f}%"),
-                ("Taux Marge HP",       f"{tx_m_hp:.1f}%"),
-                ("Taux Marge Promo",    f"{tx_m_promo:.1f}%"),
-                ("Effet Promo (pts)",   f"−{delta_hp_p:.1f}"),
-                ("Poids Promo",         f"{poids_promo:.1f}%"),
-                ("Taux Casse",          f"{tx_casse:.2f}%"),
-            ]
-            for ci, (lbl, val) in enumerate(kpi_data):
-                c1e = ws1.cell(row=r, column=ci+1, value=lbl)
-                c1e.font = Font("Calibri", size=9, bold=True, color=C_WH)
-                c1e.fill = xfill(C_SUB); c1e.alignment = xctr(); c1e.border = xbdr()
-                c2e = ws1.cell(row=r+1, column=ci+1, value=val)
-                c2e.font = Font("Calibri", size=12, bold=True, color=C_DK)
-                c2e.fill = xfill("FFFFFF"); c2e.alignment = xctr(); c2e.border = xbdr()
-                ws1.column_dimensions[get_column_letter(ci+1)].width = 18
-            ws1.row_dimensions[r].height = 20; ws1.row_dimensions[r+1].height = 28
-            r += 3
-
-            ws1.merge_cells(start_row=r, start_column=1, end_row=r, end_column=8)
-            c = ws1.cell(row=r, column=1, value="  PERFORMANCE PAR FORMAT")
-            c.font = Font("Calibri", size=10, bold=True, color=C_WH)
-            c.fill = xfill(C_SUB); c.alignment = xlft(); ws1.row_dimensions[r].height = 22; r += 1
-
-            write_header_row(ws1, r,
-                ["Format","CA (FCFA)","Marge (FCFA)","Tx Marge","Tx Marge HP","Tx Marge Promo","Pds Promo","Tx Casse"],
-                [14,18,18,12,14,16,12,12])
-            r += 1
-            for ri2, (_, fd) in enumerate(agg_fmt.iterrows()):
-                bg_f = {"Hyper":"D6EAF8","Market":"D5F5E3","Supeco":"E8DAEF"}.get(fd["format"],"FFFFFF")
-                for ci2, (v, fmt3) in enumerate([
-                    (fd["format"], None), (fd["CA"], "#,##0"), (fd["Marge"], "#,##0"),
-                    (fd["TxMarge"]/100, "0.0%"), (fd.get("TxMarge_HP",None), "0.0%"),
-                    (fd.get("TxMarge_Promo",None), "0.0%"),
-                    (fd["PdsPromo"]/100 if pd.notna(fd["PdsPromo"]) else None, "0.0%"),
-                    (fd["TxCasse"]/100 if pd.notna(fd["TxCasse"]) else None, "0.0%"),
-                ]):
-                    if pd.notna(v) if not isinstance(v, str) else True:
-                        pv = v/100 if fmt3 == "0.0%" and isinstance(v, float) and not (0 <= abs(v) <= 1.5) else v
-                    else:
-                        pv = None
-                    c = ws1.cell(row=r, column=ci2+1, value=pv)
-                    c.font = Font("Calibri", size=10, color=C_DK)
-                    c.fill = xfill(bg_f); c.border = xbdr()
-                    if fmt3: c.number_format = fmt3
-                    c.alignment = xrgt() if ci2 in [1,2] else xctr()
-                ws1.row_dimensions[r].height = 20; r += 1
-
-            r += 1
-            ws1.merge_cells(start_row=r, start_column=1, end_row=r, end_column=8)
-            c = ws1.cell(row=r, column=1, value="  PALMARÈS MAGASINS — classé par taux de marge décroissant")
-            c.font = Font("Calibri", size=10, bold=True, color=C_WH)
-            c.fill = xfill(C_SUB); c.alignment = xlft(); ws1.row_dimensions[r].height = 22; r += 1
-
-            write_header_row(ws1, r, ["Rang","Magasin","Format","CA (FCFA)","Marge (FCFA)","Tx Marge","Pds Promo","Tx Casse"],
-                             [5,24,10,18,18,12,12,12])
-            r += 1
-            for ri3, (_, sd) in enumerate(agg_site.iterrows()):
-                bg_s = "F7F7F7" if ri3 % 2 == 0 else "FFFFFF"
-                vals3 = [ri3+1, sd["lib_site"], sd["format"], sd["CA"], sd["Marge"],
-                         sd["TxMarge"]/100 if pd.notna(sd["TxMarge"]) else None,
-                         sd["PdsPromo"]/100 if pd.notna(sd["PdsPromo"]) else None,
-                         sd["TxCasse"]/100 if pd.notna(sd["TxCasse"]) else None]
-                fmts3 = [None,None,None,"#,##0","#,##0","0.0%","0.0%","0.0%"]
-                for ci3,(v,f3) in enumerate(zip(vals3,fmts3)):
-                    c = ws1.cell(row=r, column=ci3+1, value=v)
-                    c.font = Font("Calibri", size=10, color=C_DK)
-                    c.fill = xfill(bg_s); c.border = xbdr()
-                    if f3: c.number_format = f3
-                    c.alignment = xctr() if ci3==0 else xrgt() if ci3 in [3,4] else xctr()
-                ws1.row_dimensions[r].height = 20; r += 1
-
-            ws1.freeze_panes = "A4"
-
-            # ── Onglet 2 : Récap rayon
-            ws2 = wb_exp.create_sheet("Récap Rayon")
-            title_block(ws2, "RÉCAPITULATIF PAR RAYON — Fond de Rayon vs Promotion", span=10)
-            write_header_row(ws2, 4,
-                ["Rayon","CA (FCFA)","Poids CA","Marge (FCFA)","Tx Marge","Tx Marge HP","Tx Marge Promo","Écart HP−Promo","Pds Promo","Tx Casse"],
-                [22,16,10,16,12,14,16,16,12,12])
-            for ri4,(_, rd4) in enumerate(agg_rax.iterrows()):
-                r4 = ri4 + 5
-                bg4 = "F7F7F7" if ri4%2==0 else "FFFFFF"
-                ecart4 = rd4["TxMarge_HP"] - rd4["TxMarge_Promo"] if pd.notna(rd4.get("TxMarge_Promo")) else None
-                vals4 = [rd4["lib_rayon"], rd4["CA"], rd4["PoidsCA"]/100,
-                         rd4["Marge"], rd4["TxMarge"]/100,
-                         rd4["TxMarge_HP"]/100 if pd.notna(rd4.get("TxMarge_HP")) else None,
-                         rd4["TxMarge_Promo"]/100 if pd.notna(rd4.get("TxMarge_Promo")) else None,
-                         ecart4/100 if ecart4 is not None else None,
-                         rd4["PdsPromo"]/100, rd4["TxCasse"]/100]
-                fmts4 = [None,"#,##0","0.0%","#,##0","0.0%","0.0%","0.0%","0.0%","0.0%","0.0%"]
-                for ci4,(v,f4) in enumerate(zip(vals4,fmts4)):
-                    c = ws2.cell(row=r4, column=ci4+1, value=v)
-                    c.font = Font("Calibri",size=10,color=C_DK); c.fill=xfill(bg4); c.border=xbdr()
-                    if f4: c.number_format=f4
-                    c.alignment = xrgt() if ci4 in [1,3] else xctr()
-                ws2.row_dimensions[r4].height = 20
-            ws2.freeze_panes = "A5"
-
-            # ── Onglet 3 : Matrice
-            ws3 = wb_exp.create_sheet("Matrice Marge")
-            title_block(ws3, "MATRICE TAUX DE MARGE — RAYON × MAGASIN", span=len(mat_pivot.columns)+2)
-            ws3.cell(row=4, column=1, value="Rayon").font = Font("Calibri", size=10, bold=True, color=C_WH)
-            ws3.cell(row=4, column=1).fill      = xfill(C_SUB)
-            ws3.cell(row=4, column=1).alignment = xctr()
-            ws3.cell(row=4, column=1).border    = xbdr()
-            ws3.column_dimensions["A"].width = 22
-            for ci5, col_name in enumerate(mat_pivot.columns):
-                c = ws3.cell(row=4, column=ci5+2, value=short_name(col_name))
-                c.font = Font("Calibri", size=9, bold=True, color=C_WH)
-                c.fill = xfill(C_SUB); c.alignment = xctr(); c.border = xbdr()
-                ws3.column_dimensions[get_column_letter(ci5+2)].width = 16
-            ws3.row_dimensions[4].height = 36
-            for ri5, rayon_idx in enumerate(mat_pivot.index):
-                r5 = ri5 + 5
-                c0 = ws3.cell(row=r5, column=1, value=rayon_idx)
-                c0.font = Font("Calibri", size=10, bold=True, color=C_DK)
-                c0.fill = xfill("F7F7F7"); c0.alignment = xlft(); c0.border = xbdr()
-                for ci5, col_name in enumerate(mat_pivot.columns):
-                    v5 = mat_pivot.loc[rayon_idx, col_name]
-                    c = ws3.cell(row=r5, column=ci5+2)
-                    if pd.notna(v5):
-                        c.value = v5/100; c.number_format = "0.0%"
-                    c.font = Font("Calibri", size=11, bold=True, color=C_DK)
-                    c.alignment = xctr(); c.border = xbdr()
-                    c.fill = xfill("FFFFFF")
-                ws3.row_dimensions[r5].height = 28
-            ws3.freeze_panes = "B5"
-
-            # ── Onglet 4 : Flop 100
-            ws4 = wb_exp.create_sheet("Flop 100")
-            title_block(ws4, f"FLOP {len(flop100)} — DESTRUCTEURS DE MARGE · Format : Site: Tx% | Qty: XX · triés du pire au meilleur", span=12)
-            ws4.merge_cells("A3:L3")
-            c = ws4.cell(row=3, column=1,
-                value=f"  {nb_flop_neg} articles à marge négative · Pertes : {flop100[flop100['Marge']<0]['Marge'].sum():,.0f} FCFA · Format : Site: Tx% | Qty: XX · Blocs triés du pire au meilleur taux")
-            c.font = Font("Calibri", size=9, italic=True, color="AABBCC")
-            c.fill = xfill(C_HDR); c.alignment = xlft()
-            ws4.row_dimensions[3].height = 14
-
-            hdrs4  = ["#","Article","Rayon","Famille","CA (FCFA)","Marge (FCFA)","Tx Marge","Pds Promo","Qté",
-                      "🔵 HYPER — Tx marge % | Qty par site",
-                      "🟢 MARKET — Tx marge % | Qty par site",
-                      "🟣 SUPECO — Tx marge % | Qty par site"]
-            wdths4 = [5, 44, 16, 24, 13, 13, 10, 10, 8, 46, 50, 54]
-
-            bloc_bg = {9: C_HYP, 10: C_MKT, 11: C_SUP}
-            for ci6, (h, w) in enumerate(zip(hdrs4, wdths4)):
-                bg6 = bloc_bg.get(ci6, C_SUB)
-                c = ws4.cell(row=4, column=ci6+1, value=h)
-                c.font = Font("Calibri", size=9, bold=True, color=C_WH)
-                c.fill = xfill(bg6); c.alignment = xctr(); c.border = xbdr()
-                ws4.column_dimensions[get_column_letter(ci6+1)].width = w
-            ws4.row_dimensions[4].height = 28
-
-            bloc_fill = {9: "D6EAF8", 10: "D5F5E3", 11: "E8DAEF"}
-            for ri6, (_, rd6) in enumerate(flop100.iterrows()):
-                r6 = ri6 + 5
-                bg6 = "F7F7F7" if ri6 % 2 == 0 else "FFFFFF"
-                tm6 = rd6["TxMarge"]; pp6 = rd6["PdsPromo"]
-                vals6 = [
-                    rd6["Rang"], rd6["lib_art"], rd6["lib_rayon"], rd6["lib_fam"],
-                    rd6["CA"], rd6["Marge"],
-                    tm6/100 if pd.notna(tm6) else None,
-                    pp6/100 if pd.notna(pp6) else None,
-                    int(rd6["Qte"]) if pd.notna(rd6["Qte"]) else None,
-                    rd6["Bloc_Hyper"], rd6["Bloc_Market"], rd6["Bloc_Supeco"],
-                ]
-                fmts6 = [None,None,None,None,"#,##0","#,##0","0.0%","0.0%","#,##0",None,None,None]
-                for ci6, (v, f6) in enumerate(zip(vals6, fmts6)):
-                    c = ws4.cell(row=r6, column=ci6+1, value=v)
-                    cell_bg = bloc_fill.get(ci6, bg6) if (ci6 >= 9 and v and v != "—") else bg6
-                    c.font  = Font("Calibri", size=10 if ci6 < 9 else 9, color=C_DK)
-                    c.fill  = xfill(cell_bg); c.border = xbdr()
-                    if f6: c.number_format = f6
-                    if ci6 == 0:         c.font = Font("Calibri", size=10, bold=True, color=C_DK); c.alignment = xctr()
-                    elif ci6 in [4, 5]:  c.alignment = xrgt()
-                    elif ci6 in [6,7,8]: c.alignment = xctr()
-                    elif ci6 >= 9:       c.alignment = xlft(w=True)
-                    else:                c.alignment = xlft(w=(ci6 in [1, 3]))
-                ws4.row_dimensions[r6].height = 30
-
-            ws4.freeze_panes = "A5"
-
-            # ── Onglet 5 : Analyse Casse
-            ws5 = wb_exp.create_sheet("Analyse Casse")
-            title_block(ws5, "ANALYSE CASSE RÉSEAU", span=8)
-
-            # KPIs casse
-            kpi_casse = [
-                ("Casse Réseau (FCFA)",  f"{abs(casse_reseau):,.0f}"),
-                ("Tx Casse Réseau",      f"{tx_casse_reseau:.2f}%"),
-                ("Sites > 1% casse",     str(nb_sites_alerte)),
-                ("Tx Casse Moyen",       f"{moy_tx_casse_site:.2f}%"),
-            ]
-            for ci_k, (lbl, val) in enumerate(kpi_casse):
-                ck = ws5.cell(row=4, column=ci_k+1, value=lbl)
-                ck.font = Font("Calibri", size=9, bold=True, color=C_WH)
-                ck.fill = xfill(C_SUB); ck.alignment = xctr(); ck.border = xbdr()
-                ck2 = ws5.cell(row=5, column=ci_k+1, value=val)
-                ck2.font = Font("Calibri", size=12, bold=True, color=C_DK)
-                ck2.fill = xfill("FFFFFF"); ck2.alignment = xctr(); ck2.border = xbdr()
-                ws5.column_dimensions[get_column_letter(ci_k+1)].width = 22
-            ws5.row_dimensions[4].height = 20; ws5.row_dimensions[5].height = 28
-
-            # Classement sites
-            r5s = 7
-            ws5.merge_cells(start_row=r5s, start_column=1, end_row=r5s, end_column=7)
-            c = ws5.cell(row=r5s, column=1, value="  CLASSEMENT MAGASINS — taux de casse décroissant")
-            c.font = Font("Calibri", size=10, bold=True, color=C_WH)
-            c.fill = xfill(C_SUB); c.alignment = xlft(); ws5.row_dimensions[r5s].height = 22; r5s += 1
-
-            hdrs_cs = ["Rang","Magasin","Format","CA (FCFA)","Casse (FCFA)","Casse (Qté)","Tx Casse"]
-            wdths_cs = [5, 28, 10, 16, 16, 14, 12]
-            write_header_row(ws5, r5s, hdrs_cs, wdths_cs); r5s += 1
-
-            for ri_s, (_, sd) in enumerate(agg_casse_site.iterrows()):
-                bg_s = "FFF8F0" if sd["TxCasse"] > 1 else ("F7F7F7" if ri_s % 2 == 0 else "FFFFFF")
-                casse_q_val = int(sd["Casse_Q"]) if has_qty and pd.notna(sd.get("Casse_Q")) else None
-                vals_s = [ri_s+1, sd["lib_site"], sd["format"],
-                          sd["CA"], abs(sd["Casse_V"]),
-                          casse_q_val,
-                          sd["TxCasse"]/100 if pd.notna(sd["TxCasse"]) else None]
-                fmts_s = [None,None,None,"#,##0","#,##0","#,##0","0.00%"]
-                for ci_s, (v, f_s) in enumerate(zip(vals_s, fmts_s)):
-                    c = ws5.cell(row=r5s, column=ci_s+1, value=v)
-                    c.font = Font("Calibri", size=10, color=C_DK)
-                    c.fill = xfill(bg_s); c.border = xbdr()
-                    if f_s: c.number_format = f_s
-                    c.alignment = xctr() if ci_s == 0 else xrgt() if ci_s in [3,4,5] else xctr()
-                ws5.row_dimensions[r5s].height = 20; r5s += 1
-
-            # Récap rayon
-            r5s += 1
-            ws5.merge_cells(start_row=r5s, start_column=1, end_row=r5s, end_column=5)
-            c = ws5.cell(row=r5s, column=1, value="  CASSE PAR RAYON")
-            c.font = Font("Calibri", size=10, bold=True, color=C_WH)
-            c.fill = xfill(C_SUB); c.alignment = xlft(); ws5.row_dimensions[r5s].height = 22; r5s += 1
-
-            write_header_row(ws5, r5s, ["Rayon","CA (FCFA)","Casse (FCFA)","Tx Casse","% Casse Réseau"],
-                             [22, 16, 16, 12, 16]); r5s += 1
-            for ri_r, (_, rd) in enumerate(agg_casse_rax.iterrows()):
-                bg_r = "F7F7F7" if ri_r % 2 == 0 else "FFFFFF"
-                pct_res = abs(rd["Casse_V"]) / abs(casse_reseau) if casse_reseau != 0 else 0
-                vals_r = [rd["lib_rayon"], rd["CA"], abs(rd["Casse_V"]),
-                          rd["TxCasse"]/100 if pd.notna(rd["TxCasse"]) else None, pct_res]
-                fmts_r = [None,"#,##0","#,##0","0.00%","0.0%"]
-                for ci_r, (v, f_r) in enumerate(zip(vals_r, fmts_r)):
-                    c = ws5.cell(row=r5s, column=ci_r+1, value=v)
-                    c.font = Font("Calibri", size=10, color=C_DK)
-                    c.fill = xfill(bg_r); c.border = xbdr()
-                    if f_r: c.number_format = f_r
-                    c.alignment = xlft() if ci_r == 0 else xrgt() if ci_r in [1,2] else xctr()
-                ws5.row_dimensions[r5s].height = 20; r5s += 1
-
-            # Top 30 articles
-            r5s += 1
-            ws5.merge_cells(start_row=r5s, start_column=1, end_row=r5s, end_column=8)
-            c = ws5.cell(row=r5s, column=1, value="  TOP 30 ARTICLES — valeur de casse la plus élevée")
-            c.font = Font("Calibri", size=10, bold=True, color=C_WH)
-            c.fill = xfill(C_SUB); c.alignment = xlft(); ws5.row_dimensions[r5s].height = 22; r5s += 1
-
-            hdrs_a = ["#","Article","Rayon","Famille","CA (FCFA)","Casse (FCFA)","Casse (Qté)","Tx Casse"]
-            wdths_a = [5, 44, 18, 24, 16, 16, 14, 12]
-            write_header_row(ws5, r5s, hdrs_a, wdths_a); r5s += 1
-
-            for ri_a, (_, ra) in enumerate(top30_casse.iterrows()):
-                bg_a = "F7F7F7" if ri_a % 2 == 0 else "FFFFFF"
-                casse_q_a = int(ra["Casse_Q"]) if has_qty and pd.notna(ra.get("Casse_Q")) else None
-                vals_a = [ra["Rang"], ra["lib_art"], ra["lib_rayon"], ra["lib_fam"],
-                          ra["CA"], abs(ra["Casse_V"]), casse_q_a,
-                          ra["TxCasse"]/100 if pd.notna(ra["TxCasse"]) else None]
-                fmts_a = [None,None,None,None,"#,##0","#,##0","#,##0","0.00%"]
-                for ci_a, (v, f_a) in enumerate(zip(vals_a, fmts_a)):
-                    c = ws5.cell(row=r5s, column=ci_a+1, value=v)
-                    c.font = Font("Calibri", size=10, color=C_DK)
-                    c.fill = xfill(bg_a); c.border = xbdr()
-                    if f_a: c.number_format = f_a
-                    if ci_a == 0:        c.alignment = xctr()
-                    elif ci_a in [4,5,6]: c.alignment = xrgt()
-                    elif ci_a == 7:      c.alignment = xctr()
-                    else:                c.alignment = xlft(w=(ci_a in [1,3]))
-                ws5.row_dimensions[r5s].height = 20; r5s += 1
-
-            ws5.freeze_panes = "A4"
-
-            buf = BytesIO()
-            wb_exp.save(buf)
-            buf.seek(0)
+  <strong>Onglet 1 — Contrôle exhaustivité</strong> : contrôles fournisseurs, décisions, finance et qualité données<br>
+  <strong>Onglet 2 — État DL complet</strong> : un fournisseur par ligne avec TS, Sit95, colis, coût XD<br>
+  <strong>Onglet 3 — Plan de lissage XD</strong> : cadence cible, jours de livraison, charge quai et coûts<br>
+  <strong>Onglet 4 — À statuer</strong> : DL surveiller, litiges, inactifs, hors périmètre, sans données<br>
+  <strong>Onglet 5 — BDD articles</strong> : liste articles par fournisseur avec décision XD associée
+</div>
+""", unsafe_allow_html=True)
 
         st.download_button(
-            label="⬇️ Télécharger le rapport Excel",
-            data=buf,
-            file_name=f"SmartBuyer_Diagnostic_Reseau_{periode.replace('/','').replace(' ','_').replace('→','_')}.xlsx",
+            label="📥 Télécharger Analyse_Commando_XD.xlsx",
+            data=excel_bytes,
+            file_name="Analyse_Commando_XD.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
         )
+
+except ImportError as e:
+    st.error("Dépendance Python manquante.")
+    st.code(str(e))
+    st.markdown("""
+<div class='alert-card alert-amber'>
+  <strong>Correction recommandée</strong><br>
+  Ajoute les dépendances suivantes dans <code>requirements.txt</code>, puis redéploie l’application.
+</div>
+""", unsafe_allow_html=True)
+    st.code("""streamlit
+pandas
+numpy
+openpyxl
+xlsxwriter
+pyxlsb
+xlrd""")
+
+except ValueError as e:
+    st.error("Erreur de structure ou de données fichier.")
+    st.code(str(e))
+
+except Exception as e:
+    st.error("Erreur inattendue pendant le traitement.")
+    st.exception(e)
