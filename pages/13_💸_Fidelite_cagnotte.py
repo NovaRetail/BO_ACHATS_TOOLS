@@ -8,7 +8,7 @@ from io import StringIO
 # CHARTE VISUELLE SmartBuyer Hub
 # ─────────────────────────────────────────────
 st.set_page_config(
-    page_title="Suivi Fidélité · SmartBuyer Hub",
+    page_title="Fidélité Cagnotte · SmartBuyer Hub",
     page_icon="🏷️",
     layout="wide",
 )
@@ -296,7 +296,7 @@ with col_title:
     st.markdown("""
     <div style="padding-top:6px;">
     <span style="font-size:18px;font-weight:700;color:#1C1C1E;">SmartBuyer Hub</span>
-    <span style="font-size:14px;color:#8E8E93;margin-left:10px;">· Suivi Fidélité · Investissement vs Performance</span>
+    <span style="font-size:14px;color:#8E8E93;margin-left:10px;">· Fidélité Cagnotte · Investissement vs Performance</span>
     </div>
     """, unsafe_allow_html=True)
 
@@ -329,13 +329,16 @@ with st.sidebar:
         label_visibility="collapsed"
     )
     
-    st.markdown("<hr style='margin:16px 0;border:none;border-top:1px solid #E5E5EA;'>")
+    st.markdown("---")
     st.markdown("""
-    <div style='font-size:11px;color:#8E8E93;line-height:1.6;'>
-    📌 <b>Format attendu :</b><br>
-    • Ventes : export PBI (séparateur <code>;</code>)<br>
-    • Fidélité : Article / Cagnotte / Mois<br>
-    • Plusieurs semaines cumulables
+    <div style='font-size:11px;color:#8E8E93;line-height:1.8;'>
+    <div style='font-size:12px;font-weight:600;color:#3A3A3C;margin-bottom:6px;'>📋 Format attendu</div>
+    <div style='margin-bottom:4px;'><b>Ventes :</b> export Power BI (séparateur <code>;</code>)</div>
+    <div style='margin-bottom:4px;'><b>Fidélité :</b> colonnes Article / Cagnotte / Mois</div>
+    <div style='margin-bottom:4px;'><b>Multi-semaines :</b> chargez plusieurs fichiers, ils sont empilés automatiquement</div>
+    <div style='margin-top:10px;padding:8px;background:#F2F2F7;border-radius:6px;font-size:10px;color:#636366;'>
+    💡 La période est détectée automatiquement depuis les métadonnées du fichier PBI
+    </div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -345,14 +348,82 @@ with st.sidebar:
 # ─────────────────────────────────────────────
 if not ventes_files or not fidelite_file:
     st.markdown("""
-    <div style='background:#FFFFFF;border-radius:16px;padding:48px;text-align:center;
-    border:1px solid #E5E5EA;box-shadow:0 1px 3px rgba(0,0,0,0.06);'>
-        <div style='font-size:48px;margin-bottom:16px;'>🏷️</div>
-        <div style='font-size:20px;font-weight:700;color:#1C1C1E;margin-bottom:8px;'>
-            Suivi Fidélité
+    <div style='background:#FFFFFF;border-radius:16px;padding:40px 48px;
+    border:1px solid #E5E5EA;box-shadow:0 1px 3px rgba(0,0,0,0.06);margin-bottom:20px;'>
+        <div style='display:flex;align-items:flex-start;gap:24px;'>
+            <div style='font-size:48px;line-height:1;margin-top:4px;'>🏷️</div>
+            <div style='flex:1;'>
+                <div style='font-size:22px;font-weight:700;color:#1C1C1E;margin-bottom:6px;'>
+                    Fidélité Cagnotte
+                </div>
+                <div style='font-size:14px;color:#636366;line-height:1.6;max-width:680px;'>
+                    Pilotez la performance de votre programme de fidélité : mesurez l'investissement cagnotte,
+                    le poids des articles en programme sur votre CA et votre marge, et identifiez les magasins
+                    et familles où le programme génère de la valeur.
+                </div>
+            </div>
         </div>
-        <div style='font-size:14px;color:#8E8E93;max-width:400px;margin:0 auto;'>
-            Chargez vos fichiers ventes et votre liste fidélité dans le panneau gauche pour démarrer l'analyse.
+    </div>
+    """, unsafe_allow_html=True)
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.markdown("""
+        <div style='background:#FFFFFF;border-radius:12px;padding:20px 24px;
+        border:1px solid #E5E5EA;box-shadow:0 1px 3px rgba(0,0,0,0.06);height:180px;'>
+            <div style='font-size:24px;margin-bottom:10px;'>📊</div>
+            <div style='font-size:14px;font-weight:600;color:#1C1C1E;margin-bottom:6px;'>Récap Financier</div>
+            <div style='font-size:12px;color:#636366;line-height:1.6;'>
+                Agrégat Site × Rayon × Famille — CA et Marge fidélité vs global, poids du programme,
+                budget cagnotte investi.
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    with col2:
+        st.markdown("""
+        <div style='background:#FFFFFF;border-radius:12px;padding:20px 24px;
+        border:1px solid #E5E5EA;box-shadow:0 1px 3px rgba(0,0,0,0.06);height:180px;'>
+            <div style='font-size:24px;margin-bottom:10px;'>🔍</div>
+            <div style='font-size:14px;font-weight:600;color:#1C1C1E;margin-bottom:6px;'>Récap Détail</div>
+            <div style='font-size:12px;color:#636366;line-height:1.6;'>
+                Vue Article × Magasin avec ligne TOTAL par article — cagnotte unitaire,
+                total cagnotte, CA et marge par site.
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    with col3:
+        st.markdown("""
+        <div style='background:#FFFFFF;border-radius:12px;padding:20px 24px;
+        border:1px solid #E5E5EA;box-shadow:0 1px 3px rgba(0,0,0,0.06);height:180px;'>
+            <div style='font-size:24px;margin-bottom:10px;'>📋</div>
+            <div style='font-size:14px;font-weight:600;color:#1C1C1E;margin-bottom:6px;'>Drill-down Granulaire</div>
+            <div style='font-size:12px;color:#636366;line-height:1.6;'>
+                Toutes les lignes article × site × période — filtrable par Rayon, Famille
+                et Magasin pour une analyse fine.
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+
+    st.markdown("""
+    <div style='background:#EAF4FF;border-radius:12px;padding:20px 24px;
+    border:1px solid #B8D9FF;'>
+        <div style='font-size:13px;font-weight:600;color:#007AFF;margin-bottom:10px;'>
+            🚀 Pour démarrer
+        </div>
+        <div style='display:grid;grid-template-columns:1fr 1fr;gap:16px;'>
+            <div style='font-size:12px;color:#3A3A3C;line-height:1.7;'>
+                <b>① Fichiers ventes</b> (panneau gauche)<br>
+                Chargez une ou plusieurs extractions Power BI au format CSV (séparateur <code>;</code>).
+                Plusieurs semaines peuvent être chargées simultanément — elles seront empilées automatiquement.
+            </div>
+            <div style='font-size:12px;color:#3A3A3C;line-height:1.7;'>
+                <b>② Liste Fidélité</b> (panneau gauche)<br>
+                Chargez le référentiel des articles en programme avec les colonnes
+                <code>Article</code> / <code>Cagnotte</code> / <code>Mois</code>.
+                La jointure avec les ventes est automatique.
+            </div>
         </div>
     </div>
     """, unsafe_allow_html=True)
