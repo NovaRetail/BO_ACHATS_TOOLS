@@ -335,13 +335,20 @@ df_fid_only = df_joined[df_joined['est_fidelite']].copy()
 
 
 # ─────────────────────────────────────────────
-# PERIOD BADGE
+# PERIOD BADGE — plage consolidée de tous les fichiers du mois
 # ─────────────────────────────────────────────
-pi = next((p for p in periods if mois_sel in p['mois']), periods[0] if periods else None)
-d1_str = pi['date_debut'].strftime('%d/%m/%Y') if pi and pi['date_debut'] else '—'
-d2_str = pi['date_fin'].strftime('%d/%m/%Y')   if pi and pi['date_fin']   else '—'
-sem_str  = pi['sem']  if pi else '—'
-mois_str = pi['mois'] if pi else '—'
+periods_mois = [p for p in periods if mois_sel in p['mois']]
+if not periods_mois:
+    periods_mois = periods  # fallback
+
+dates_debut = [p['date_debut'] for p in periods_mois if p['date_debut'] is not None]
+dates_fin   = [p['date_fin']   for p in periods_mois if p['date_fin']   is not None]
+semaines    = sorted(set(p['sem'] for p in periods_mois if p['sem'] != '—'))
+
+d1_str   = min(dates_debut).strftime('%d/%m/%Y') if dates_debut else '—'
+d2_str   = max(dates_fin).strftime('%d/%m/%Y')   if dates_fin   else '—'
+sem_str  = ' · '.join(semaines) if semaines else '—'
+mois_str = periods_mois[0]['mois'] if periods_mois else '—'
 
 st.markdown(f"""<div class="period-badge">
     <div>
@@ -394,6 +401,109 @@ st.markdown(f"""<div class="kpi-grid">
     </div>
 </div>""", unsafe_allow_html=True)
 
+
+# ─────────────────────────────────────────────
+# EXPORT GLOBAL
+# ─────────────────────────────────────────────
+def build_full_export():
+    """Construit un Excel multi-onglets avec toutes les données du module."""
+
+    # 1. Récap Financier
+    grp_gl = df_mois.groupby(['Site nom long','Rayon','Famille'], as_index=False).agg(
+        CA_Globale=('CA','sum'), Marge_Globale=('Marge','sum'))
+    grp_fd = df_fid_only.groupby(['Site nom long','Rayon','Famille'], as_index=False).agg(
+        CA_Fidelite=('CA','sum'), Marge_Fidelite=('Marge','sum'),
+        Qte_Vente=('Qté Vente','sum'), Total_Cagnotte=('Total Cagnotte','sum'))
+    df_rf = grp_fd.merge(grp_gl, on=['Site nom long','Rayon','Famille'], how='left')
+    df_rf['Poids Fidélité %'] = np.where(df_rf['CA_Globale']>0,
+        (df_rf['CA_Fidelite']/df_rf['CA_Globale']*100).round(1), np.nan)
+    df_rf['Poids Marge Fidélité %'] = np.where(df_rf['Marge_Globale'].abs()>0,
+        (df_rf['Marge_Fidelite']/df_rf['Marge_Globale']*100).round(1), np.nan)
+    df_rf.insert(0, 'Mois', mois_court)
+    df_rf = df_rf.rename(columns={'Site nom long':'Site','CA_Fidelite':'CA Fidélité',
+        'CA_Globale':'CA Globale','Marge_Fidelite':'Marge Fidélité','Marge_Globale':'Marge Globale',
+        'Qte_Vente':'Qté Vente','Total_Cagnotte':'Total Cagnotte'})
+
+    # 2. Récap Détail Article × Site
+    df_rd = df_fid_only.groupby(
+        ['Date Début','Date Fin','Semaine','Mois','Rayon','Famille','Article','Site nom long'],
+        as_index=False
+    ).agg(CA=('CA','sum'), Marge=('Marge','sum'), Qte=('Qté Vente','sum'),
+          Cagnotte_unit=('Cagnotte_unit','first'), Total_Cagnotte=('Total Cagnotte','sum'))
+    df_rd = df_rd.rename(columns={'Site nom long':'Site','Qte':'Qté Vente',
+        'Cagnotte_unit':'Cagnotte/unité','Total_Cagnotte':'Total Cagnotte'})
+
+    # 3. Synthèse — Top Familles
+    grp_fam_e = df_fid_only.groupby('Famille', as_index=False).agg(
+        CA_Fidelite=('CA','sum'), Marge_Fidelite=('Marge','sum'),
+        Budget_Cagnotte=('Total Cagnotte','sum'))
+    grp_fam_gl_e = df_mois.groupby('Famille', as_index=False).agg(CA_Globale=('CA','sum'))
+    grp_fam_e = grp_fam_e.merge(grp_fam_gl_e, on='Famille', how='left')
+    grp_fam_e['Poids %'] = np.where(grp_fam_e['CA_Globale']>0,
+        (grp_fam_e['CA_Fidelite']/grp_fam_e['CA_Globale']*100).round(1), np.nan)
+    grp_fam_e = grp_fam_e.sort_values('Budget_Cagnotte', ascending=False).rename(columns={
+        'CA_Fidelite':'CA Fidélité','Marge_Fidelite':'Marge Fidélité','Budget_Cagnotte':'Budget Cagnotte'})
+
+    # 4. Synthèse — Performance Réseau
+    grp_site_e = df_fid_only.groupby('Site nom long', as_index=False).agg(
+        CA_Fidelite=('CA','sum'), Marge_Fidelite=('Marge','sum'),
+        Budget_Cagnotte=('Total Cagnotte','sum'), Nb_Articles=('_article_id','nunique'))
+    grp_site_gl_e = df_mois.groupby('Site nom long', as_index=False).agg(CA_Globale=('CA','sum'))
+    grp_site_e = grp_site_e.merge(grp_site_gl_e, on='Site nom long', how='left')
+    grp_site_e['Poids %'] = np.where(grp_site_e['CA_Globale']>0,
+        (grp_site_e['CA_Fidelite']/grp_site_e['CA_Globale']*100).round(1), np.nan)
+    grp_site_e = grp_site_e.rename(columns={'Site nom long':'Site','CA_Fidelite':'CA Fidélité',
+        'Marge_Fidelite':'Marge Fidélité','Budget_Cagnotte':'Budget Cagnotte','Nb_Articles':'Nb Articles'})
+
+    # 5. Alertes — Articles sans ventes
+    arts_zero_e = (df_fid_only[df_fid_only['CA'].isna() | (df_fid_only['CA']==0)]
+                   [['_article_id','Article']].drop_duplicates().sort_values('Article')
+                   [['Article']])
+
+    # 6. Alertes — Familles marge négative
+    fam_neg_e = df_fid_only.groupby('Famille', as_index=False).agg(
+        CA_Fidelite=('CA','sum'), Marge_Fidelite=('Marge','sum'),
+        Budget_Cagnotte=('Total Cagnotte','sum'))
+    fam_neg_e = fam_neg_e[fam_neg_e['Marge_Fidelite']<0].sort_values('Marge_Fidelite')
+    fam_neg_e = fam_neg_e.rename(columns={'CA_Fidelite':'CA Fidélité',
+        'Marge_Fidelite':'Marge Fidélité','Budget_Cagnotte':'Budget Cagnotte'})
+
+    # 7. Raw Data fidélité
+    df_raw_e = df_ventes.copy()
+    df_raw_e['_mois_court'] = df_raw_e['Mois'].apply(lambda x: str(x).split(' ')[0] if pd.notna(x) else '')
+    df_fid_all_e = df_fidelite.rename(columns={'Article':'_article_id','Cagnotte':'Cagnotte/unité','Mois':'_mois_fid'})
+    df_raw_e = df_raw_e.merge(
+        df_fid_all_e[['_article_id','Cagnotte/unité','_mois_fid']],
+        left_on=['_article_id','_mois_court'], right_on=['_article_id','_mois_fid'], how='left'
+    ).drop(columns=['_mois_fid','_mois_court','_article_id'], errors='ignore')
+    df_raw_e['Total Cagnotte'] = df_raw_e['Cagnotte/unité'] * df_raw_e['Qté Vente']
+    df_raw_e = df_raw_e[df_raw_e['Cagnotte/unité'].notna()].copy()
+    cols_re = ['Date Début','Date Fin','Semaine','Mois','Site nom long','Rayon',
+               'Famille','Article','CA','Marge','Qté Vente','Cagnotte/unité','Total Cagnotte']
+    df_raw_e = df_raw_e[[c for c in cols_re if c in df_raw_e.columns]]
+
+    return to_excel({
+        'Récap Financier':       df_rf,
+        'Récap Détail':          df_rd,
+        'Synthèse Familles':     grp_fam_e,
+        'Performance Réseau':    grp_site_e,
+        'Alertes Articles 0vte': arts_zero_e,
+        'Alertes Marge Négative':fam_neg_e,
+        'Raw Data Fidélité':     df_raw_e,
+    })
+
+# Bouton export global — aligné à droite via colonnes
+_spacer, _btn_col = st.columns([8, 2])
+with _btn_col:
+    st.download_button(
+        label="⬇️ Tout exporter · Excel",
+        data=build_full_export(),
+        file_name=f"Fidelite_Cagnotte_Complet_{mois_court}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True,
+    )
+
+st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
 # TABS
