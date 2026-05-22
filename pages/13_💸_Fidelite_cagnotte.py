@@ -680,7 +680,7 @@ with tab0:
         df_top5 = grp_fam[['Famille','CA_Fidelite','Marge_Fidelite','Budget_Cagnotte','Poids %']].copy()
         # shorten famille label
         df_top5['Famille'] = df_top5['Famille'].apply(
-            lambda x: re.sub(r'^\d+\s*-\s*', '', str(x))[:30])
+            lambda x: re.sub(r'^\d+\s*-\s*', '', str(x)))
         df_top5_disp = df_top5.copy()
         df_top5_disp['CA_Fidelite']    = df_top5_disp['CA_Fidelite'].apply(fmt_num)
         df_top5_disp['Marge_Fidelite'] = df_top5_disp['Marge_Fidelite'].apply(fmt_num)
@@ -757,7 +757,7 @@ with tab0:
         if n_zero > 0:
             arts_zero_disp = arts_zero_names[['Article']].copy()
             arts_zero_disp['Article'] = arts_zero_disp['Article'].apply(
-                lambda x: re.sub(r'^\d+\s*-\s*', '', str(x))[:50])
+                lambda x: re.sub(r'^\d+\s*-\s*', '', str(x)))
             st.dataframe(arts_zero_disp, use_container_width=True, hide_index=True, height=220)
         else:
             st.success("✅ Tous les articles en programme ont généré des ventes.")
@@ -782,7 +782,7 @@ with tab0:
         if n_neg > 0:
             fam_neg_disp = fam_neg.copy()
             fam_neg_disp['Famille'] = fam_neg_disp['Famille'].apply(
-                lambda x: re.sub(r'^\d+\s*-\s*', '', str(x))[:35])
+                lambda x: re.sub(r'^\d+\s*-\s*', '', str(x)))
             fam_neg_disp['Marge_Fidelite']  = fam_neg_disp['Marge_Fidelite'].apply(fmt_num)
             fam_neg_disp['CA_Fidelite']     = fam_neg_disp['CA_Fidelite'].apply(fmt_num)
             fam_neg_disp['Budget_Cagnotte'] = fam_neg_disp['Budget_Cagnotte'].apply(fmt_num)
