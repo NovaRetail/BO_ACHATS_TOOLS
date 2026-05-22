@@ -587,10 +587,13 @@ def build_full_export():
     grp_site_e = grp_site_e.rename(columns={'Site nom long':'Site','CA_Fidelite':'CA Fidélité',
         'Marge_Fidelite':'Marge Fidélité','Budget_Cagnotte':'Budget Cagnotte','Nb_Articles':'Nb Articles'})
 
-    # 5. Alertes — Articles sans ventes
-    arts_zero_e = (df_fid_only[df_fid_only['CA'].isna() | (df_fid_only['CA']==0)]
-                   [['_article_id','Article']].drop_duplicates().sort_values('Article')
-                   [['Article']])
+    # 5. Alertes — Articles sans ventes (croisé sur mois actifs uniquement)
+    arts_perimetre_e = set(df_fid_mois['Article'].unique())
+    arts_avec_ca_e   = set(df_fid_only[df_fid_only['CA'].notna() & (df_fid_only['CA']>0)]['_article_id'].unique())
+    arts_zero_ids_e  = arts_perimetre_e - arts_avec_ca_e
+    arts_zero_e = (df_ventes[df_ventes['_article_id'].isin(arts_zero_ids_e)]
+                   [['_article_id','Article']].drop_duplicates()
+                   .sort_values('Article')[['Article']])
 
     # 6. Alertes — Familles marge négative
     fam_neg_e = df_fid_only.groupby('Famille', as_index=False).agg(
@@ -720,12 +723,28 @@ with tab0:
     col_c, col_d = st.columns([1, 1])
 
     with col_c:
-        # Articles sans ventes (0 ROI)
-        arts_zero = df_fid_only[df_fid_only['CA'].isna() | (df_fid_only['CA'] == 0)]['_article_id'].unique()
-        # Distinct article names
-        arts_zero_names = (df_fid_only[df_fid_only['_article_id'].isin(arts_zero)]
-                           [['_article_id','Article']].drop_duplicates()
-                           .sort_values('Article'))
+        # Articles sans ventes (0 ROI) — croisement strict mois sélectionnés
+        # Articles en programme pour les mois actifs
+        arts_perimetre_mois = set(df_fid_mois['Article'].unique())
+        # Articles ayant vendu (CA > 0) dans la période filtrée
+        arts_avec_ca = set(
+            df_fid_only[df_fid_only['CA'].notna() & (df_fid_only['CA'] > 0)]['_article_id'].unique()
+        )
+        # Articles en programme ce mois sans aucune vente
+        arts_zero_ids = arts_perimetre_mois - arts_avec_ca
+        # Récupérer les libellés depuis df_fid_only ou df_ventes
+        arts_zero_from_ventes = (df_ventes[df_ventes['_article_id'].isin(arts_zero_ids)]
+                                 [['_article_id','Article']].drop_duplicates())
+        # Compléter avec les IDs non trouvés dans les ventes (articles absents du tout)
+        arts_found_ids = set(arts_zero_from_ventes['_article_id'].tolist())
+        arts_missing   = arts_zero_ids - arts_found_ids
+        if arts_missing:
+            df_missing = pd.DataFrame({'_article_id': list(arts_missing),
+                                       'Article': [str(i) for i in arts_missing]})
+            arts_zero_names = pd.concat([arts_zero_from_ventes, df_missing], ignore_index=True)
+        else:
+            arts_zero_names = arts_zero_from_ventes
+        arts_zero_names = arts_zero_names.sort_values('Article').reset_index(drop=True)
         n_zero = len(arts_zero_names)
         st.markdown(f"""
         <div class="alert-card">
