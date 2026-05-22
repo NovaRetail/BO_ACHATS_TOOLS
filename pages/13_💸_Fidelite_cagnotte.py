@@ -202,77 +202,132 @@ st.markdown("<hr style='margin:8px 0 16px 0;border:none;border-top:1px solid #E5
 
 
 # ─────────────────────────────────────────────
-# SIDEBAR
+# SIDEBAR — Upload + Filtres
 # ─────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("### 📂 Chargement des données")
+    st.markdown("### 📂 Données")
     st.markdown("**Fichiers ventes** *(multi-upload)*")
     ventes_files = st.file_uploader("ventes", type=['csv'], accept_multiple_files=True,
                                      key="ventes_upload", label_visibility="collapsed")
-    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
     st.markdown("**Liste Fidélité** *(référentiel)*")
     fidelite_file = st.file_uploader("fidelite", type=['csv'], accept_multiple_files=False,
                                       key="fidelite_upload", label_visibility="collapsed")
-    st.markdown("---")
-    st.markdown("""<div style='font-size:11px;color:#8E8E93;line-height:1.8;'>
-    <div style='font-size:12px;font-weight:600;color:#3A3A3C;margin-bottom:6px;'>📋 Format attendu</div>
-    <b>Ventes :</b> export Power BI (séparateur <code>;</code>)<br>
-    <b>Fidélité :</b> Article / Cagnotte / Mois<br>
-    <b>Multi-semaines :</b> fichiers empilés automatiquement
-    <div style='margin-top:10px;padding:8px;background:#F2F2F7;border-radius:6px;font-size:10px;color:#636366;'>
-    💡 Période détectée automatiquement depuis les métadonnées PBI
-    </div></div>""", unsafe_allow_html=True)
+    st.markdown("""<div style='font-size:10px;color:#8E8E93;line-height:1.7;margin-top:8px;padding:8px;background:#F2F2F7;border-radius:6px;'>
+    📋 <b>Ventes :</b> export PBI séparateur <code>;</code><br>
+    📋 <b>Fidélité :</b> Article / Cagnotte / Mois<br>
+    💡 Période détectée automatiquement
+    </div>""", unsafe_allow_html=True)
+
+    # Filtres — affichés seulement si données chargées
+    # (widgets déclarés ici, valeurs utilisées après le chargement)
+    _sidebar_filters_placeholder = True
 
 
 # ─────────────────────────────────────────────
 # LANDING PAGE
 # ─────────────────────────────────────────────
 if not ventes_files or not fidelite_file:
+    # Hero
     st.markdown("""
-    <div style='background:#FFFFFF;border-radius:16px;padding:40px 48px;
-    border:1px solid #E5E5EA;box-shadow:0 1px 3px rgba(0,0,0,0.06);margin-bottom:20px;'>
+    <div style='background:linear-gradient(135deg,#007AFF 0%,#0055CC 100%);border-radius:16px;
+    padding:40px 48px;margin-bottom:20px;color:#FFFFFF;'>
         <div style='display:flex;align-items:flex-start;gap:24px;'>
-            <div style='font-size:48px;line-height:1;margin-top:4px;'>🏷️</div>
+            <div style='font-size:52px;line-height:1;margin-top:2px;'>🏷️</div>
             <div style='flex:1;'>
-                <div style='font-size:22px;font-weight:700;color:#1C1C1E;margin-bottom:6px;'>Fidélité Cagnotte</div>
-                <div style='font-size:14px;color:#636366;line-height:1.6;max-width:680px;'>
-                    Pilotez la performance de votre programme de fidélité : mesurez l'investissement cagnotte,
-                    le poids des articles en programme sur votre CA et votre marge, et identifiez les magasins
-                    et familles où le programme génère de la valeur réelle.
+                <div style='font-size:24px;font-weight:700;margin-bottom:8px;'>Fidélité Cagnotte</div>
+                <div style='font-size:14px;opacity:0.9;line-height:1.7;max-width:700px;'>
+                    Pilotez en temps réel la performance de votre programme de fidélité Carrefour CI.
+                    Consolidez plusieurs semaines d'extractions PBI, mesurez l'investissement cagnotte article par article,
+                    analysez le poids du programme sur votre CA et votre marge, et détectez immédiatement
+                    les articles sans ventes et les familles en dérive.
+                </div>
+                <div style='margin-top:16px;display:flex;gap:12px;flex-wrap:wrap;'>
+                    <span style='background:rgba(255,255,255,0.2);border-radius:20px;padding:4px 14px;font-size:12px;font-weight:500;'>
+                    📦 Multi-semaines</span>
+                    <span style='background:rgba(255,255,255,0.2);border-radius:20px;padding:4px 14px;font-size:12px;font-weight:500;'>
+                    🏪 10 magasins</span>
+                    <span style='background:rgba(255,255,255,0.2);border-radius:20px;padding:4px 14px;font-size:12px;font-weight:500;'>
+                    🔗 Jointure auto article × cagnotte</span>
+                    <span style='background:rgba(255,255,255,0.2);border-radius:20px;padding:4px 14px;font-size:12px;font-weight:500;'>
+                    ⬇️ Export Excel 7 onglets</span>
                 </div>
             </div>
         </div>
     </div>""", unsafe_allow_html=True)
 
-    c1, c2, c3, c4 = st.columns(4)
+    # 5 onglets cards
+    c1, c2, c3, c4, c5 = st.columns(5)
     cards = [
-        ("🏠", "Synthèse Exécutive", "Vue COPIL : top familles, performance réseau, alertes articles sans ventes et familles en marge négative."),
-        ("📊", "Récap Financier", "Agrégat Site × Rayon × Famille — CA et Marge fidélité vs global, poids du programme, budget cagnotte."),
-        ("🔍", "Récap Détail", "Vue Article × Magasin — cagnotte unitaire, total cagnotte, CA et marge par site."),
-        ("📋", "Drill-down", "Toutes les lignes article × site × période, filtrable par Rayon, Famille et Magasin."),
+        ("🏠", "Synthèse Exécutive", "#007AFF",
+         "Vue COPIL prête à partager. Top 5 familles par cagnotte, performance par magasin, "
+         "alertes articles à ROI nul et familles en marge négative."),
+        ("📊", "Récap Financier", "#34C759",
+         "Agrégat Site × Rayon × Famille. CA fidélité vs CA global, Marge fidélité vs Marge globale, "
+         "Poids % du programme, Budget cagnotte investi."),
+        ("🔍", "Récap Détail", "#FF9500",
+         "Vue Article × Magasin. Cagnotte unitaire, Total cagnotte, CA et Marge par site. "
+         "Granularité article pour identifier les best-sellers du programme."),
+        ("📋", "Drill-down", "#AF52DE",
+         "Toutes les lignes brutes article × site × semaine. "
+         "Filtres croisés Rayon / Famille / Magasin pour une analyse fine."),
+        ("🗃️", "Raw Data", "#FF3B30",
+         "Extraction consolidée de toutes vos semaines PBI, "
+         "articles fidélité uniquement, avec cagnottage calculé ligne par ligne. Export direct Excel."),
     ]
-    for col, (ico, title, desc) in zip([c1, c2, c3, c4], cards):
+    for col, (ico, title, color, desc) in zip([c1,c2,c3,c4,c5], cards):
         with col:
-            st.markdown(f"""<div style='background:#FFFFFF;border-radius:12px;padding:20px 24px;
-            border:1px solid #E5E5EA;box-shadow:0 1px 3px rgba(0,0,0,0.06);min-height:170px;'>
-                <div style='font-size:24px;margin-bottom:10px;'>{ico}</div>
-                <div style='font-size:14px;font-weight:600;color:#1C1C1E;margin-bottom:6px;'>{title}</div>
-                <div style='font-size:12px;color:#636366;line-height:1.6;'>{desc}</div>
+            st.markdown(f"""<div style='background:#FFFFFF;border-radius:12px;padding:18px 20px;
+            border:1px solid #E5E5EA;border-top:3px solid {color};
+            box-shadow:0 1px 3px rgba(0,0,0,0.06);min-height:200px;'>
+                <div style='font-size:22px;margin-bottom:8px;'>{ico}</div>
+                <div style='font-size:13px;font-weight:600;color:#1C1C1E;margin-bottom:6px;'>{title}</div>
+                <div style='font-size:11px;color:#636366;line-height:1.6;'>{desc}</div>
             </div>""", unsafe_allow_html=True)
 
     st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
-    st.markdown("""<div style='background:#EAF4FF;border-radius:12px;padding:20px 24px;border:1px solid #B8D9FF;'>
-        <div style='font-size:13px;font-weight:600;color:#007AFF;margin-bottom:10px;'>🚀 Pour démarrer</div>
-        <div style='display:grid;grid-template-columns:1fr 1fr;gap:16px;'>
-            <div style='font-size:12px;color:#3A3A3C;line-height:1.7;'>
-                <b>① Fichiers ventes</b> (panneau gauche)<br>
-                Chargez une ou plusieurs extractions Power BI CSV (séparateur <code>;</code>).
-                Plusieurs semaines peuvent être chargées simultanément.
+
+    # Données clés du programme
+    st.markdown("""<div style='background:#FFFFFF;border-radius:12px;padding:20px 28px;
+    border:1px solid #E5E5EA;box-shadow:0 1px 3px rgba(0,0,0,0.06);margin-bottom:16px;'>
+        <div style='font-size:13px;font-weight:600;color:#1C1C1E;margin-bottom:14px;'>
+        📐 Ce que le module calcule automatiquement
+        </div>
+        <div style='display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;font-size:12px;color:#3A3A3C;line-height:1.7;'>
+            <div>
+                <div style='font-weight:600;color:#007AFF;margin-bottom:4px;'>Jointure ventes × fidélité</div>
+                Chaque ligne de vente est associée à sa cagnotte unitaire du mois correspondant
+                via le code article. Aucune manipulation manuelle.
             </div>
-            <div style='font-size:12px;color:#3A3A3C;line-height:1.7;'>
-                <b>② Liste Fidélité</b> (panneau gauche)<br>
-                Chargez le référentiel des articles en programme avec les colonnes
+            <div>
+                <div style='font-weight:600;color:#007AFF;margin-bottom:4px;'>Total Cagnotte</div>
+                Calculé ligne par ligne : <code>Cagnotte/unité × Qté Vendue</code>.
+                Agrégé par article, famille, site et période selon la vue choisie.
+            </div>
+            <div>
+                <div style='font-weight:600;color:#007AFF;margin-bottom:4px;'>Poids Fidélité %</div>
+                <code>CA Fidélité / CA Global</code> et <code>Marge Fidélité / Marge Globale</code>
+                par Site × Rayon × Famille — pour mesurer l'importance du programme dans chaque rayon.
+            </div>
+        </div>
+    </div>""", unsafe_allow_html=True)
+
+    # Démarrage
+    st.markdown("""<div style='background:#EAF4FF;border-radius:12px;padding:20px 28px;border:1px solid #B8D9FF;'>
+        <div style='font-size:13px;font-weight:600;color:#007AFF;margin-bottom:12px;'>🚀 Pour démarrer — 2 étapes</div>
+        <div style='display:grid;grid-template-columns:1fr 1fr;gap:20px;'>
+            <div style='font-size:12px;color:#3A3A3C;line-height:1.8;'>
+                <div style='font-weight:600;margin-bottom:4px;'>① Fichiers ventes (panneau gauche)</div>
+                Chargez une ou plusieurs extractions Power BI au format CSV (séparateur <code>;</code>).
+                Plusieurs semaines sont cumulables — le module les empile et détecte automatiquement
+                les périodes, semaines et mois depuis les métadonnées PBI.
+            </div>
+            <div style='font-size:12px;color:#3A3A3C;line-height:1.8;'>
+                <div style='font-weight:600;margin-bottom:4px;'>② Liste Fidélité (panneau gauche)</div>
+                Chargez le référentiel des articles en programme : colonnes
                 <code>Article</code> / <code>Cagnotte</code> / <code>Mois</code>.
+                Un même article peut apparaître sur plusieurs mois avec des montants différents —
+                la jointure est faite mois par mois automatiquement.
             </div>
         </div>
     </div>""", unsafe_allow_html=True)
@@ -293,70 +348,147 @@ if not all_dfs:
     st.error("Aucune donnée valide trouvée dans les fichiers ventes.")
     st.stop()
 
-df_ventes  = pd.concat(all_dfs, ignore_index=True)
+df_ventes   = pd.concat(all_dfs, ignore_index=True)
 df_fidelite = load_fidelite_csv(fidelite_file)
 
 
 # ─────────────────────────────────────────────
-# GLOBAL FILTERS (top bar)
+# SIDEBAR — FILTRES (après chargement des données)
 # ─────────────────────────────────────────────
-mois_disponibles = sorted(df_ventes['Mois'].dropna().unique().tolist())
-cf1, cf2, cf3 = st.columns([2, 2, 4])
-with cf1:
-    mois_sel = st.selectbox("Mois actif", options=mois_disponibles, index=0)
-with cf2:
-    rayon_sel = st.selectbox("Rayon", options=['Tous'] + sorted(df_ventes['Rayon'].dropna().unique().tolist()))
-with cf3:
-    sites_sel = st.multiselect("Magasins", options=sorted(df_ventes['Site nom long'].dropna().unique().tolist()), default=[])
+with st.sidebar:
+    st.markdown("---")
+    st.markdown("### 🎛️ Filtres")
+
+    # Mois
+    mois_disponibles = sorted(df_ventes['Mois'].dropna().unique().tolist())
+    mois_sel = st.multiselect(
+        "Mois", options=mois_disponibles, default=mois_disponibles,
+        key='f_mois'
+    )
+    if not mois_sel:
+        mois_sel = mois_disponibles  # tout si rien coché
+
+    # Semaines — dynamiques selon mois sélectionnés
+    sem_dispo = sorted(df_ventes[df_ventes['Mois'].isin(mois_sel)]['Semaine'].dropna().unique().tolist())
+    sem_sel = st.multiselect(
+        "Semaines", options=sem_dispo, default=[],
+        key='f_sem',
+        help="Vide = toutes les semaines des mois sélectionnés"
+    )
+
+    # Rayon
+    rayons_dispo = sorted(df_ventes['Rayon'].dropna().unique().tolist())
+    rayon_sel = st.multiselect(
+        "Rayon", options=rayons_dispo, default=[],
+        key='f_rayon',
+        help="Vide = tous les rayons"
+    )
+
+    # Famille — dynamique selon rayon
+    if rayon_sel:
+        fam_src = df_ventes[df_ventes['Rayon'].isin(rayon_sel)]
+    else:
+        fam_src = df_ventes
+    fam_dispo = sorted(fam_src['Famille'].dropna().unique().tolist())
+    famille_sel = st.multiselect(
+        "Famille", options=fam_dispo, default=[],
+        key='f_famille',
+        help="Vide = toutes les familles"
+    )
+
+    # Magasins
+    sites_dispo = sorted(df_ventes['Site nom long'].dropna().unique().tolist())
+    sites_sel = st.multiselect(
+        "Magasins", options=sites_dispo, default=[],
+        key='f_sites',
+        help="Vide = tous les magasins"
+    )
+
+    # Reset button
+    st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+    if st.button("↺ Réinitialiser les filtres", use_container_width=True):
+        for k in ['f_mois','f_sem','f_rayon','f_famille','f_sites']:
+            if k in st.session_state:
+                del st.session_state[k]
+        st.rerun()
 
 
 # ─────────────────────────────────────────────
 # FILTER & JOIN
 # ─────────────────────────────────────────────
-mois_court = mois_sel.split(' ')[0]
-df_mois = df_ventes[df_ventes['Mois'] == mois_sel].copy()
+# Mois courts pour la jointure fidélité (ex: "Mai", "Avril")
+mois_courts = list(set(m.split(' ')[0] for m in mois_sel))
+# Label affiché dans les headers
+mois_label = ' + '.join(sorted(mois_courts)) if mois_courts else 'Tous'
 
-df_fid_mois = df_fidelite[df_fidelite['Mois'] == mois_court]
+# Filtrer ventes
+df_mois = df_ventes[df_ventes['Mois'].isin(mois_sel)].copy()
+if sem_sel:
+    df_mois = df_mois[df_mois['Semaine'].isin(sem_sel)]
+if rayon_sel:
+    df_mois = df_mois[df_mois['Rayon'].isin(rayon_sel)]
+if famille_sel:
+    df_mois = df_mois[df_mois['Famille'].isin(famille_sel)]
+if sites_sel:
+    df_mois = df_mois[df_mois['Site nom long'].isin(sites_sel)]
+
+# Fidélité pour les mois sélectionnés
+df_fid_mois = df_fidelite[df_fidelite['Mois'].isin(mois_courts)]
 if len(df_fid_mois) == 0:
     df_fid_mois = df_fidelite.copy()
 
-if sites_sel:
-    df_mois = df_mois[df_mois['Site nom long'].isin(sites_sel)]
-if rayon_sel != 'Tous':
-    df_mois = df_mois[df_mois['Rayon'] == rayon_sel]
-
+# Join ventes × fidélité (article_id + mois_court pour éviter collision inter-mois)
+df_mois['_mois_court'] = df_mois['Mois'].apply(lambda x: str(x).split(' ')[0])
 df_joined = df_mois.merge(
-    df_fid_mois[['Article','Cagnotte']].rename(columns={'Article':'_article_id','Cagnotte':'Cagnotte_unit'}),
-    on='_article_id', how='left'
-)
+    df_fid_mois[['Article','Cagnotte','Mois']].rename(columns={
+        'Article':'_article_id','Cagnotte':'Cagnotte_unit','Mois':'_mois_fid'}),
+    left_on=['_article_id','_mois_court'],
+    right_on=['_article_id','_mois_fid'],
+    how='left'
+).drop(columns=['_mois_fid','_mois_court'], errors='ignore')
+
 df_joined['est_fidelite'] = df_joined['Cagnotte_unit'].notna()
 df_joined['Total Cagnotte'] = df_joined['Cagnotte_unit'] * df_joined['Qté Vente']
 df_fid_only = df_joined[df_joined['est_fidelite']].copy()
 
+# Pour compatibilité des KPIs — nb articles périmètre fidélité tous mois confondus
+mois_court = mois_label  # utilisé dans les headers d'onglets
+
 
 # ─────────────────────────────────────────────
-# PERIOD BADGE — plage consolidée de tous les fichiers du mois
+# PERIOD BADGE — plage consolidée selon filtres actifs
 # ─────────────────────────────────────────────
-periods_mois = [p for p in periods if mois_sel in p['mois']]
-if not periods_mois:
-    periods_mois = periods  # fallback
+# Filtrer les periods selon mois ET semaines sélectionnés
+periods_sel = [p for p in periods if p['mois'] in mois_sel]
+if sem_sel:
+    periods_sel = [p for p in periods_sel if p['sem'] in sem_sel]
+if not periods_sel:
+    periods_sel = periods  # fallback tout
 
-dates_debut = [p['date_debut'] for p in periods_mois if p['date_debut'] is not None]
-dates_fin   = [p['date_fin']   for p in periods_mois if p['date_fin']   is not None]
-semaines    = sorted(set(p['sem'] for p in periods_mois if p['sem'] != '—'))
+dates_debut = [p['date_debut'] for p in periods_sel if p['date_debut'] is not None]
+dates_fin   = [p['date_fin']   for p in periods_sel if p['date_fin']   is not None]
+semaines_badge = sorted(set(p['sem'] for p in periods_sel if p['sem'] != '—'))
 
-d1_str   = min(dates_debut).strftime('%d/%m/%Y') if dates_debut else '—'
-d2_str   = max(dates_fin).strftime('%d/%m/%Y')   if dates_fin   else '—'
-sem_str  = ' · '.join(semaines) if semaines else '—'
-mois_str = periods_mois[0]['mois'] if periods_mois else '—'
+d1_str  = min(dates_debut).strftime('%d/%m/%Y') if dates_debut else '—'
+d2_str  = max(dates_fin).strftime('%d/%m/%Y')   if dates_fin   else '—'
+sem_str = ' · '.join(semaines_badge) if semaines_badge else '—'
+
+# Filtre actifs résumé
+filtres_actifs = []
+if rayon_sel:   filtres_actifs.append(f"{len(rayon_sel)} rayon(s)")
+if famille_sel: filtres_actifs.append(f"{len(famille_sel)} famille(s)")
+if sites_sel:   filtres_actifs.append(f"{len(sites_sel)} magasin(s)")
+filtres_str = ' · '.join(filtres_actifs) if filtres_actifs else 'Tous magasins · Tous rayons'
 
 st.markdown(f"""<div class="period-badge">
     <div>
-        <div class="period-label">Période détectée</div>
-        <div class="period-value">{d1_str} → {d2_str} · {sem_str} · {mois_str}</div>
+        <div class="period-label">Période · {mois_label}</div>
+        <div class="period-value">{d1_str} → {d2_str} · {sem_str}</div>
+        <div style="font-size:11px;color:#3A3A3C;margin-top:3px;">{filtres_str}</div>
     </div>
-    <div style="margin-left:auto;font-size:12px;color:#3A3A3C;">
-        {len(ventes_files)} fichier(s) chargé(s) · {len(df_fid_mois)} articles fidélité ({mois_court})
+    <div style="margin-left:auto;text-align:right;font-size:12px;color:#3A3A3C;">
+        <div>{len(ventes_files)} fichier(s) chargé(s)</div>
+        <div>{len(df_fid_mois)} articles fidélité · {len(df_mois):,} lignes filtrées</div>
     </div>
 </div>""", unsafe_allow_html=True)
 
