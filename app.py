@@ -6,7 +6,11 @@ st.markdown("""
 <style>
 body, [data-testid="stAppViewContainer"] { background: #F2F2F7; }
 [data-testid="stSidebar"] { background: #FFFFFF; border-right: 0.5px solid #E5E5EA; }
-.block-container { padding-top: 1.5rem; }
+.block-container { padding-top: 3rem; }
+/* Masquer header Streamlit natif (burger + deploy) */
+header[data-testid="stHeader"] { display: none !important; }
+/* Masquer la section "NAVIGATION" auto-générée par Streamlit */
+section[data-testid="stSidebarNav"] { display: none !important; }
 
 .page-title   { font-size: 28px; font-weight: 700; color: #1C1C1E; letter-spacing: -0.03em; margin: 0; }
 .page-caption { font-size: 13px; color: #8E8E93; margin-top: 3px; margin-bottom: 1.5rem; }
@@ -36,8 +40,6 @@ body, [data-testid="stAppViewContainer"] { background: #F2F2F7; }
 .b-gray  { background: #F2F2F7; color: #48484A; }
 .b-purp  { background: #F2F0FF; color: #5E35B1; }
 [data-testid="stPageLink"] p { display: none !important; }
-/* Masquer le label automatique "app" de la page courante dans la sidebar */
-[data-testid="stSidebarNavItems"] { display: none !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -53,9 +55,9 @@ with st.sidebar:
     st.page_link("pages/01_📊_Analyse_Scoring_ABC.py",      label="📊  Scoring ABC")
     st.page_link("pages/02_📈_Ventes_PBI.py",               label="📈  Ventes PBI")
     st.page_link("pages/03_📦_Detention_Top_CA.py",         label="📦  Détention Top CA")
-    st.page_link("pages/04_💸_Performance_Promo.py",        label="💚  Performance Promo")
+    st.page_link("pages/04_💸_Performance_Promo.py",        label="💸  Performance Promo")
     st.page_link("pages/05_🏪_Suivi_Implantation.py",       label="🏪  Suivi Implantation")
-    st.page_link("pages/06_💸_Marges_Negatives.py",         label="💚  Marges Négatives")
+    st.page_link("pages/06_💸_Marges_Negatives.py",         label="💸  Marges Négatives")
     st.page_link("pages/07_📈_OTIF.py",                     label="📈  OTIF")
     st.page_link("pages/08_📦_OOS.py",                      label="📦  Ruptures OOS")
     st.page_link("pages/09_✅_Tasks_Trackers.py",           label="✅  Tasks Tracker")
