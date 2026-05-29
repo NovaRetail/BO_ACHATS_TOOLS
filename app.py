@@ -52,16 +52,16 @@ with st.sidebar:
     st.page_link("pages/01_📊_Analyse_Scoring_ABC.py",      label="📊  Scoring ABC")
     st.page_link("pages/02_📈_Ventes_PBI.py",               label="📈  Ventes PBI")
     st.page_link("pages/03_📦_Detention_Top_CA.py",         label="📦  Détention Top CA")
-    st.page_link("pages/04_💚_Performance_Promo.py",        label="💚  Performance Promo")
+    st.page_link("pages/04_💸_Performance_Promo.py",        label="💚  Performance Promo")
     st.page_link("pages/05_🏪_Suivi_Implantation.py",       label="🏪  Suivi Implantation")
-    st.page_link("pages/06_💚_Marges_Negatives.py",         label="💚  Marges Négatives")
+    st.page_link("pages/06_💸_Marges_Negatives.py",         label="💚  Marges Négatives")
     st.page_link("pages/07_📈_OTIF.py",                     label="📈  OTIF")
     st.page_link("pages/08_📦_OOS.py",                      label="📦  Ruptures OOS")
     st.page_link("pages/09_✅_Tasks_Trackers.py",           label="✅  Tasks Tracker")
     st.page_link("pages/10_📊_Perf_Hebdo.py",               label="📊  Perf Hebdo")
     st.page_link("pages/11_📊_Rentabilite.py",              label="📊  Rentabilité")
     st.page_link("pages/12_🏪_Bascule_XD.py",               label="🏪  Bascule XD")
-    st.page_link("pages/13_💚_Fidelite_cagnotte.py",        label="🏷️  Fidélité Cagnotte")
+    st.page_link("pages/13_💸_Fidelite_cagnotte.py",        label="🏷️  Fidélité Cagnotte")
 
 # ── EN-TÊTE ──────────────────────────────────────────────────────────────────
 st.markdown("<div class='page-title'>🛍️ SmartBuyer Hub</div>", unsafe_allow_html=True)
@@ -98,11 +98,11 @@ SECTIONS = [
              "Cockpit direction : taux marge vs N-1, cible segment, score santé 0–100.",
              "Déviation = Tx Marge − Tx N-1 · Score / 100",
              "→ Briefing acheteur + plan de négociation"),
-            ("pages/06_💚_Marges_Negatives.py",     "💸", "Marges Négatives","#FF3B30", "b-red",   "Marge",
+            ("pages/06_💸_Marges_Negatives.py",     "💸", "Marges Négatives","#FF3B30", "b-red",   "Marge",
              "Flop 100 destructeurs · matrice rayon × magasin · effet promo/casse.",
              "Marge < 0 · Δ HP−Promo · Tx Casse = Casse / CA",
              "→ Identifier et corriger chaque fuite"),
-            ("pages/04_💚_Performance_Promo.py",    "🎯", "Perf Promo",      "#FF9500", "b-amber", "Promo",
+            ("pages/04_💸_Performance_Promo.py",    "🎯", "Perf Promo",      "#FF9500", "b-amber", "Promo",
              "Poids promo · taux marge promo vs HP · efficacité · dépendance.",
              "Efficacité = CA Promo ÷ Nb jours",
              "→ Revoir les promos déficitaires"),
@@ -123,7 +123,7 @@ SECTIONS = [
              "Taux d'implantation T1 par magasin. Alertes article × site.",
              "Implanté = stock ≠ 0 · Appro = RAL > 0",
              "→ Accélérer livraisons, commander, céder"),
-            ("pages/13_💚_Fidelite_cagnotte.py",    "🏷️", "Fidélité Cagnotte","#007AFF", "b-blue", "Fidélité",
+            ("pages/13_💸_Fidelite_cagnotte.py",    "🏷️", "Fidélité Cagnotte","#007AFF", "b-blue", "Fidélité",
              "Budget cagnotte vs CA et Marge fidélité. Poids % programme.",
              "Budget = Cagnotte/unité × Qté Vente",
              "→ Articles à ROI nul + familles marge négative"),
