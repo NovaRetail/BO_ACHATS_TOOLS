@@ -243,9 +243,13 @@ def parse_t1(file_bytes: bytes, filename: str):
             df[col] = val
 
     df["SEMAINE RECEPTION"] = df["SEMAINE RECEPTION"].astype(str).str.strip().replace("nan", "")
-    df["SEM_NUM"] = df["SEMAINE RECEPTION"].apply(
-        lambda s: int(re.sub(r"[Ss]", "", s)) if re.sub(r"[Ss]", "", s).isdigit() else 99
-    )
+    def _sem_to_num(s):
+        if s is None or (isinstance(s, float) and np.isnan(s)):
+            return 99
+        cleaned = re.sub(r"[Ss]", "", str(s).strip())
+        return int(cleaned) if cleaned.isdigit() else 99
+
+    df["SEM_NUM"] = df["SEMAINE RECEPTION"].apply(_sem_to_num)
     df["ORIGINE"] = df["MODE APPRO"].apply(
         lambda m: "IM" if "IMPORT" in str(m).upper() else "LO"
     )
