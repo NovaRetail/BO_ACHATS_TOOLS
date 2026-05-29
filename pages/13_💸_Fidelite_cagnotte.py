@@ -1,1064 +1,743 @@
-import streamlit as st
-import pandas as pd
-import numpy as np
-import re
-from io import StringIO, BytesIO
+"""
+13_🏷️_Fidelite_Cagnotte.py — SmartBuyer Hub
+Fidélité Cagnotte · Source : Export PBI standard (même format que Perf Hebdo / Ventes PBI)
+Référentiel : Article / Cagnotte / Mois (CSV inchangé)
 
-# ─────────────────────────────────────────────
-# CONFIG
-# ─────────────────────────────────────────────
+Migration v2 : suppression du parser CSV custom — le module accepte désormais
+le même export PBI Excel que tous les autres modules SmartBuyer.
+"""
+
+import re
+import numpy as np
+import pandas as pd
+import streamlit as st
+from io import BytesIO
+from openpyxl import Workbook
+from openpyxl.styles import PatternFill, Font, Alignment
+from openpyxl.utils import get_column_letter
+
 st.set_page_config(
-    page_title="Fidélité Cagnotte · SmartBuyer Hub",
+    page_title="Fidélité Cagnotte · SmartBuyer",
     page_icon="🏷️",
     layout="wide",
+    initial_sidebar_state="expanded",
 )
 
+# ─── CHARTE SMARTBUYER ────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 html, body, [class*="css"] {
-    font-family: 'Inter', 'Calibri', -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display",
+                 "SF Pro Text", "Helvetica Neue", Arial, sans-serif !important;
     background-color: #F2F2F7;
 }
-.stApp { background-color: #F2F2F7; }
-.block-container { padding-top: 1.5rem; padding-bottom: 2rem; max-width: 1400px; }
-[data-testid="stSidebar"] { background-color: #FFFFFF; border-right: 1px solid #E5E5EA; }
-
-.kpi-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 20px; }
-.kpi-card {
-    background: #FFFFFF; border-radius: 12px; padding: 16px 20px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.08); border: 1px solid #E5E5EA;
-}
-.kpi-label { font-size: 11px; font-weight: 500; color: #8E8E93; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
-.kpi-value { font-size: 21px; font-weight: 700; color: #1C1C1E; line-height: 1.1; }
-.kpi-value.blue { color: #007AFF; }
-.kpi-value.red { color: #FF3B30; }
-.kpi-value.green { color: #34C759; }
-.kpi-sub { font-size: 11px; color: #8E8E93; margin-top: 4px; }
-
+.stApp { background: #F2F2F7; }
+.main .block-container { padding-top: 1.8rem; max-width: 1300px; }
+[data-testid="stSidebar"] { background: #F2F2F7 !important; border-right: 0.5px solid #D1D1D6 !important; }
+[data-testid="stMetric"] { background: #FFFFFF !important; border: 0.5px solid #E5E5EA !important; border-radius: 12px !important; padding: 16px 18px !important; }
+[data-testid="stMetricLabel"] { font-size: 11px !important; font-weight: 500 !important; color: #8E8E93 !important; text-transform: uppercase !important; letter-spacing: 0.04em !important; }
+[data-testid="stMetricValue"] { font-size: 24px !important; font-weight: 600 !important; color: #1C1C1E !important; letter-spacing: -0.02em !important; }
+[data-testid="stTabs"] button[role="tab"] { font-size: 13px !important; font-weight: 500 !important; padding: 8px 16px !important; color: #8E8E93 !important; border-bottom: 2px solid transparent !important; }
+[data-testid="stTabs"] button[role="tab"][aria-selected="true"] { color: #007AFF !important; border-bottom: 2px solid #007AFF !important; background: transparent !important; }
+[data-testid="stTabs"] [role="tablist"] { border-bottom: 0.5px solid #E5E5EA !important; }
+[data-testid="stDataFrame"] { border: 0.5px solid #E5E5EA !important; border-radius: 10px !important; }
+[data-testid="stDataFrame"] th { background: #F2F2F7 !important; font-size: 11px !important; font-weight: 600 !important; color: #8E8E93 !important; text-transform: uppercase !important; letter-spacing: 0.04em !important; }
+[data-testid="stFileUploader"] { border: 1.5px dashed #D1D1D6 !important; border-radius: 10px !important; background: #F9F9FB !important; }
+.stDownloadButton > button { background: #007AFF !important; color: white !important; border: none !important; border-radius: 8px !important; font-weight: 500 !important; font-size: 13px !important; padding: 10px 24px !important; width: 100% !important; }
+hr { border-color: #E5E5EA !important; margin: 1rem 0 !important; }
+.page-title   { font-size: 28px; font-weight: 700; color: #1C1C1E; letter-spacing: -0.03em; margin: 0; }
+.page-caption { font-size: 13px; color: #8E8E93; margin-top: 3px; margin-bottom: 1.5rem; }
+.section-label { font-size: 11px; font-weight: 600; color: #8E8E93; text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 10px; }
+.alert-card  { padding: 12px 16px; border-radius: 10px; margin-bottom: 8px; font-size: 13px; line-height: 1.5; border-left: 3px solid; }
+.alert-red   { background: #FFF2F2; border-color: #FF3B30; color: #3A0000; }
+.alert-amber { background: #FFFBF0; border-color: #FF9500; color: #3A2000; }
+.alert-green { background: #F0FFF4; border-color: #34C759; color: #003A10; }
+.alert-blue  { background: #F0F8FF; border-color: #007AFF; color: #001A3A; }
 .period-badge {
     background: #EAF4FF; border: 1px solid #B8D9FF; border-radius: 10px;
     padding: 12px 20px; margin-bottom: 16px; display: flex; align-items: center; gap: 16px;
 }
-.period-label { font-size: 11px; font-weight: 600; color: #007AFF; text-transform: uppercase; letter-spacing: 0.5px; }
-.period-value { font-size: 15px; font-weight: 700; color: #007AFF; }
-
-.section-header {
-    font-size: 13px; font-weight: 600; color: #3A3A3C;
-    text-transform: uppercase; letter-spacing: 0.5px;
-    margin-bottom: 12px; margin-top: 4px; padding-bottom: 6px;
-    border-bottom: 2px solid #007AFF; display: inline-block;
-}
-
-.alert-card {
-    background: #FFFFFF; border-radius: 10px; padding: 14px 18px;
-    border: 1px solid #E5E5EA; margin-bottom: 8px;
-}
-.alert-title { font-size: 12px; font-weight: 600; color: #1C1C1E; margin-bottom: 4px; }
-.alert-badge-red { display:inline-block; background:#FFF0EE; color:#C0392B; border-radius:6px; padding:2px 8px; font-size:11px; font-weight:600; }
-.alert-badge-orange { display:inline-block; background:#FFF9E6; color:#7D5A00; border-radius:6px; padding:2px 8px; font-size:11px; font-weight:600; }
-
-.info-box {
-    background: #F2F2F7; border-left: 3px solid #007AFF; border-radius: 4px;
-    padding: 10px 14px; font-size: 12px; color: #3A3A3C; margin-bottom: 12px;
-}
-.stDataFrame { border-radius: 10px; overflow: hidden; }
-[data-testid="stTabs"] [role="tab"] { font-size: 13px; font-weight: 500; padding: 8px 16px; }
-[data-testid="stTabs"] [role="tab"][aria-selected="true"] { color: #007AFF; border-bottom: 2px solid #007AFF; }
-#MainMenu, footer, header { visibility: hidden; }
+.col-required { background: #F0F8FF; border: 0.5px solid #B3D9FF; border-radius: 8px; padding: 10px 14px; margin-bottom: 6px; display: flex; align-items: flex-start; gap: 10px; }
+.col-name { font-size: 13px; font-weight: 600; color: #0066CC; font-family: monospace; }
+.col-desc { font-size: 12px; color: #3A3A3C; margin-top: 1px; }
 </style>
 """, unsafe_allow_html=True)
 
 
-# ─────────────────────────────────────────────
-# HELPERS
-# ─────────────────────────────────────────────
-def parse_number(val):
-    if pd.isna(val) or str(val).strip() in ['', 'NaN', 'nan']:
-        return np.nan
-    s = str(val).replace('\xa0', '').replace(' ', '').replace(',', '.')
-    try:
-        return float(s)
-    except:
-        return np.nan
+# ─── HELPERS ──────────────────────────────────────────────────────────────────
+def fmt_xof(n):
+    if pd.isna(n) or n is None: return "—"
+    return f"{int(round(float(n))):,}".replace(",", " ") + " XOF"
 
-def fmt_xof(val):
-    if pd.isna(val): return '—'
-    return f"{int(round(val)):,}".replace(',', ' ') + ' XOF'
+def fmt_num(n):
+    if pd.isna(n) or n is None: return "—"
+    return f"{float(n):,.0f}".replace(",", " ")
 
-def fmt_num(val):
-    if pd.isna(val): return '—'
-    return f"{val:,.0f}".replace(',', ' ')
+def fmt_pct(v, dec=1):
+    if pd.isna(v) or v is None: return "—"
+    return f"{float(v):.{dec}f}%"
 
-def fmt_pct(val):
-    if pd.isna(val): return '—'
-    return f"{val:.1f}%"
+def short_label(s):
+    """Extrait le libellé après 'CODE - '."""
+    if pd.isna(s): return ""
+    m = re.match(r"^\d[\d\s]*-\s*(.+)$", str(s).strip())
+    return m.group(1).strip() if m else str(s).strip()
 
-def extract_article_id(s):
+def extract_code(s):
+    """Extrait le code numérique en début de chaine."""
     if pd.isna(s): return None
-    m = re.match(r'^(\d+)', str(s).strip())
-    return int(m.group(1)) if m else None
+    m = re.match(r"^(\d+)", str(s).strip())
+    try:
+        return int(m.group(1)) if m else None
+    except (ValueError, AttributeError):
+        return None
 
-def parse_period_from_lines(lines):
-    for line in lines:
-        m = re.search(r'après le (\d{2}/\d{2}/\d{4}).*?avant le (\d{2}/\d{2}/\d{4})', line)
-        if m:
-            return pd.to_datetime(m.group(1), dayfirst=True), pd.to_datetime(m.group(2), dayfirst=True)
-    return None, None
+def extract_periode(df_raw: pd.DataFrame) -> tuple[str, str]:
+    """Extrait la plage de dates depuis la ligne de filtre PBI (dernière ligne)."""
+    last_col = df_raw.iloc[:, 0].dropna().astype(str)
+    if last_col.empty:
+        return "—", "—"
+    last = last_col.iloc[-1]
+    m = re.search(
+        r"après le (\d{2}/\d{2}/\d{4}).*?avant le (\d{2}/\d{2}/\d{4})",
+        last
+    )
+    if m:
+        return m.group(1), m.group(2)
+    return "—", "—"
 
-def get_semaine_mois(d1):
-    if d1 is None: return '—', '—'
-    mois_map = {1:'Janvier',2:'Février',3:'Mars',4:'Avril',5:'Mai',6:'Juin',
-                7:'Juillet',8:'Août',9:'Septembre',10:'Octobre',11:'Novembre',12:'Décembre'}
-    return f"S{d1.isocalendar()[1]}", f"{mois_map[d1.month]} {d1.year}"
+def date_to_mois(date_str: str) -> str:
+    """Convertit 'DD/MM/YYYY' → nom du mois en français."""
+    MOIS = {
+        1:"Janvier", 2:"Février", 3:"Mars", 4:"Avril", 5:"Mai", 6:"Juin",
+        7:"Juillet", 8:"Août", 9:"Septembre", 10:"Octobre", 11:"Novembre", 12:"Décembre"
+    }
+    try:
+        d = pd.to_datetime(date_str, format="%d/%m/%Y")
+        return MOIS[d.month]
+    except Exception:
+        return "—"
 
-def load_ventes_csv(file_obj):
-    content = file_obj.read().decode('latin1')
-    lines = content.split('\n')
-    d1, d2 = parse_period_from_lines(lines)
-    sem, mois = get_semaine_mois(d1)
-    data_lines = []
-    header_found = False
-    for line in lines:
-        s = line.strip()
-        if not s: continue
-        if 'Filtres appliqués' in s: break
-        if 'Site nom long' in s: header_found = True
-        if header_found: data_lines.append(s)
-    if not data_lines:
-        return None, d1, d2, sem, mois
-    df = pd.read_csv(StringIO('\n'.join(data_lines)), sep=';', encoding='utf-8', on_bad_lines='skip')
+
+# ─── PARSING PBI ──────────────────────────────────────────────────────────────
+@st.cache_data(show_spinner=False)
+def parse_pbi(file_bytes: bytes) -> tuple[pd.DataFrame, str, str, str]:
+    """
+    Charge un export PBI standard (même format que Perf Hebdo / Ventes PBI).
+    Retourne (df_articles, date_debut, date_fin, mois_label).
+
+    Règles de filtrage :
+    - Garder uniquement les lignes Article × Site réelles
+      (Article non nul, non 'Total', Site non nul, non 'Total')
+    - Exclure les lignes de totaux intermédiaires
+    - Exclure la ligne de filtres PBI (dernière ligne)
+    """
+    raw = pd.read_excel(BytesIO(file_bytes))
+
+    # Extraire la période avant tout nettoyage
+    date_debut, date_fin = extract_periode(raw)
+    mois_label = date_to_mois(date_debut)
+
+    # Colonnes numériques à normaliser
+    num_cols = [
+        "CA", "Marge", "CA Hors Promo", "Marge Hors Promo",
+        "CA Promo", "Marge Promo", "%CA Poids Promo",
+        "Qté Vente", "Casse (Valeur)", "Casse (Qté)", "%Marge",
+    ]
+    for col in num_cols:
+        if col in raw.columns:
+            raw[col] = pd.to_numeric(raw[col], errors="coerce")
+
+    # Filtrer : lignes article × site réelles
+    mask = (
+        raw["Article"].notna() &
+        (~raw["Article"].astype(str).str.strip().isin(["Total", "nan", ""])) &
+        raw["Site nom long"].notna() &
+        (~raw["Site nom long"].astype(str).str.strip().isin(["Total", "nan", ""])) &
+        # Exclure la ligne de filtres PBI
+        (~raw["Article"].astype(str).str.startswith("Filtres", na=False))
+    )
+    df = raw[mask].copy().reset_index(drop=True)
+
+    # Labels courts
+    df["lib_article"]   = df["Article"].apply(short_label)
+    df["lib_rayon"]     = df["Rayon"].apply(short_label)
+    df["lib_famille"]   = df["Famille"].apply(short_label)
+    df["lib_sfam"]      = df["Sous Famille"].apply(short_label) if "Sous Famille" in df.columns else ""
+    df["lib_site"]      = df["Site nom long"].apply(short_label)
+    df["code_article"]  = df["Article"].apply(extract_code)
+
+    # Assurer l'existence des colonnes optionnelles
+    for col in ["CA Promo", "Marge Promo", "CA Hors Promo", "Marge Hors Promo",
+                "Casse (Valeur)", "Casse (Qté)", "Qté Vente", "%CA Poids Promo"]:
+        if col not in df.columns:
+            df[col] = 0.0
+
+    df["Qté Vente"] = df["Qté Vente"].fillna(0)
+
+    return df, date_debut, date_fin, mois_label
+
+
+@st.cache_data(show_spinner=False)
+def parse_fidelite(file_bytes: bytes) -> pd.DataFrame:
+    """
+    Charge le référentiel fidélité CSV.
+    Format attendu : Article (int) | Cagnotte (float) | Mois (texte fr)
+    """
+    df = pd.read_csv(BytesIO(file_bytes), sep=None, engine="python")
     df.columns = [c.strip() for c in df.columns]
-    for col in ['CA', 'Marge', 'Qté Vente']:
-        if col in df.columns:
-            df[col] = df[col].apply(parse_number)
-    df = df[
-        df['Article'].notna() &
-        ~df['Article'].astype(str).str.strip().isin(['Total', 'NaN', '']) &
-        df['Site nom long'].notna() &
-        ~df['Site nom long'].astype(str).str.strip().isin(['Total', 'NaN', ''])
-    ].copy()
-    df['Date Début'] = d1.strftime('%d/%m/%Y') if d1 else '—'
-    df['Date Fin']   = d2.strftime('%d/%m/%Y') if d2 else '—'
-    df['Semaine'] = sem
-    df['Mois']    = mois
-    df['_article_id'] = df['Article'].apply(extract_article_id)
-    return df, d1, d2, sem, mois
 
-def load_fidelite_csv(file_obj):
-    content = file_obj.read().decode('latin1')
-    df = pd.read_csv(StringIO(content), sep=None, engine='python', encoding='utf-8')
-    df.columns = [c.strip() for c in df.columns]
-    mois_map = {'mai':'Mai','avril':'Avril','mars':'Mars','juin':'Juin','janvier':'Janvier',
-                'février':'Février','juillet':'Juillet','août':'Août','septembre':'Septembre',
-                'octobre':'Octobre','novembre':'Novembre','décembre':'Décembre'}
-    if 'Mois' in df.columns:
-        df['Mois'] = df['Mois'].astype(str).str.strip().str.lower().map(mois_map).fillna(df['Mois'])
-    df = df.dropna(subset=['Article','Cagnotte'])
-    df['Article']  = df['Article'].astype(int)
-    df['Cagnotte'] = pd.to_numeric(df['Cagnotte'], errors='coerce')
+    required = {"Article", "Cagnotte"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"Colonnes manquantes dans le référentiel : {', '.join(missing)}")
+
+    df["Article"]  = pd.to_numeric(df["Article"], errors="coerce")
+    df["Cagnotte"] = pd.to_numeric(df["Cagnotte"], errors="coerce")
+    df = df.dropna(subset=["Article", "Cagnotte"])
+    df["Article"] = df["Article"].astype(int)
+
+    if "Mois" not in df.columns:
+        df["Mois"] = "—"
+    else:
+        df["Mois"] = df["Mois"].astype(str).str.strip()
+
+    return df[["Article", "Cagnotte", "Mois"]].copy()
+
+
+def join_fidelite(
+    df_pbi: pd.DataFrame,
+    df_fid: pd.DataFrame,
+    mois_pbi: str,
+) -> pd.DataFrame:
+    """
+    Joint le PBI avec le référentiel fidélité.
+    Priorité : jointure Article × Mois exact, puis fallback Article seul.
+    Calcule Total Cagnotte = Cagnotte/unité × Qté Vente.
+    """
+    # Jointure stricte Article × Mois
+    fid_mois = df_fid[df_fid["Mois"] == mois_pbi][["Article", "Cagnotte"]].copy()
+    fid_mois = fid_mois.rename(columns={"Cagnotte": "Cagnotte_unit"})
+
+    df = df_pbi.merge(fid_mois, left_on="code_article", right_on="Article", how="left")
+    df = df.drop(columns=["Article_y"] if "Article_y" in df.columns else [], errors="ignore")
+
+    # Fallback : si aucun mois ne correspond, prendre la dernière cagnotte connue
+    n_matched = df["Cagnotte_unit"].notna().sum()
+    if n_matched == 0 and not df_fid.empty:
+        # Prendre la cagnotte sans filtre mois (utile si le mois PBI ne matche pas)
+        fid_any = (
+            df_fid.groupby("Article", as_index=False)["Cagnotte"]
+            .last()
+            .rename(columns={"Cagnotte": "Cagnotte_unit"})
+        )
+        df = df_pbi.merge(fid_any, left_on="code_article", right_on="Article", how="left")
+        df = df.drop(columns=["Article_y"] if "Article_y" in df.columns else [], errors="ignore")
+
+    df["est_fidelite"]   = df["Cagnotte_unit"].notna()
+    df["Total Cagnotte"] = df["Cagnotte_unit"].fillna(0) * df["Qté Vente"].fillna(0)
+
     return df
 
-def to_excel(df_dict):
-    """Export dict of {sheet_name: dataframe} to Excel bytes."""
+
+# ─── EXPORT EXCEL ─────────────────────────────────────────────────────────────
+def to_excel(sheets: dict) -> bytes:
     buf = BytesIO()
-    with pd.ExcelWriter(buf, engine='openpyxl') as writer:
-        for sheet, df in df_dict.items():
-            df.to_excel(writer, sheet_name=sheet[:31], index=False)
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        H_FILL = PatternFill("solid", fgColor="1C3557")
+        H_FONT = Font(bold=True, color="FFFFFF", size=10)
+        CTR    = Alignment(horizontal="center", vertical="center")
+
+        for sheet_name, df in sheets.items():
+            df.to_excel(writer, sheet_name=sheet_name[:31], index=False)
+            ws = writer.sheets[sheet_name[:31]]
+            for i, col in enumerate(df.columns, 1):
+                c = ws.cell(row=1, column=i)
+                c.fill = H_FILL; c.font = H_FONT; c.alignment = CTR
+                ws.column_dimensions[get_column_letter(i)].width = min(
+                    max(len(str(col)) + 4, 12), 40
+                )
+            ws.freeze_panes = "A2"
     return buf.getvalue()
 
-def color_marge(val):
-    try:
-        n = float(str(val).replace(' ','').replace('XOF','').replace(',','.'))
-        if n < 0: return 'color:#FF3B30;font-weight:600'
-        if n > 0: return 'color:#34C759;font-weight:600'
-    except: pass
-    return ''
 
-def color_poids(val):
-    try:
-        n = float(str(val).replace('%','').replace(',','.'))
-        if n >= 30: return 'background-color:#E8FAF0;color:#1A7F3C;font-weight:600'
-        if n >= 15: return 'background-color:#FFF9E6;color:#7D5A00;font-weight:600'
-        return 'background-color:#FFF0EE;color:#C0392B;font-weight:600'
-    except: pass
-    return ''
-
-
-# ─────────────────────────────────────────────
-# HEADER
-# ─────────────────────────────────────────────
-c1, c2 = st.columns([1, 11])
-with c1:
-    st.markdown("""<div style="width:44px;height:44px;background:#007AFF;border-radius:10px;
-    display:flex;align-items:center;justify-content:center;margin-top:4px;">
-    <span style="font-size:22px;">🏷️</span></div>""", unsafe_allow_html=True)
-with c2:
-    st.markdown("""<div style="padding-top:6px;">
-    <span style="font-size:18px;font-weight:700;color:#1C1C1E;">SmartBuyer Hub</span>
-    <span style="font-size:14px;color:#8E8E93;margin-left:10px;">· Fidélité Cagnotte · Investissement vs Performance</span>
-    </div>""", unsafe_allow_html=True)
-st.markdown("<hr style='margin:8px 0 16px 0;border:none;border-top:1px solid #E5E5EA;'>", unsafe_allow_html=True)
-
-
-# ─────────────────────────────────────────────
-# SIDEBAR — Upload + Filtres
-# ─────────────────────────────────────────────
+# ─── SIDEBAR ──────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("### 📂 Données")
-    st.markdown("**Fichiers ventes** *(multi-upload)*")
-    ventes_files = st.file_uploader("ventes", type=['csv'], accept_multiple_files=True,
-                                     key="ventes_upload", label_visibility="collapsed")
-    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-    st.markdown("**Liste Fidélité** *(référentiel)*")
-    fidelite_file = st.file_uploader("fidelite", type=['csv'], accept_multiple_files=False,
-                                      key="fidelite_upload", label_visibility="collapsed")
-    st.markdown("""<div style='font-size:10px;color:#8E8E93;line-height:1.7;margin-top:8px;padding:8px;background:#F2F2F7;border-radius:6px;'>
-    📋 <b>Ventes :</b> export PBI séparateur <code>;</code><br>
-    📋 <b>Fidélité :</b> Article / Cagnotte / Mois<br>
-    💡 Période détectée automatiquement
-    </div>""", unsafe_allow_html=True)
-
-    # Filtres — affichés seulement si données chargées
-    # (widgets déclarés ici, valeurs utilisées après le chargement)
-    _sidebar_filters_placeholder = True
-
-
-# ─────────────────────────────────────────────
-# LANDING PAGE
-# ─────────────────────────────────────────────
-if not ventes_files or not fidelite_file:
-    # Hero
     st.markdown("""
-    <div style='background:linear-gradient(135deg,#007AFF 0%,#0055CC 100%);border-radius:16px;
-    padding:40px 48px;margin-bottom:20px;color:#FFFFFF;'>
-        <div style='display:flex;align-items:flex-start;gap:24px;'>
-            <div style='font-size:52px;line-height:1;margin-top:2px;'>🏷️</div>
-            <div style='flex:1;'>
-                <div style='font-size:24px;font-weight:700;margin-bottom:8px;'>Fidélité Cagnotte</div>
-                <div style='font-size:14px;opacity:0.9;line-height:1.7;max-width:700px;'>
-                    Pilotez en temps réel la performance de votre programme de fidélité Carrefour CI.
-                    Consolidez plusieurs semaines d'extractions PBI, mesurez l'investissement cagnotte article par article,
-                    analysez le poids du programme sur votre CA et votre marge, et détectez immédiatement
-                    les articles sans ventes et les familles en dérive.
-                </div>
-                <div style='margin-top:16px;display:flex;gap:12px;flex-wrap:wrap;'>
-                    <span style='background:rgba(255,255,255,0.2);border-radius:20px;padding:4px 14px;font-size:12px;font-weight:500;'>
-                    📦 Multi-semaines</span>
-                    <span style='background:rgba(255,255,255,0.2);border-radius:20px;padding:4px 14px;font-size:12px;font-weight:500;'>
-                    🏪 10 magasins</span>
-                    <span style='background:rgba(255,255,255,0.2);border-radius:20px;padding:4px 14px;font-size:12px;font-weight:500;'>
-                    🔗 Jointure auto article × cagnotte</span>
-                    <span style='background:rgba(255,255,255,0.2);border-radius:20px;padding:4px 14px;font-size:12px;font-weight:500;'>
-                    ⬇️ Export Excel 7 onglets</span>
-                </div>
-            </div>
-        </div>
-    </div>""", unsafe_allow_html=True)
+<div style='margin-bottom:18px'>
+  <div style='font-size:20px;font-weight:700;color:#1C1C1E;letter-spacing:-0.02em'>🛍️ SmartBuyer</div>
+  <div style='font-size:11px;color:#8E8E93;margin-top:1px'>Hub analytique · Équipe Achats</div>
+</div>""", unsafe_allow_html=True)
+    st.markdown("---")
 
-    # 5 onglets cards
-    c1, c2, c3, c4, c5 = st.columns(5)
-    cards = [
-        ("🏠", "Synthèse Exécutive", "#007AFF",
-         "Vue COPIL prête à partager. Top 5 familles par cagnotte, performance par magasin, "
-         "alertes articles à ROI nul et familles en marge négative."),
-        ("📊", "Récap Financier", "#34C759",
-         "Agrégat Site × Rayon × Famille. CA fidélité vs CA global, Marge fidélité vs Marge globale, "
-         "Poids % du programme, Budget cagnotte investi."),
-        ("🔍", "Récap Détail", "#FF9500",
-         "Vue Article × Magasin. Cagnotte unitaire, Total cagnotte, CA et Marge par site. "
-         "Granularité article pour identifier les best-sellers du programme."),
-        ("📋", "Drill-down", "#AF52DE",
-         "Toutes les lignes brutes article × site × semaine. "
-         "Filtres croisés Rayon / Famille / Magasin pour une analyse fine."),
-        ("🗃️", "Raw Data", "#FF3B30",
-         "Extraction consolidée de toutes vos semaines PBI, "
-         "articles fidélité uniquement, avec cagnottage calculé ligne par ligne. Export direct Excel."),
-    ]
-    for col, (ico, title, color, desc) in zip([c1,c2,c3,c4,c5], cards):
-        with col:
-            st.markdown(f"""<div style='background:#FFFFFF;border-radius:12px;padding:18px 20px;
-            border:1px solid #E5E5EA;border-top:3px solid {color};
-            box-shadow:0 1px 3px rgba(0,0,0,0.06);min-height:200px;'>
-                <div style='font-size:22px;margin-bottom:8px;'>{ico}</div>
-                <div style='font-size:13px;font-weight:600;color:#1C1C1E;margin-bottom:6px;'>{title}</div>
-                <div style='font-size:11px;color:#636366;line-height:1.6;'>{desc}</div>
-            </div>""", unsafe_allow_html=True)
+    st.markdown("<div style='font-size:11px;font-weight:600;color:#8E8E93;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px'>Import fichiers</div>", unsafe_allow_html=True)
 
-    st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+    st.markdown("**Export PBI ventes** *(même format que Perf Hebdo)*")
+    pbi_files = st.file_uploader(
+        "PBI", type=["xlsx", "xls"], accept_multiple_files=True,
+        key="fid_pbi", label_visibility="collapsed",
+        help="Export PBI standard : Rayon / Famille / Article / Site nom long / CA / Marge / CA Promo / Qté Vente"
+    )
 
-    # Données clés du programme
-    st.markdown("""<div style='background:#FFFFFF;border-radius:12px;padding:20px 28px;
-    border:1px solid #E5E5EA;box-shadow:0 1px 3px rgba(0,0,0,0.06);margin-bottom:16px;'>
-        <div style='font-size:13px;font-weight:600;color:#1C1C1E;margin-bottom:14px;'>
-        📐 Ce que le module calcule automatiquement
-        </div>
-        <div style='display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;font-size:12px;color:#3A3A3C;line-height:1.7;'>
-            <div>
-                <div style='font-weight:600;color:#007AFF;margin-bottom:4px;'>Jointure ventes × fidélité</div>
-                Chaque ligne de vente est associée à sa cagnotte unitaire du mois correspondant
-                via le code article. Aucune manipulation manuelle.
-            </div>
-            <div>
-                <div style='font-weight:600;color:#007AFF;margin-bottom:4px;'>Total Cagnotte</div>
-                Calculé ligne par ligne : <code>Cagnotte/unité × Qté Vendue</code>.
-                Agrégé par article, famille, site et période selon la vue choisie.
-            </div>
-            <div>
-                <div style='font-weight:600;color:#007AFF;margin-bottom:4px;'>Poids Fidélité %</div>
-                <code>CA Fidélité / CA Global</code> et <code>Marge Fidélité / Marge Globale</code>
-                par Site × Rayon × Famille — pour mesurer l'importance du programme dans chaque rayon.
-            </div>
-        </div>
-    </div>""", unsafe_allow_html=True)
+    st.markdown("**Référentiel Fidélité** *(CSV inchangé)*")
+    fid_file = st.file_uploader(
+        "Fidelite", type=["csv"], key="fid_ref", label_visibility="collapsed",
+        help="Colonnes : Article | Cagnotte | Mois"
+    )
 
-    # Démarrage
-    st.markdown("""<div style='background:#EAF4FF;border-radius:12px;padding:20px 28px;border:1px solid #B8D9FF;'>
-        <div style='font-size:13px;font-weight:600;color:#007AFF;margin-bottom:12px;'>🚀 Pour démarrer — 2 étapes</div>
-        <div style='display:grid;grid-template-columns:1fr 1fr;gap:20px;'>
-            <div style='font-size:12px;color:#3A3A3C;line-height:1.8;'>
-                <div style='font-weight:600;margin-bottom:4px;'>① Fichiers ventes (panneau gauche)</div>
-                Chargez une ou plusieurs extractions Power BI au format CSV (séparateur <code>;</code>).
-                Plusieurs semaines sont cumulables — le module les empile et détecte automatiquement
-                les périodes, semaines et mois depuis les métadonnées PBI.
-            </div>
-            <div style='font-size:12px;color:#3A3A3C;line-height:1.8;'>
-                <div style='font-weight:600;margin-bottom:4px;'>② Liste Fidélité (panneau gauche)</div>
-                Chargez le référentiel des articles en programme : colonnes
-                <code>Article</code> / <code>Cagnotte</code> / <code>Mois</code>.
-                Un même article peut apparaître sur plusieurs mois avec des montants différents —
-                la jointure est faite mois par mois automatiquement.
-            </div>
-        </div>
-    </div>""", unsafe_allow_html=True)
+    st.markdown("---")
+    st.markdown("<div style='font-size:11px;font-weight:600;color:#8E8E93;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px'>Filtres</div>", unsafe_allow_html=True)
+    # Filtres — peuplés après chargement (déclarés ici pour structure sidebar)
+    _sidebar_filters = True
+
+
+# ─── PAGE PRINCIPALE ──────────────────────────────────────────────────────────
+st.markdown("<div class='page-title'>🏷️ Fidélité Cagnotte</div>", unsafe_allow_html=True)
+st.markdown("<div class='page-caption'>Investissement cagnotte · Performance par article × magasin · Source : Export PBI standard</div>", unsafe_allow_html=True)
+
+# ─── ÉCRAN D'ACCUEIL ──────────────────────────────────────────────────────────
+if not pbi_files or not fid_file:
+    st.markdown("---")
+    st.markdown("""
+<div class='alert-card alert-blue'>
+  <strong>ℹ️ Ce module utilise désormais l'export PBI standard</strong><br>
+  Le même fichier Excel que tu charges dans <strong>Perf Hebdo</strong> ou <strong>Ventes PBI</strong>.
+  Plus de CSV custom — un seul format pour tout SmartBuyer Hub.
+</div>""", unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("<div class='section-label'>Fichiers attendus</div>", unsafe_allow_html=True)
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("""
+<div class='col-required'>
+  <div style='font-size:16px'>📊</div>
+  <div>
+    <div class='col-name'>Export PBI ventes (.xlsx)</div>
+    <div class='col-desc'>Même fichier que Perf Hebdo / Ventes PBI. Multi-upload possible (plusieurs semaines).</div>
+    <div class='col-desc' style='margin-top:4px;color:#8E8E93'>Colonnes : Rayon · Famille · Sous Famille · Article · Site nom long · CA · Marge · CA Promo · Marge Promo · Qté Vente</div>
+  </div>
+</div>""", unsafe_allow_html=True)
+
+    with c2:
+        st.markdown("""
+<div class='col-required'>
+  <div style='font-size:16px'>📋</div>
+  <div>
+    <div class='col-name'>Référentiel Fidélité (.csv)</div>
+    <div class='col-desc'>Format inchangé — 3 colonnes.</div>
+    <div class='col-desc' style='margin-top:4px;color:#8E8E93'>Article (code entier) · Cagnotte (XOF/unité) · Mois (ex: Mai, Avril)</div>
+  </div>
+</div>""", unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("""
+<div class='alert-card alert-green'>
+  <strong>✅ Nouveautés v2</strong><br>
+  · Plus de parser CSV custom : le module lit directement l'export PBI Excel<br>
+  · La période est détectée automatiquement depuis les métadonnées PBI<br>
+  · Multi-upload : charge plusieurs semaines pour une analyse consolidée<br>
+  · Jointure Article × Mois automatique avec fallback si le mois ne correspond pas
+</div>""", unsafe_allow_html=True)
+
+    st.info("⬆️ Charge les fichiers dans la sidebar pour démarrer.")
     st.stop()
 
 
-# ─────────────────────────────────────────────
-# DATA LOADING
-# ─────────────────────────────────────────────
-all_dfs, periods = [], []
-for f in ventes_files:
-    df_v, d1, d2, sem, mois = load_ventes_csv(f)
-    if df_v is not None and len(df_v) > 0:
-        all_dfs.append(df_v)
-        periods.append({'file': f.name, 'date_debut': d1, 'date_fin': d2, 'sem': sem, 'mois': mois})
+# ─── CHARGEMENT ───────────────────────────────────────────────────────────────
+errors = []
+all_dfs, all_periods = [], []
+
+with st.spinner("Lecture des fichiers PBI…"):
+    for f in pbi_files:
+        try:
+            df_v, d1, d2, mois = parse_pbi(f.read())
+            if not df_v.empty:
+                df_v["_fichier"] = f.name
+                df_v["_periode"] = f"{d1} → {d2}"
+                df_v["_mois"]    = mois
+                all_dfs.append(df_v)
+                all_periods.append({"fichier": f.name, "d1": d1, "d2": d2, "mois": mois})
+        except Exception as e:
+            errors.append(f"**{f.name}** : {e}")
+
+if errors:
+    for err in errors:
+        st.warning(err)
 
 if not all_dfs:
-    st.error("Aucune donnée valide trouvée dans les fichiers ventes.")
+    st.error("Aucune donnée valide dans les fichiers PBI chargés.")
     st.stop()
 
-df_ventes   = pd.concat(all_dfs, ignore_index=True)
-df_fidelite = load_fidelite_csv(fidelite_file)
+df_pbi_all = pd.concat(all_dfs, ignore_index=True)
+
+try:
+    df_fid = parse_fidelite(fid_file.read())
+except Exception as e:
+    st.error(f"Erreur lecture référentiel fidélité : {e}")
+    st.stop()
 
 
-# ─────────────────────────────────────────────
-# SIDEBAR — FILTRES (après chargement des données)
-# ─────────────────────────────────────────────
+# ─── FILTRES SIDEBAR ──────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("---")
-    st.markdown("### 🎛️ Filtres")
-
-    # Mois
-    mois_disponibles = sorted(df_ventes['Mois'].dropna().unique().tolist())
-    mois_sel = st.multiselect(
-        "Mois", options=mois_disponibles, default=mois_disponibles,
-        key='f_mois'
-    )
+    mois_dispo = sorted(set(p["mois"] for p in all_periods if p["mois"] != "—"))
+    mois_sel   = st.multiselect("Mois", mois_dispo, default=mois_dispo, key="fid_mois_sel")
     if not mois_sel:
-        mois_sel = mois_disponibles  # tout si rien coché
+        mois_sel = mois_dispo
 
-    # Semaines — dynamiques selon mois sélectionnés
-    sem_dispo = sorted(df_ventes[df_ventes['Mois'].isin(mois_sel)]['Semaine'].dropna().unique().tolist())
-    sem_sel = st.multiselect(
-        "Semaines", options=sem_dispo, default=[],
-        key='f_sem',
-        help="Vide = toutes les semaines des mois sélectionnés"
-    )
+    rayons_dispo = sorted(df_pbi_all["lib_rayon"].dropna().unique())
+    rayon_sel    = st.multiselect("Rayon", rayons_dispo, default=[], key="fid_rayon_sel",
+                                   help="Vide = tous")
 
-    # Rayon
-    rayons_dispo = sorted(df_ventes['Rayon'].dropna().unique().tolist())
-    rayon_sel = st.multiselect(
-        "Rayon", options=rayons_dispo, default=[],
-        key='f_rayon',
-        help="Vide = tous les rayons"
-    )
+    fam_src   = df_pbi_all[df_pbi_all["lib_rayon"].isin(rayon_sel)] if rayon_sel else df_pbi_all
+    fam_dispo = sorted(fam_src["lib_famille"].dropna().unique())
+    fam_sel   = st.multiselect("Famille", fam_dispo, default=[], key="fid_fam_sel",
+                                help="Vide = toutes")
 
-    # Famille — dynamique selon rayon
-    if rayon_sel:
-        fam_src = df_ventes[df_ventes['Rayon'].isin(rayon_sel)]
-    else:
-        fam_src = df_ventes
-    fam_dispo = sorted(fam_src['Famille'].dropna().unique().tolist())
-    famille_sel = st.multiselect(
-        "Famille", options=fam_dispo, default=[],
-        key='f_famille',
-        help="Vide = toutes les familles"
-    )
+    sites_dispo = sorted(df_pbi_all["lib_site"].dropna().unique())
+    sites_sel   = st.multiselect("Magasins", sites_dispo, default=[], key="fid_sites_sel",
+                                  help="Vide = tous")
 
-    # Magasins
-    sites_dispo = sorted(df_ventes['Site nom long'].dropna().unique().tolist())
-    sites_sel = st.multiselect(
-        "Magasins", options=sites_dispo, default=[],
-        key='f_sites',
-        help="Vide = tous les magasins"
-    )
-
-    # Reset button
-    st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
-    if st.button("↺ Réinitialiser les filtres", use_container_width=True):
-        for k in ['f_mois','f_sem','f_rayon','f_famille','f_sites']:
+    if st.button("↺ Réinitialiser", use_container_width=True):
+        for k in ["fid_mois_sel", "fid_rayon_sel", "fid_fam_sel", "fid_sites_sel"]:
             if k in st.session_state:
                 del st.session_state[k]
         st.rerun()
 
 
-# ─────────────────────────────────────────────
-# FILTER & JOIN
-# ─────────────────────────────────────────────
-# Mois courts pour la jointure fidélité (ex: "Mai", "Avril")
-mois_courts = list(set(m.split(' ')[0] for m in mois_sel))
-# Label affiché dans les headers
-mois_label = ' + '.join(sorted(mois_courts)) if mois_courts else 'Tous'
+# ─── FILTRE + JOINTURE ────────────────────────────────────────────────────────
+df_filtre = df_pbi_all[df_pbi_all["_mois"].isin(mois_sel)].copy()
+if rayon_sel:  df_filtre = df_filtre[df_filtre["lib_rayon"].isin(rayon_sel)]
+if fam_sel:    df_filtre = df_filtre[df_filtre["lib_famille"].isin(fam_sel)]
+if sites_sel:  df_filtre = df_filtre[df_filtre["lib_site"].isin(sites_sel)]
 
-# Filtrer ventes
-df_mois = df_ventes[df_ventes['Mois'].isin(mois_sel)].copy()
-if sem_sel:
-    df_mois = df_mois[df_mois['Semaine'].isin(sem_sel)]
-if rayon_sel:
-    df_mois = df_mois[df_mois['Rayon'].isin(rayon_sel)]
-if famille_sel:
-    df_mois = df_mois[df_mois['Famille'].isin(famille_sel)]
-if sites_sel:
-    df_mois = df_mois[df_mois['Site nom long'].isin(sites_sel)]
+if df_filtre.empty:
+    st.warning("Aucune donnée pour les filtres sélectionnés.")
+    st.stop()
 
-# Fidélité pour les mois sélectionnés
-df_fid_mois = df_fidelite[df_fidelite['Mois'].isin(mois_courts)]
-if len(df_fid_mois) == 0:
-    df_fid_mois = df_fidelite.copy()
+# Mois principal pour la jointure (premier mois sélectionné)
+mois_join = mois_sel[0] if mois_sel else "—"
+df = join_fidelite(df_filtre, df_fid, mois_join)
+df_fid_only = df[df["est_fidelite"]].copy()
 
-# Join ventes × fidélité (article_id + mois_court pour éviter collision inter-mois)
-df_mois['_mois_court'] = df_mois['Mois'].apply(lambda x: str(x).split(' ')[0])
-df_joined = df_mois.merge(
-    df_fid_mois[['Article','Cagnotte','Mois']].rename(columns={
-        'Article':'_article_id','Cagnotte':'Cagnotte_unit','Mois':'_mois_fid'}),
-    left_on=['_article_id','_mois_court'],
-    right_on=['_article_id','_mois_fid'],
-    how='left'
-).drop(columns=['_mois_fid','_mois_court'], errors='ignore')
-
-df_joined['est_fidelite'] = df_joined['Cagnotte_unit'].notna()
-df_joined['Total Cagnotte'] = df_joined['Cagnotte_unit'] * df_joined['Qté Vente']
-df_fid_only = df_joined[df_joined['est_fidelite']].copy()
-
-# Pour compatibilité des KPIs — nb articles périmètre fidélité tous mois confondus
-mois_court = mois_label  # utilisé dans les headers d'onglets
-
-
-# ─────────────────────────────────────────────
-# PERIOD BADGE — plage consolidée selon filtres actifs
-# ─────────────────────────────────────────────
-# Filtrer les periods selon mois ET semaines sélectionnés
-periods_sel = [p for p in periods if p['mois'] in mois_sel]
-if sem_sel:
-    periods_sel = [p for p in periods_sel if p['sem'] in sem_sel]
-if not periods_sel:
-    periods_sel = periods  # fallback tout
-
-dates_debut = [p['date_debut'] for p in periods_sel if p['date_debut'] is not None]
-dates_fin   = [p['date_fin']   for p in periods_sel if p['date_fin']   is not None]
-semaines_badge = sorted(set(p['sem'] for p in periods_sel if p['sem'] != '—'))
-
-d1_str  = min(dates_debut).strftime('%d/%m/%Y') if dates_debut else '—'
-d2_str  = max(dates_fin).strftime('%d/%m/%Y')   if dates_fin   else '—'
-sem_str = ' · '.join(semaines_badge) if semaines_badge else '—'
-
-# Filtre actifs résumé
-filtres_actifs = []
-if rayon_sel:   filtres_actifs.append(f"{len(rayon_sel)} rayon(s)")
-if famille_sel: filtres_actifs.append(f"{len(famille_sel)} famille(s)")
-if sites_sel:   filtres_actifs.append(f"{len(sites_sel)} magasin(s)")
-filtres_str = ' · '.join(filtres_actifs) if filtres_actifs else 'Tous magasins · Tous rayons'
-
-st.markdown(f"""<div class="period-badge">
-    <div>
-        <div class="period-label">Période · {mois_label}</div>
-        <div class="period-value">{d1_str} → {d2_str} · {sem_str}</div>
-        <div style="font-size:11px;color:#3A3A3C;margin-top:3px;">{filtres_str}</div>
-    </div>
-    <div style="margin-left:auto;text-align:right;font-size:12px;color:#3A3A3C;">
-        <div>{len(ventes_files)} fichier(s) chargé(s)</div>
-        <div>{len(df_fid_mois)} articles fidélité · {len(df_mois):,} lignes filtrées</div>
-    </div>
+if df_fid_only.empty:
+    st.markdown("""
+<div class='alert-card alert-amber'>
+  <strong>⚠️ Aucun article fidélité trouvé dans ce fichier PBI</strong><br>
+  Vérifie que les codes articles du référentiel correspondent au format PBI (ex: 12001277).
 </div>""", unsafe_allow_html=True)
+    with st.expander("Diagnostic"):
+        st.write("Codes dans le référentiel :", sorted(df_fid["Article"].unique().tolist())[:10])
+        st.write("Codes dans le PBI :", sorted([c for c in df["code_article"].dropna().unique().tolist() if c])[:10])
+    st.stop()
 
 
-# ─────────────────────────────────────────────
-# KPI COMPUTATION
-# ─────────────────────────────────────────────
-budget_cagnotte = df_fid_only['Total Cagnotte'].sum()
-ca_fidelite     = df_fid_only['CA'].sum()
-marge_fidelite  = df_fid_only['Marge'].sum()
-arts_actifs     = df_fid_only[df_fid_only['CA'] > 0]['_article_id'].nunique()
-arts_perimetre  = df_fid_mois['Article'].nunique()
-sites_actifs    = df_fid_only[df_fid_only['CA'] > 0]['Site nom long'].nunique()
-sites_total     = df_mois['Site nom long'].nunique()
-marge_class     = "red" if marge_fidelite < 0 else "green"
+# ─── PERIOD BADGE ─────────────────────────────────────────────────────────────
+periodes_label = " · ".join(sorted(set(p["d1"] + " → " + p["d2"] for p in all_periods)))
+mois_label_str = " + ".join(mois_sel)
+n_fichiers     = len(pbi_files)
+filtres_str    = " · ".join(
+    [f"{len(rayon_sel)} rayon(s)"] * bool(rayon_sel) +
+    [f"{len(fam_sel)} famille(s)"] * bool(fam_sel) +
+    [f"{len(sites_sel)} magasin(s)"] * bool(sites_sel)
+) or "Tous rayons · Tous magasins"
 
-st.markdown(f"""<div class="kpi-grid">
-    <div class="kpi-card">
-        <div class="kpi-label">Budget Cagnotte</div>
-        <div class="kpi-value blue">{fmt_xof(budget_cagnotte)}</div>
-        <div class="kpi-sub">Investissement fidélité</div>
+st.markdown(f"""
+<div class="period-badge">
+  <div>
+    <div style='font-size:11px;font-weight:600;color:#007AFF;text-transform:uppercase;letter-spacing:.05em'>
+      Période · {mois_label_str}
     </div>
-    <div class="kpi-card">
-        <div class="kpi-label">CA Fidélité</div>
-        <div class="kpi-value">{fmt_xof(ca_fidelite)}</div>
-        <div class="kpi-sub">Articles en programme</div>
-    </div>
-    <div class="kpi-card">
-        <div class="kpi-label">Marge Fidélité</div>
-        <div class="kpi-value {marge_class}">{fmt_xof(marge_fidelite)}</div>
-        <div class="kpi-sub">Impact marge programme</div>
-    </div>
-    <div class="kpi-card">
-        <div class="kpi-label">Articles Actifs</div>
-        <div class="kpi-value blue">{arts_actifs} <span style="font-size:14px;color:#8E8E93;">/ {arts_perimetre}</span></div>
-        <div class="kpi-sub">Avec ventes &gt; 0 · périmètre {mois_court}</div>
-    </div>
-    <div class="kpi-card">
-        <div class="kpi-label">Couverture Réseau</div>
-        <div class="kpi-value blue">{sites_actifs} <span style="font-size:14px;color:#8E8E93;">/ {sites_total}</span></div>
-        <div class="kpi-sub">Sites avec ventes fidélité</div>
-    </div>
+    <div style='font-size:15px;font-weight:700;color:#007AFF;margin-top:2px'>{periodes_label}</div>
+    <div style='font-size:12px;color:#3A3A3C;margin-top:3px'>{filtres_str}</div>
+  </div>
+  <div style='margin-left:auto;text-align:right;font-size:12px;color:#3A3A3C'>
+    <div>{n_fichiers} fichier(s) PBI · {len(df_fid)} articles en programme</div>
+    <div>{len(df_filtre):,} lignes PBI filtrées</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+
+# ─── KPIs ─────────────────────────────────────────────────────────────────────
+budget      = df_fid_only["Total Cagnotte"].sum()
+ca_fid      = df_fid_only["CA"].sum()
+mg_fid      = df_fid_only["Marge"].sum()
+ca_global   = df_filtre["CA"].sum()
+poids_ca    = ca_fid / ca_global * 100 if ca_global > 0 else 0
+arts_actifs = df_fid_only[df_fid_only["CA"] > 0]["code_article"].nunique()
+arts_perim  = df_fid["Article"].nunique()
+sites_actif = df_fid_only[df_fid_only["CA"] > 0]["lib_site"].nunique()
+
+k1, k2, k3, k4, k5 = st.columns(5)
+k1.metric("Budget Cagnotte",  fmt_xof(budget))
+k2.metric("CA Fidélité",      fmt_xof(ca_fid), f"{poids_ca:.1f}% du CA global")
+k3.metric("Marge Fidélité",   fmt_xof(mg_fid))
+k4.metric("Articles actifs",  f"{arts_actifs} / {arts_perim}")
+k5.metric("Sites couverts",   f"{sites_actif} / {df_filtre['lib_site'].nunique()}")
+
+
+# ─── ALERTES ──────────────────────────────────────────────────────────────────
+st.markdown("---")
+st.markdown("<div class='section-label'>Alertes</div>", unsafe_allow_html=True)
+
+# Articles sans ventes
+arts_perimetre_ids = set(df_fid["Article"].unique())
+arts_avec_vente    = set(
+    df_fid_only[df_fid_only["CA"] > 0]["code_article"].dropna().unique()
+)
+arts_zero = arts_perimetre_ids - arts_avec_vente
+n_zero    = len(arts_zero)
+
+# Familles marge négative
+fam_marge = df_fid_only.groupby("lib_famille")["Marge"].sum()
+fam_neg   = fam_marge[fam_marge < 0]
+n_neg     = len(fam_neg)
+
+a1, a2 = st.columns(2)
+with a1:
+    if n_zero > 0:
+        st.markdown(f"""
+<div class='alert-card alert-red'>
+  <strong>⚠️ {n_zero} article(s) en programme sans aucune vente</strong><br>
+  <span style='font-size:12px;opacity:.85'>Budget cagnotte investi à ROI nul — vérifier disponibilité en rayon.</span>
 </div>""", unsafe_allow_html=True)
+    else:
+        st.markdown("<div class='alert-card alert-green'>✅ Tous les articles en programme ont généré des ventes.</div>", unsafe_allow_html=True)
+
+with a2:
+    if n_neg > 0:
+        noms = ", ".join(fam_neg.index.tolist())
+        st.markdown(f"""
+<div class='alert-card alert-amber'>
+  <strong>⚠️ {n_neg} famille(s) en marge négative</strong> : {noms}<br>
+  <span style='font-size:12px;opacity:.85'>La cagnotte dégrade la marge sur ces familles.</span>
+</div>""", unsafe_allow_html=True)
+    else:
+        st.markdown("<div class='alert-card alert-green'>✅ Aucune famille en marge négative.</div>", unsafe_allow_html=True)
 
 
-# ─────────────────────────────────────────────
-# EXPORT GLOBAL
-# ─────────────────────────────────────────────
-def build_full_export():
-    """Construit un Excel multi-onglets avec toutes les données du module."""
-
-    # 1. Récap Financier
-    grp_gl = df_mois.groupby(['Site nom long','Rayon','Famille'], as_index=False).agg(
-        CA_Globale=('CA','sum'), Marge_Globale=('Marge','sum'))
-    grp_fd = df_fid_only.groupby(['Site nom long','Rayon','Famille'], as_index=False).agg(
-        CA_Fidelite=('CA','sum'), Marge_Fidelite=('Marge','sum'),
-        Qte_Vente=('Qté Vente','sum'), Total_Cagnotte=('Total Cagnotte','sum'))
-    df_rf = grp_fd.merge(grp_gl, on=['Site nom long','Rayon','Famille'], how='left')
-    df_rf['Poids Fidélité %'] = np.where(df_rf['CA_Globale']>0,
-        (df_rf['CA_Fidelite']/df_rf['CA_Globale']*100).round(1), np.nan)
-    df_rf['Poids Marge Fidélité %'] = np.where(df_rf['Marge_Globale'].abs()>0,
-        (df_rf['Marge_Fidelite']/df_rf['Marge_Globale']*100).round(1), np.nan)
-    df_rf.insert(0, 'Mois', mois_court)
-    df_rf = df_rf.rename(columns={'Site nom long':'Site','CA_Fidelite':'CA Fidélité',
-        'CA_Globale':'CA Globale','Marge_Fidelite':'Marge Fidélité','Marge_Globale':'Marge Globale',
-        'Qte_Vente':'Qté Vente','Total_Cagnotte':'Total Cagnotte'})
-
-    # 2. Récap Détail Article × Site
-    df_rd = df_fid_only.groupby(
-        ['Date Début','Date Fin','Semaine','Mois','Rayon','Famille','Article','Site nom long'],
-        as_index=False
-    ).agg(CA=('CA','sum'), Marge=('Marge','sum'), Qte=('Qté Vente','sum'),
-          Cagnotte_unit=('Cagnotte_unit','first'), Total_Cagnotte=('Total Cagnotte','sum'))
-    df_rd = df_rd.rename(columns={'Site nom long':'Site','Qte':'Qté Vente',
-        'Cagnotte_unit':'Cagnotte/unité','Total_Cagnotte':'Total Cagnotte'})
-
-    # 3. Synthèse — Top Familles
-    grp_fam_e = df_fid_only.groupby('Famille', as_index=False).agg(
-        CA_Fidelite=('CA','sum'), Marge_Fidelite=('Marge','sum'),
-        Budget_Cagnotte=('Total Cagnotte','sum'))
-    grp_fam_gl_e = df_mois.groupby('Famille', as_index=False).agg(CA_Globale=('CA','sum'))
-    grp_fam_e = grp_fam_e.merge(grp_fam_gl_e, on='Famille', how='left')
-    grp_fam_e['Poids %'] = np.where(grp_fam_e['CA_Globale']>0,
-        (grp_fam_e['CA_Fidelite']/grp_fam_e['CA_Globale']*100).round(1), np.nan)
-    grp_fam_e = grp_fam_e.sort_values('Budget_Cagnotte', ascending=False).rename(columns={
-        'CA_Fidelite':'CA Fidélité','Marge_Fidelite':'Marge Fidélité','Budget_Cagnotte':'Budget Cagnotte'})
-
-    # 4. Synthèse — Performance Réseau
-    grp_site_e = df_fid_only.groupby('Site nom long', as_index=False).agg(
-        CA_Fidelite=('CA','sum'), Marge_Fidelite=('Marge','sum'),
-        Budget_Cagnotte=('Total Cagnotte','sum'), Nb_Articles=('_article_id','nunique'))
-    grp_site_gl_e = df_mois.groupby('Site nom long', as_index=False).agg(CA_Globale=('CA','sum'))
-    grp_site_e = grp_site_e.merge(grp_site_gl_e, on='Site nom long', how='left')
-    grp_site_e['Poids %'] = np.where(grp_site_e['CA_Globale']>0,
-        (grp_site_e['CA_Fidelite']/grp_site_e['CA_Globale']*100).round(1), np.nan)
-    grp_site_e = grp_site_e.rename(columns={'Site nom long':'Site','CA_Fidelite':'CA Fidélité',
-        'Marge_Fidelite':'Marge Fidélité','Budget_Cagnotte':'Budget Cagnotte','Nb_Articles':'Nb Articles'})
-
-    # 5. Alertes — Articles sans ventes (croisé sur mois actifs uniquement)
-    arts_perimetre_e = set(df_fid_mois['Article'].unique())
-    arts_avec_ca_e   = set(df_fid_only[df_fid_only['CA'].notna() & (df_fid_only['CA']>0)]['_article_id'].unique())
-    arts_zero_ids_e  = arts_perimetre_e - arts_avec_ca_e
-    arts_zero_e = (df_ventes[df_ventes['_article_id'].isin(arts_zero_ids_e)]
-                   [['_article_id','Article']].drop_duplicates()
-                   .sort_values('Article')[['Article']])
-
-    # 6. Alertes — Familles marge négative
-    fam_neg_e = df_fid_only.groupby('Famille', as_index=False).agg(
-        CA_Fidelite=('CA','sum'), Marge_Fidelite=('Marge','sum'),
-        Budget_Cagnotte=('Total Cagnotte','sum'))
-    fam_neg_e = fam_neg_e[fam_neg_e['Marge_Fidelite']<0].sort_values('Marge_Fidelite')
-    fam_neg_e = fam_neg_e.rename(columns={'CA_Fidelite':'CA Fidélité',
-        'Marge_Fidelite':'Marge Fidélité','Budget_Cagnotte':'Budget Cagnotte'})
-
-    # 7. Raw Data fidélité
-    df_raw_e = df_ventes.copy()
-    df_raw_e['_mois_court'] = df_raw_e['Mois'].apply(lambda x: str(x).split(' ')[0] if pd.notna(x) else '')
-    df_fid_all_e = df_fidelite.rename(columns={'Article':'_article_id','Cagnotte':'Cagnotte/unité','Mois':'_mois_fid'})
-    df_raw_e = df_raw_e.merge(
-        df_fid_all_e[['_article_id','Cagnotte/unité','_mois_fid']],
-        left_on=['_article_id','_mois_court'], right_on=['_article_id','_mois_fid'], how='left'
-    ).drop(columns=['_mois_fid','_mois_court','_article_id'], errors='ignore')
-    df_raw_e['Total Cagnotte'] = df_raw_e['Cagnotte/unité'] * df_raw_e['Qté Vente']
-    df_raw_e = df_raw_e[df_raw_e['Cagnotte/unité'].notna()].copy()
-    cols_re = ['Date Début','Date Fin','Semaine','Mois','Site nom long','Rayon',
-               'Famille','Article','CA','Marge','Qté Vente','Cagnotte/unité','Total Cagnotte']
-    df_raw_e = df_raw_e[[c for c in cols_re if c in df_raw_e.columns]]
-
-    return to_excel({
-        'Récap Financier':       df_rf,
-        'Récap Détail':          df_rd,
-        'Synthèse Familles':     grp_fam_e,
-        'Performance Réseau':    grp_site_e,
-        'Alertes Articles 0vte': arts_zero_e,
-        'Alertes Marge Négative':fam_neg_e,
-        'Raw Data Fidélité':     df_raw_e,
-    })
-
-# Bouton export global — aligné à droite via colonnes
-_spacer, _btn_col = st.columns([8, 2])
-with _btn_col:
-    st.download_button(
-        label="⬇️ Tout exporter · Excel",
-        data=build_full_export(),
-        file_name=f"Fidelite_Cagnotte_Complet_{mois_court}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True,
-    )
-
-st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
-
-# ─────────────────────────────────────────────
-# TABS
-# ─────────────────────────────────────────────
+# ─── TABS ─────────────────────────────────────────────────────────────────────
+st.markdown("---")
 tab0, tab1, tab2, tab3, tab4 = st.tabs([
-    "🏠 Synthèse Exécutive",
+    "🏠 Synthèse",
     "📊 Récap Financier",
-    "🔍 Récap Détail Article × Site",
-    "📋 Drill-down Granulaire",
-    "🗃️ Raw Data",
+    "🔍 Détail Article × Site",
+    "📋 Drill-down",
+    "📥 Export Excel",
 ])
 
 
-# ═══════════════════════════════════════════════════════
-# ONGLET 0 — SYNTHÈSE EXÉCUTIVE
-# ═══════════════════════════════════════════════════════
+# ═══ TAB 0 — SYNTHÈSE ═════════════════════════════════════════════════════════
 with tab0:
-    st.markdown(f'<div class="section-header">Synthèse Exécutive · {mois_court} · Vue COPIL</div>', unsafe_allow_html=True)
-    st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+    c1, c2 = st.columns(2)
 
-    # ── Bloc A : Top 5 Familles par budget cagnotte ──────────────
-    col_a, col_b = st.columns([1, 1])
-
-    with col_a:
-        st.markdown("**🏆 Top 5 Familles · Budget Cagnotte investi**")
-        grp_fam = df_fid_only.groupby('Famille', as_index=False).agg(
-            CA_Fidelite=('CA', 'sum'),
-            Marge_Fidelite=('Marge', 'sum'),
-            Qte=('Qté Vente', 'sum'),
-            Budget_Cagnotte=('Total Cagnotte', 'sum'),
-        ).sort_values('Budget_Cagnotte', ascending=False).head(5)
-
-        # Global CA per famille for poids
-        grp_fam_global = df_mois.groupby('Famille', as_index=False).agg(CA_Globale=('CA','sum'))
-        grp_fam = grp_fam.merge(grp_fam_global, on='Famille', how='left')
-        grp_fam['Poids %'] = np.where(grp_fam['CA_Globale']>0,
-            (grp_fam['CA_Fidelite']/grp_fam['CA_Globale']*100).round(1), np.nan)
-
-        df_top5 = grp_fam[['Famille','CA_Fidelite','Marge_Fidelite','Budget_Cagnotte','Poids %']].copy()
-        # shorten famille label
-        df_top5['Famille'] = df_top5['Famille'].apply(
-            lambda x: re.sub(r'^\d+\s*-\s*', '', str(x)))
-        df_top5_disp = df_top5.copy()
-        df_top5_disp['CA_Fidelite']    = df_top5_disp['CA_Fidelite'].apply(fmt_num)
-        df_top5_disp['Marge_Fidelite'] = df_top5_disp['Marge_Fidelite'].apply(fmt_num)
-        df_top5_disp['Budget_Cagnotte']= df_top5_disp['Budget_Cagnotte'].apply(fmt_num)
-        df_top5_disp['Poids %']        = df_top5_disp['Poids %'].apply(fmt_pct)
-        df_top5_disp = df_top5_disp.rename(columns={
-            'CA_Fidelite':'CA Fidélité','Marge_Fidelite':'Marge','Budget_Cagnotte':'Cagnotte','Poids %':'Poids CA %'})
-        styled_top5 = df_top5_disp.style.map(color_marge, subset=['Marge']).map(color_poids, subset=['Poids CA %'])
-        st.dataframe(styled_top5, use_container_width=True, hide_index=True)
-
-    with col_b:
-        st.markdown("**🏪 Performance Réseau · Site**")
-        grp_site = df_fid_only.groupby('Site nom long', as_index=False).agg(
-            CA_Fidelite=('CA','sum'),
-            Marge_Fidelite=('Marge','sum'),
-            Budget_Cagnotte=('Total Cagnotte','sum'),
-            Nb_Articles=('_article_id','nunique'),
-        ).sort_values('CA_Fidelite', ascending=False)
-        grp_site_global = df_mois.groupby('Site nom long', as_index=False).agg(CA_Globale=('CA','sum'))
-        grp_site = grp_site.merge(grp_site_global, on='Site nom long', how='left')
-        grp_site['Poids %'] = np.where(grp_site['CA_Globale']>0,
-            (grp_site['CA_Fidelite']/grp_site['CA_Globale']*100).round(1), np.nan)
-
-        grp_site['Site'] = grp_site['Site nom long'].apply(
-            lambda x: re.sub(r'^\d+\s*-\s*', '', str(x)))
-        df_site_disp = grp_site[['Site','CA_Fidelite','Marge_Fidelite','Budget_Cagnotte','Poids %','Nb_Articles']].copy()
-        df_site_disp['CA_Fidelite']    = df_site_disp['CA_Fidelite'].apply(fmt_num)
-        df_site_disp['Marge_Fidelite'] = df_site_disp['Marge_Fidelite'].apply(fmt_num)
-        df_site_disp['Budget_Cagnotte']= df_site_disp['Budget_Cagnotte'].apply(fmt_num)
-        df_site_disp['Poids %']        = df_site_disp['Poids %'].apply(fmt_pct)
-        df_site_disp = df_site_disp.rename(columns={
-            'CA_Fidelite':'CA Fidélité','Marge_Fidelite':'Marge','Budget_Cagnotte':'Cagnotte',
-            'Poids %':'Poids CA %','Nb_Articles':'Nb Art.'})
-        styled_site = df_site_disp.style.map(color_marge, subset=['Marge']).map(color_poids, subset=['Poids CA %'])
-        st.dataframe(styled_site, use_container_width=True, hide_index=True)
-
-    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
-
-    # ── Bloc B : Alertes ─────────────────────────────────────────
-    col_c, col_d = st.columns([1, 1])
-
-    with col_c:
-        # Articles sans ventes (0 ROI) — croisement strict mois sélectionnés
-        # Articles en programme pour les mois actifs
-        arts_perimetre_mois = set(df_fid_mois['Article'].unique())
-        # Articles ayant vendu (CA > 0) dans la période filtrée
-        arts_avec_ca = set(
-            df_fid_only[df_fid_only['CA'].notna() & (df_fid_only['CA'] > 0)]['_article_id'].unique()
+    # Top 5 familles par budget cagnotte
+    with c1:
+        st.markdown("<div class='section-label'>Top familles · Budget cagnotte</div>", unsafe_allow_html=True)
+        grp_fam = df_fid_only.groupby("lib_famille", as_index=False).agg(
+            CA=("CA","sum"), Marge=("Marge","sum"), Budget=("Total Cagnotte","sum")
         )
-        # Articles en programme ce mois sans aucune vente
-        arts_zero_ids = arts_perimetre_mois - arts_avec_ca
-        # Récupérer les libellés depuis df_fid_only ou df_ventes
-        arts_zero_from_ventes = (df_ventes[df_ventes['_article_id'].isin(arts_zero_ids)]
-                                 [['_article_id','Article']].drop_duplicates())
-        # Compléter avec les IDs non trouvés dans les ventes (articles absents du tout)
-        arts_found_ids = set(arts_zero_from_ventes['_article_id'].tolist())
-        arts_missing   = arts_zero_ids - arts_found_ids
-        if arts_missing:
-            df_missing = pd.DataFrame({'_article_id': list(arts_missing),
-                                       'Article': [str(i) for i in arts_missing]})
-            arts_zero_names = pd.concat([arts_zero_from_ventes, df_missing], ignore_index=True)
-        else:
-            arts_zero_names = arts_zero_from_ventes
-        arts_zero_names = arts_zero_names.sort_values('Article').reset_index(drop=True)
-        n_zero = len(arts_zero_names)
-        st.markdown(f"""
-        <div class="alert-card">
-            <div class="alert-title">⚠️ Articles sans ventes · Cagnotte à ROI nul</div>
-            <div style='margin-bottom:8px;'>
-                <span class="alert-badge-red">{n_zero} article(s)</span>
-                <span style='font-size:11px;color:#8E8E93;margin-left:8px;'>présents en programme mais 0 vente sur la période</span>
-            </div>
-        </div>""", unsafe_allow_html=True)
-        if n_zero > 0:
-            arts_zero_disp = arts_zero_names[['Article']].copy()
-            arts_zero_disp['Article'] = arts_zero_disp['Article'].apply(
-                lambda x: re.sub(r'^\d+\s*-\s*', '', str(x)))
-            st.dataframe(arts_zero_disp, use_container_width=True, hide_index=True, height=220)
-        else:
-            st.success("✅ Tous les articles en programme ont généré des ventes.")
+        grp_fam_gl = df_filtre.groupby("lib_famille", as_index=False).agg(CA_gl=("CA","sum"))
+        grp_fam    = grp_fam.merge(grp_fam_gl, on="lib_famille", how="left")
+        grp_fam["Poids %"] = (grp_fam["CA"] / grp_fam["CA_gl"].replace(0, np.nan) * 100).round(1)
+        grp_fam = grp_fam.sort_values("Budget", ascending=False).head(5)
 
-    with col_d:
-        # Familles marge fidélité négative
-        grp_fam_marge = df_fid_only.groupby('Famille', as_index=False).agg(
-            Marge_Fidelite=('Marge','sum'),
-            CA_Fidelite=('CA','sum'),
-            Budget_Cagnotte=('Total Cagnotte','sum'),
+        disp_fam = grp_fam.rename(columns={"lib_famille":"Famille","CA":"CA Fidélité","Budget":"Budget Cagnotte"})
+        disp_fam["CA Fidélité"]    = disp_fam["CA Fidélité"].apply(fmt_num)
+        disp_fam["Marge"]          = disp_fam["Marge"].apply(fmt_num)
+        disp_fam["Budget Cagnotte"]= disp_fam["Budget Cagnotte"].apply(fmt_num)
+        disp_fam["Poids %"]        = disp_fam["Poids %"].apply(fmt_pct)
+        st.dataframe(disp_fam[["Famille","CA Fidélité","Marge","Budget Cagnotte","Poids %"]],
+                     use_container_width=True, hide_index=True, height=240)
+
+    # Performance réseau par site
+    with c2:
+        st.markdown("<div class='section-label'>Performance réseau · Site</div>", unsafe_allow_html=True)
+        grp_site = df_fid_only.groupby("lib_site", as_index=False).agg(
+            CA=("CA","sum"), Marge=("Marge","sum"),
+            Budget=("Total Cagnotte","sum"), Nb_Art=("code_article","nunique")
         )
-        fam_neg = grp_fam_marge[grp_fam_marge['Marge_Fidelite'] < 0].sort_values('Marge_Fidelite')
-        n_neg = len(fam_neg)
-        st.markdown(f"""
-        <div class="alert-card">
-            <div class="alert-title">🔴 Familles · Marge Fidélité négative</div>
-            <div style='margin-bottom:8px;'>
-                <span class="alert-badge-orange">{n_neg} famille(s)</span>
-                <span style='font-size:11px;color:#8E8E93;margin-left:8px;'>où le programme dégrade la marge</span>
-            </div>
-        </div>""", unsafe_allow_html=True)
-        if n_neg > 0:
-            fam_neg_disp = fam_neg.copy()
-            fam_neg_disp['Famille'] = fam_neg_disp['Famille'].apply(
-                lambda x: re.sub(r'^\d+\s*-\s*', '', str(x)))
-            fam_neg_disp['Marge_Fidelite']  = fam_neg_disp['Marge_Fidelite'].apply(fmt_num)
-            fam_neg_disp['CA_Fidelite']     = fam_neg_disp['CA_Fidelite'].apply(fmt_num)
-            fam_neg_disp['Budget_Cagnotte'] = fam_neg_disp['Budget_Cagnotte'].apply(fmt_num)
-            fam_neg_disp = fam_neg_disp.rename(columns={
-                'Marge_Fidelite':'Marge','CA_Fidelite':'CA Fidélité','Budget_Cagnotte':'Cagnotte'})
-            styled_neg = fam_neg_disp.style.map(color_marge, subset=['Marge'])
-            st.dataframe(styled_neg, use_container_width=True, hide_index=True, height=220)
-        else:
-            st.success("✅ Aucune famille en marge négative.")
+        grp_site_gl = df_filtre.groupby("lib_site", as_index=False).agg(CA_gl=("CA","sum"))
+        grp_site    = grp_site.merge(grp_site_gl, on="lib_site", how="left")
+        grp_site["Poids %"] = (grp_site["CA"] / grp_site["CA_gl"].replace(0, np.nan) * 100).round(1)
+        grp_site = grp_site.sort_values("CA", ascending=False)
 
-    # ── Export Synthèse ─────────────────────────────────────────
-    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-    synth_export = {
-        'Top5 Familles': grp_fam[['Famille','CA_Fidelite','Marge_Fidelite','Budget_Cagnotte','Poids %']].rename(columns={
-            'CA_Fidelite':'CA Fidélité','Marge_Fidelite':'Marge Fidélité','Budget_Cagnotte':'Budget Cagnotte'}),
-        'Performance Réseau': grp_site[['Site nom long','CA_Fidelite','Marge_Fidelite','Budget_Cagnotte','Poids %','Nb_Articles']].rename(columns={
-            'CA_Fidelite':'CA Fidélité','Marge_Fidelite':'Marge Fidélité','Budget_Cagnotte':'Budget Cagnotte','Nb_Articles':'Nb Articles'}),
-        'Alertes Articles 0 vente': arts_zero_names,
-        'Alertes Marge Négative': fam_neg[['Famille','CA_Fidelite','Marge_Fidelite','Budget_Cagnotte']].rename(columns={
-            'CA_Fidelite':'CA Fidélité','Marge_Fidelite':'Marge Fidélité','Budget_Cagnotte':'Budget Cagnotte'}),
-    }
-    st.download_button(
-        label="⬇️ Exporter Synthèse Excel",
-        data=to_excel(synth_export),
-        file_name=f"Synthese_Fidelite_{mois_court}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
+        disp_site = grp_site.rename(columns={"lib_site":"Site","CA":"CA Fidélité","Budget":"Budget","Nb_Art":"Nb Art."})
+        disp_site["CA Fidélité"] = disp_site["CA Fidélité"].apply(fmt_num)
+        disp_site["Marge"]       = disp_site["Marge"].apply(fmt_num)
+        disp_site["Budget"]      = disp_site["Budget"].apply(fmt_num)
+        disp_site["Poids %"]     = disp_site["Poids %"].apply(fmt_pct)
+        st.dataframe(disp_site[["Site","CA Fidélité","Marge","Budget","Poids %","Nb Art."]],
+                     use_container_width=True, hide_index=True, height=240)
+
+    # Articles sans ventes (si applicable)
+    if n_zero > 0:
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("<div class='section-label'>Articles en programme sans ventes</div>", unsafe_allow_html=True)
+        arts_zero_df = df_fid[df_fid["Article"].isin(arts_zero)][["Article","Cagnotte","Mois"]].copy()
+        arts_zero_df["Cagnotte"] = arts_zero_df["Cagnotte"].apply(fmt_num)
+        st.dataframe(arts_zero_df, use_container_width=True, hide_index=True, height=200)
 
 
-# ═══════════════════════════════════════════════════════
-# ONGLET 1 — RÉCAP FINANCIER (Mois · Site × Rayon × Famille)
-# ═══════════════════════════════════════════════════════
+# ═══ TAB 1 — RÉCAP FINANCIER ══════════════════════════════════════════════════
 with tab1:
-    st.markdown(f'<div class="section-header">Récap Financier · {mois_court} · Site × Rayon × Famille</div>', unsafe_allow_html=True)
-    st.markdown("""<div class="info-box">
-    Agrégat <b>Site × Rayon × Famille</b> — CA / Marge fidélité vs global · Poids du programme · Budget cagnotte
-    </div>""", unsafe_allow_html=True)
+    st.markdown("<div class='section-label'>Site × Rayon × Famille · CA et Marge fidélité vs global</div>", unsafe_allow_html=True)
 
-    # Global aggregation
-    grp_global = df_mois.groupby(['Site nom long','Rayon','Famille'], as_index=False).agg(
-        CA_Globale=('CA','sum'), Marge_Globale=('Marge','sum'))
-    grp_fid = df_fid_only.groupby(['Site nom long','Rayon','Famille'], as_index=False).agg(
-        CA_Fidelite=('CA','sum'), Marge_Fidelite=('Marge','sum'),
-        Qte_Vente=('Qté Vente','sum'), Total_Cagnotte=('Total Cagnotte','sum'))
+    grp_gl  = df_filtre.groupby(["lib_site","lib_rayon","lib_famille"], as_index=False).agg(
+        CA_gl=("CA","sum"), Mg_gl=("Marge","sum"))
+    grp_fid = df_fid_only.groupby(["lib_site","lib_rayon","lib_famille"], as_index=False).agg(
+        CA=("CA","sum"), Marge=("Marge","sum"),
+        Qte=("Qté Vente","sum"), Budget=("Total Cagnotte","sum"))
 
-    df_recap = grp_fid.merge(grp_global, on=['Site nom long','Rayon','Famille'], how='left')
-    df_recap['Poids Fidélité %'] = np.where(df_recap['CA_Globale']>0,
-        (df_recap['CA_Fidelite']/df_recap['CA_Globale']*100).round(1), np.nan)
-    df_recap['Poids Marge %'] = np.where(df_recap['Marge_Globale'].abs()>0,
-        (df_recap['Marge_Fidelite']/df_recap['Marge_Globale']*100).round(1), np.nan)
+    recap = grp_fid.merge(grp_gl, on=["lib_site","lib_rayon","lib_famille"], how="left")
+    recap["Poids CA %"]    = (recap["CA"]    / recap["CA_gl"].replace(0, np.nan) * 100).round(1)
+    recap["Poids Marge %"] = (recap["Marge"] / recap["Mg_gl"].abs().replace(0, np.nan) * 100).round(1)
 
-    # Add Mois column first
-    df_recap.insert(0, 'Mois', mois_court)
+    disp_recap = recap.rename(columns={
+        "lib_site":"Site","lib_rayon":"Rayon","lib_famille":"Famille",
+        "CA":"CA Fidélité","Marge":"Marge Fidélité","CA_gl":"CA Global",
+        "Mg_gl":"Marge Globale","Qte":"Qté Vente","Budget":"Budget Cagnotte"
+    })
+    for col in ["CA Fidélité","Marge Fidélité","CA Global","Marge Globale","Budget Cagnotte"]:
+        disp_recap[col] = disp_recap[col].apply(fmt_num)
+    disp_recap["Qté Vente"]     = disp_recap["Qté Vente"].apply(lambda x: f"{x:,.0f}".replace(",", " ") if pd.notna(x) else "—")
+    disp_recap["Poids CA %"]    = disp_recap["Poids CA %"].apply(fmt_pct)
+    disp_recap["Poids Marge %"] = disp_recap["Poids Marge %"].apply(fmt_pct)
 
-    # Format display (no total row)
-    df_recap_disp = df_recap.copy()
-    for col in ['CA_Fidelite','CA_Globale','Marge_Fidelite','Marge_Globale','Total_Cagnotte']:
-        df_recap_disp[col] = df_recap_disp[col].apply(fmt_num)
-    df_recap_disp['Qte_Vente']      = df_recap_disp['Qte_Vente'].apply(lambda x: f"{x:,.1f}".replace(',', ' ') if not pd.isna(x) else '—')
-    df_recap_disp['Poids Fidélité %'] = df_recap_disp['Poids Fidélité %'].apply(fmt_pct)
-    df_recap_disp['Poids Marge %']    = df_recap_disp['Poids Marge %'].apply(fmt_pct)
-    df_recap_disp = df_recap_disp.rename(columns={
-        'Site nom long':'Site','CA_Fidelite':'CA Fidélité','CA_Globale':'CA Globale',
-        'Marge_Fidelite':'Marge Fidélité','Marge_Globale':'Marge Globale',
-        'Qte_Vente':'Qté Vente','Total_Cagnotte':'Total Cagnotte',
-        'Poids Marge %':'Poids Marge Fidélité %'})
-
-    styled1 = df_recap_disp.style\
-        .map(color_marge, subset=['Marge Fidélité','Marge Globale'])\
-        .map(color_poids, subset=['Poids Fidélité %','Poids Marge Fidélité %'])
-    st.dataframe(styled1, use_container_width=True, height=500, hide_index=True)
-
-    # Export
-    export1 = df_recap.rename(columns={
-        'Site nom long':'Site','CA_Fidelite':'CA Fidélité','CA_Globale':'CA Globale',
-        'Marge_Fidelite':'Marge Fidélité','Marge_Globale':'Marge Globale',
-        'Qte_Vente':'Qté Vente','Total_Cagnotte':'Total Cagnotte',
-        'Poids Marge %':'Poids Marge Fidélité %'})
-    st.download_button(
-        label="⬇️ Exporter Récap Financier Excel",
-        data=to_excel({'Récap Financier': export1}),
-        file_name=f"Recap_Financier_Fidelite_{mois_court}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
+    st.dataframe(disp_recap[[
+        "Site","Rayon","Famille","CA Fidélité","CA Global","Poids CA %",
+        "Marge Fidélité","Marge Globale","Poids Marge %","Qté Vente","Budget Cagnotte"
+    ]], use_container_width=True, height=500, hide_index=True)
 
 
-# ═══════════════════════════════════════════════════════
-# ONGLET 2 — RÉCAP DÉTAIL Article × Site
-# ═══════════════════════════════════════════════════════
+# ═══ TAB 2 — DÉTAIL ARTICLE × SITE ═══════════════════════════════════════════
 with tab2:
-    st.markdown(f'<div class="section-header">Récap Détail · Article × Magasin · {mois_court}</div>', unsafe_allow_html=True)
-    st.markdown("""<div class="info-box">Articles en programme fidélité uniquement · Agrégat Article × Site</div>""",
+    st.markdown("<div class='section-label'>Article × Magasin · Cagnotte unitaire · Total cagnotte</div>", unsafe_allow_html=True)
+
+    grp_art = df_fid_only.groupby(
+        ["lib_rayon","lib_famille","lib_article","lib_site"], as_index=False
+    ).agg(
+        CA=("CA","sum"), Marge=("Marge","sum"), Qte=("Qté Vente","sum"),
+        Cagnotte_unit=("Cagnotte_unit","first"), Budget=("Total Cagnotte","sum")
+    )
+    grp_art = grp_art.sort_values("Budget", ascending=False).reset_index(drop=True)
+
+    disp_art = grp_art.rename(columns={
+        "lib_rayon":"Rayon","lib_famille":"Famille","lib_article":"Article",
+        "lib_site":"Site","Qte":"Qté Vente","Cagnotte_unit":"Cagnotte/unité","Budget":"Total Cagnotte"
+    })
+    for col in ["CA","Marge","Total Cagnotte"]:
+        disp_art[col] = disp_art[col].apply(fmt_num)
+    disp_art["Qté Vente"]      = disp_art["Qté Vente"].apply(lambda x: f"{x:,.0f}".replace(",", " "))
+    disp_art["Cagnotte/unité"] = disp_art["Cagnotte/unité"].apply(fmt_num)
+
+    st.dataframe(disp_art, use_container_width=True, height=520, hide_index=True)
+
+
+# ═══ TAB 3 — DRILL-DOWN ═══════════════════════════════════════════════════════
+with tab3:
+    fc1, fc2, fc3 = st.columns(3)
+    with fc1:
+        rayon_dd = st.selectbox("Rayon", ["Tous"] + sorted(df_fid_only["lib_rayon"].dropna().unique()), key="dd_r")
+    with fc2:
+        fam_src_dd = df_fid_only[df_fid_only["lib_rayon"]==rayon_dd] if rayon_dd!="Tous" else df_fid_only
+        fam_dd     = st.selectbox("Famille", ["Toutes"] + sorted(fam_src_dd["lib_famille"].dropna().unique()), key="dd_f")
+    with fc3:
+        site_dd = st.selectbox("Magasin", ["Tous"] + sorted(df_fid_only["lib_site"].dropna().unique()), key="dd_s")
+
+    drill = df_fid_only.copy()
+    if rayon_dd != "Tous":   drill = drill[drill["lib_rayon"]    == rayon_dd]
+    if fam_dd   != "Toutes": drill = drill[drill["lib_famille"]  == fam_dd]
+    if site_dd  != "Tous":   drill = drill[drill["lib_site"]     == site_dd]
+
+    st.markdown(f"<div style='font-size:12px;color:#8E8E93;margin-bottom:8px'>"
+                f"{len(drill):,} lignes · CA : <strong>{fmt_num(drill['CA'].sum())} XOF</strong> · "
+                f"Budget : <strong>{fmt_num(drill['Total Cagnotte'].sum())} XOF</strong></div>",
                 unsafe_allow_html=True)
 
-    grp_art_site = df_fid_only.groupby(
-        ['Date Début','Date Fin','Semaine','Mois','Rayon','Famille','Article','_article_id','Site nom long'],
-        as_index=False
-    ).agg(CA=('CA','sum'), Marge=('Marge','sum'), Qte=('Qté Vente','sum'),
-          Cagnotte_unit=('Cagnotte_unit','first'), Total_Cagnotte=('Total Cagnotte','sum'))
+    disp_drill = drill[[
+        "_periode","lib_rayon","lib_famille","lib_article","lib_site",
+        "CA","Marge","Qté Vente","Cagnotte_unit","Total Cagnotte"
+    ]].rename(columns={
+        "_periode":"Période","lib_rayon":"Rayon","lib_famille":"Famille",
+        "lib_article":"Article","lib_site":"Site",
+        "Cagnotte_unit":"Cagnotte/unité"
+    }).copy()
 
-    if len(grp_art_site) > 0:
-        df_det_disp = grp_art_site[[
-            'Date Début','Date Fin','Semaine','Mois','Rayon','Famille','Article',
-            'Site nom long','CA','Marge','Qte','Cagnotte_unit','Total_Cagnotte'
-        ]].copy().rename(columns={
-            'Site nom long':'Site / Magasin','Qte':'Qté Vente',
-            'Cagnotte_unit':'Cagnotte/unité','Total_Cagnotte':'Total Cagnotte'})
-        for col in ['CA','Marge','Total Cagnotte']:
-            df_det_disp[col] = df_det_disp[col].apply(fmt_num)
-        df_det_disp['Qté Vente']       = df_det_disp['Qté Vente'].apply(lambda x: f"{x:,.1f}".replace(',', ' ') if not pd.isna(x) else '—')
-        df_det_disp['Cagnotte/unité']  = df_det_disp['Cagnotte/unité'].apply(fmt_num)
+    for col in ["CA","Marge","Total Cagnotte"]:
+        disp_drill[col] = disp_drill[col].apply(fmt_num)
+    disp_drill["Qté Vente"]      = disp_drill["Qté Vente"].apply(lambda x: f"{x:,.0f}".replace(",", " "))
+    disp_drill["Cagnotte/unité"] = disp_drill["Cagnotte/unité"].apply(fmt_num)
 
-        styled2 = df_det_disp.style.map(color_marge, subset=['Marge'])
-        st.dataframe(styled2, use_container_width=True, height=580, hide_index=True)
+    st.dataframe(disp_drill, use_container_width=True, height=520, hide_index=True)
 
-        # Export
-        export2 = grp_art_site[[
-            'Date Début','Date Fin','Semaine','Mois','Rayon','Famille','Article',
-            'Site nom long','CA','Marge','Qte','Cagnotte_unit','Total_Cagnotte'
-        ]].rename(columns={'Site nom long':'Site','Qte':'Qté Vente',
-                            'Cagnotte_unit':'Cagnotte/unité','Total_Cagnotte':'Total Cagnotte'})
+
+# ═══ TAB 4 — EXPORT EXCEL ═════════════════════════════════════════════════════
+with tab4:
+    st.markdown("""
+<div class='alert-card alert-blue'>
+  <strong>📋 Contenu de l'export (5 onglets)</strong><br>
+  <strong>1. Récap Financier</strong> — Site × Rayon × Famille · CA / Marge fidélité vs global · Poids % · Budget<br>
+  <strong>2. Détail Article × Site</strong> — Cagnotte unitaire · Total cagnotte · CA · Marge par ligne<br>
+  <strong>3. Synthèse Familles</strong> — Top familles par budget cagnotte<br>
+  <strong>4. Performance Réseau</strong> — Par magasin avec poids CA %<br>
+  <strong>5. Alertes</strong> — Articles sans ventes + familles marge négative
+</div>""", unsafe_allow_html=True)
+
+    st.caption(f"Période : {periodes_label} · {arts_actifs} articles actifs · {len(df_fid_only):,} lignes")
+
+    if st.button("Générer le fichier Excel", type="primary", key="gen_fid_excel"):
+        with st.spinner("Génération…"):
+
+            # Récap financier (valeurs brutes pour Excel)
+            recap_xl = recap.rename(columns={
+                "lib_site":"Site","lib_rayon":"Rayon","lib_famille":"Famille",
+                "CA":"CA Fidélité","Marge":"Marge Fidélité","CA_gl":"CA Global",
+                "Mg_gl":"Marge Globale","Qte":"Qté Vente","Budget":"Budget Cagnotte"
+            })
+
+            # Détail article × site
+            detail_xl = df_fid_only[[
+                "_periode","lib_rayon","lib_famille","lib_sfam","lib_article","lib_site",
+                "CA","Marge","Qté Vente","Cagnotte_unit","Total Cagnotte"
+            ]].rename(columns={
+                "_periode":"Période","lib_rayon":"Rayon","lib_famille":"Famille",
+                "lib_sfam":"Sous-Famille","lib_article":"Article","lib_site":"Site",
+                "Cagnotte_unit":"Cagnotte/unité"
+            })
+
+            # Synthèse familles
+            synth_fam = grp_fam.rename(columns={
+                "lib_famille":"Famille","Budget":"Budget Cagnotte"})
+
+            # Performance réseau
+            perf_site = grp_site.rename(columns={
+                "lib_site":"Site","Budget":"Budget Cagnotte","Nb_Art":"Nb Articles"})
+
+            # Alertes
+            alertes_rows = []
+            for art_id in arts_zero:
+                fid_rows = df_fid[df_fid["Article"] == art_id]
+                cagnotte = fid_rows["Cagnotte"].iloc[0] if not fid_rows.empty else 0
+                alertes_rows.append({"Article": art_id, "Cagnotte/unité": cagnotte, "Alerte": "Aucune vente"})
+            for fam, mg in fam_neg.items():
+                alertes_rows.append({"Famille": fam, "Marge Fidélité": mg, "Alerte": "Marge négative"})
+            alertes_xl = pd.DataFrame(alertes_rows) if alertes_rows else pd.DataFrame(
+                {"Message": ["Aucune alerte"]})
+
+            excel_bytes = to_excel({
+                "Récap Financier":      recap_xl,
+                "Détail Article×Site":  detail_xl,
+                "Synthèse Familles":    synth_fam,
+                "Performance Réseau":   perf_site,
+                "Alertes":              alertes_xl,
+            })
+
         st.download_button(
-            label="⬇️ Exporter Récap Détail Excel",
-            data=to_excel({'Récap Détail': export2}),
-            file_name=f"Recap_Detail_Fidelite_{mois_court}.xlsx",
+            label=f"⬇️ Télécharger — Fidélité Cagnotte",
+            data=excel_bytes,
+            file_name=f"SmartBuyer_Fidelite_{mois_label_str.replace(' ', '_')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
-    else:
-        st.info("Aucune donnée fidélité pour les filtres sélectionnés.")
-
-
-# ═══════════════════════════════════════════════════════
-# ONGLET 3 — DRILL-DOWN GRANULAIRE
-# ═══════════════════════════════════════════════════════
-with tab3:
-    st.markdown(f'<div class="section-header">Drill-down Granulaire · {mois_court}</div>', unsafe_allow_html=True)
-
-    cd1, cd2, cd3 = st.columns(3)
-    with cd1:
-        rayons_dd = sorted(df_fid_only['Rayon'].dropna().unique().tolist())
-        rayon_dd  = st.selectbox("Rayon", ['Tous'] + rayons_dd, key='dd_rayon')
-    with cd2:
-        fam_src = df_fid_only[df_fid_only['Rayon']==rayon_dd] if rayon_dd!='Tous' else df_fid_only
-        fam_list = sorted(fam_src['Famille'].dropna().unique().tolist())
-        famille_dd = st.selectbox("Famille", ['Toutes'] + fam_list, key='dd_famille')
-    with cd3:
-        site_dd = st.selectbox("Magasin", ['Tous'] + sorted(df_fid_only['Site nom long'].dropna().unique().tolist()), key='dd_site')
-
-    df_drill = df_fid_only.copy()
-    if rayon_dd   != 'Tous':    df_drill = df_drill[df_drill['Rayon']==rayon_dd]
-    if famille_dd != 'Toutes':  df_drill = df_drill[df_drill['Famille']==famille_dd]
-    if site_dd    != 'Tous':    df_drill = df_drill[df_drill['Site nom long']==site_dd]
-
-    st.markdown(f"""<div class="info-box">
-    {len(df_drill):,} lignes · CA : <b>{fmt_num(df_drill['CA'].sum())} XOF</b> · 
-    Cagnotte : <b>{fmt_num(df_drill['Total Cagnotte'].sum())} XOF</b>
-    </div>""", unsafe_allow_html=True)
-
-    df_drill_disp = df_drill[[
-        'Date Début','Date Fin','Semaine','Mois','Site nom long','Rayon','Famille',
-        'Article','CA','Marge','Qté Vente','Cagnotte_unit','Total Cagnotte'
-    ]].copy().rename(columns={'Site nom long':'Site','Cagnotte_unit':'Cagnotte/unité'})
-    for col in ['CA','Marge','Total Cagnotte']:
-        df_drill_disp[col] = df_drill_disp[col].apply(fmt_num)
-    df_drill_disp['Qté Vente']      = df_drill_disp['Qté Vente'].apply(lambda x: f"{x:,.1f}".replace(',', ' ') if not pd.isna(x) else '—')
-    df_drill_disp['Cagnotte/unité'] = df_drill_disp['Cagnotte/unité'].apply(fmt_num)
-
-    styled3 = df_drill_disp.style.map(color_marge, subset=['Marge'])
-    st.dataframe(styled3, use_container_width=True, height=580, hide_index=True)
-
-    # Export
-    export3 = df_drill[[
-        'Date Début','Date Fin','Semaine','Mois','Site nom long','Rayon','Famille',
-        'Article','CA','Marge','Qté Vente','Cagnotte_unit','Total Cagnotte'
-    ]].rename(columns={'Site nom long':'Site','Cagnotte_unit':'Cagnotte/unité'})
-    st.download_button(
-        label="⬇️ Exporter Drill-down Excel",
-        data=to_excel({'Drill-down': export3}),
-        file_name=f"Drilldown_Fidelite_{mois_court}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
-
-# ═══════════════════════════════════════════════════════
-# ONGLET 4 — RAW DATA (consolidation toutes extractions)
-# ═══════════════════════════════════════════════════════
-with tab4:
-    st.markdown(f'<div class="section-header">Raw Data · Consolidation PBI · Toutes périodes</div>', unsafe_allow_html=True)
-    st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
-
-    # Raw = df_ventes complet (toutes semaines chargées, pas de filtre mois)
-    # Rejoindre avec fidélité sur _article_id × mois
-    # On fait un join global : pour chaque ligne, chercher la cagnotte du mois correspondant
-    df_raw = df_ventes.copy()
-    df_raw['_mois_court'] = df_raw['Mois'].apply(lambda x: str(x).split(' ')[0] if pd.notna(x) else '')
-
-    # Join fidélité : article_id + mois_court
-    df_fid_all = df_fidelite.copy()
-    df_fid_all = df_fid_all.rename(columns={'Article': '_article_id', 'Cagnotte': 'Cagnotte/unité', 'Mois': '_mois_fid'})
-
-    df_raw = df_raw.merge(
-        df_fid_all[['_article_id', 'Cagnotte/unité', '_mois_fid']],
-        left_on=['_article_id', '_mois_court'],
-        right_on=['_article_id', '_mois_fid'],
-        how='left'
-    ).drop(columns=['_mois_fid', '_mois_court', '_article_id'], errors='ignore')
-
-    df_raw['Total Cagnotte'] = df_raw['Cagnotte/unité'] * df_raw['Qté Vente']
-
-    # Restreindre aux articles fidélité uniquement
-    df_raw = df_raw[df_raw['Cagnotte/unité'].notna()].copy()
-
-    # Stats
-    nb_lignes   = len(df_raw)
-    nb_semaines = df_raw['Semaine'].nunique()
-    nb_sites    = df_raw['Site nom long'].nunique()
-    nb_articles = df_raw['Article'].nunique()
-    periodes_str = ' · '.join(sorted(df_raw['Semaine'].dropna().unique().tolist()))
-
-    st.markdown(f"""<div class="info-box">
-    Articles <b>programme fidélité uniquement</b> · <b>{nb_lignes:,}</b> lignes · 
-    <b>{nb_semaines}</b> semaine(s) : {periodes_str} · <b>{nb_sites}</b> sites · <b>{nb_articles}</b> articles distincts
-    </div>""", unsafe_allow_html=True)
-
-    # Filtres rapides
-    cr1, cr2 = st.columns(2)
-    with cr1:
-        sem_list   = sorted(df_raw['Semaine'].dropna().unique().tolist())
-        sem_filter = st.multiselect("Semaine(s)", options=sem_list, default=[], key='raw_sem')
-    with cr2:
-        site_raw = st.selectbox("Magasin", ['Tous'] + sorted(df_raw['Site nom long'].dropna().unique().tolist()), key='raw_site')
-
-    df_raw_f = df_raw.copy()
-    if sem_filter:
-        df_raw_f = df_raw_f[df_raw_f['Semaine'].isin(sem_filter)]
-    if site_raw != 'Tous':
-        df_raw_f = df_raw_f[df_raw_f['Site nom long'] == site_raw]
-
-    st.markdown(f"""<div style='font-size:12px;color:#636366;margin-bottom:8px;'>
-    {len(df_raw_f):,} lignes affichées</div>""", unsafe_allow_html=True)
-
-    # Display columns
-    cols_raw = ['Date Début','Date Fin','Semaine','Mois','Site nom long','Rayon',
-                'Famille','Article','CA','Marge','Qté Vente','Cagnotte/unité','Total Cagnotte']
-    df_raw_disp = df_raw_f[[c for c in cols_raw if c in df_raw_f.columns]].copy()
-
-    # Format numerics for display
-    for col in ['CA','Marge','Total Cagnotte']:
-        if col in df_raw_disp.columns:
-            df_raw_disp[col] = df_raw_disp[col].apply(fmt_num)
-    if 'Qté Vente' in df_raw_disp.columns:
-        df_raw_disp['Qté Vente'] = df_raw_disp['Qté Vente'].apply(
-            lambda x: f"{x:,.1f}".replace(',', ' ') if not pd.isna(x) else '—')
-    if 'Cagnotte/unité' in df_raw_disp.columns:
-        df_raw_disp['Cagnotte/unité'] = df_raw_disp['Cagnotte/unité'].apply(fmt_num)
-
-    # Highlight fidélité rows
-    def style_raw(row):
-        if row.get('Cagnotte/unité', '—') not in ['—', '', None] and str(row.get('Cagnotte/unité', '—')) != '—':
-            return ['background-color:#F0F8FF;'] * len(row)
-        return [''] * len(row)
-
-    styled_raw = df_raw_disp.style\
-        .apply(style_raw, axis=1)\
-        .map(color_marge, subset=['Marge'] if 'Marge' in df_raw_disp.columns else [])
-    st.dataframe(styled_raw, use_container_width=True, height=600, hide_index=True)
-
-    # Export — raw values (not formatted strings)
-    df_raw_export = df_raw_f[[c for c in cols_raw if c in df_raw_f.columns]].copy()
-    # Keep numerics as numbers for Excel
-    for col in ['CA','Marge','Qté Vente','Cagnotte/unité','Total Cagnotte']:
-        if col in df_raw_export.columns:
-            df_raw_export[col] = pd.to_numeric(df_raw_export[col], errors='coerce')
-
-    st.download_button(
-        label="⬇️ Exporter Raw Data Excel",
-        data=to_excel({'Raw Data': df_raw_export}),
-        file_name=f"RawData_Fidelite_Consolide.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
