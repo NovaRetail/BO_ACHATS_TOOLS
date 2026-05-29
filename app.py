@@ -1,6 +1,6 @@
 import streamlit as st
 
-st.set_page_config(page_title="SmartBuyer", page_icon="🛍️", layout="wide")
+st.set_page_config(page_title="NovaRetail Solutions", page_icon="🛍️", layout="wide")
 
 st.markdown("""
 <style>
@@ -36,6 +36,8 @@ body, [data-testid="stAppViewContainer"] { background: #F2F2F7; }
 .b-gray  { background: #F2F2F7; color: #48484A; }
 .b-purp  { background: #F2F0FF; color: #5E35B1; }
 [data-testid="stPageLink"] p { display: none !important; }
+/* Masquer le label automatique "app" de la page courante dans la sidebar */
+[data-testid="stSidebarNavItems"] { display: none !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -43,7 +45,7 @@ body, [data-testid="stAppViewContainer"] { background: #F2F2F7; }
 with st.sidebar:
     st.markdown("""
 <div style='margin-bottom:18px'>
-  <div style='font-size:20px;font-weight:700;color:#1C1C1E;letter-spacing:-0.02em'>🛍️ SmartBuyer</div>
+  <div style='font-size:20px;font-weight:700;color:#1C1C1E;letter-spacing:-0.02em'>NovaRetail Solutions</div>
   <div style='font-size:11px;color:#8E8E93;margin-top:1px'>Hub analytique · Équipe Achats</div>
 </div>""", unsafe_allow_html=True)
     st.markdown("---")
@@ -63,7 +65,7 @@ with st.sidebar:
     st.page_link("pages/13_💸_Fidelite_cagnotte.py",        label="🏷️  Fidélité Cagnotte")
 
 # ── EN-TÊTE ──────────────────────────────────────────────────────────────────
-st.markdown("<div class='page-title'>🛍️ SmartBuyer Hub</div>", unsafe_allow_html=True)
+st.markdown("<div class='page-title'>NovaRetail Solutions</div>", unsafe_allow_html=True)
 st.markdown("<div class='page-caption'>Plateforme analytique · Équipe Achats Carrefour CI · Clique sur un module pour l'ouvrir</div>", unsafe_allow_html=True)
 
 # ── KPIs ─────────────────────────────────────────────────────────────────────
@@ -171,4 +173,4 @@ for section in SECTIONS:
 
 # ── FOOTER ───────────────────────────────────────────────────────────────────
 st.markdown("---")
-st.markdown('<div style="text-align:center;color:#C7C7CC;font-size:11px;padding:8px 0">NovaRetail Solutions · SmartBuyer v2.3 · 13 modules · Carrefour Côte d\'Ivoire</div>', unsafe_allow_html=True)
+st.markdown('<div style="text-align:center;color:#C7C7CC;font-size:11px;padding:8px 0">NovaRetail Solutions · v2.3 · 13 modules · Carrefour Côte d\'Ivoire</div>', unsafe_allow_html=True)
