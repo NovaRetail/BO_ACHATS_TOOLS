@@ -186,11 +186,11 @@ def compute(df_pbi, site_cols, sites_info, df_topca, type_filtre, cible, seuil_r
         var_name="site_col",
         value_name="stock"
     )
-    df_long["site"]   = df_long["site_col"].map(sites_info)
-    df_long["type"]   = df_long["code"].map(lambda c: top_meta.get(c, {}).get("type", "?")
-                                            if c in top_meta.index else "?")
-    df_long["lib_topca"] = df_long["code"].map(lambda c: top_meta.get(c, {}).get("lib", "")
-                                               if c in top_meta.index else "")
+    df_long["site"]      = df_long["site_col"].map(sites_info)
+    type_map             = top_meta["type"].to_dict()
+    lib_map              = top_meta["lib"].to_dict()
+    df_long["type"]      = df_long["code"].map(type_map).fillna("?")
+    df_long["lib_topca"] = df_long["code"].map(lib_map).fillna("")
 
     # Calculs
     df_long["detenu"]        = df_long["stock"].notna() & (df_long["stock"] > 0)
