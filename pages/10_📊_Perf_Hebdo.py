@@ -676,7 +676,7 @@ with st.expander("📥 Export Excel — Brief Directeur · Brief Acheteur · Cla
                                ecart_a if ecart_a>0 else None,
                                art["action_rec"]]
                         fmts2=[None,None,"#,##0","#,##0","0.0%","0.0%","0.0%","0.0%",None]
-                        for i,(v,fmt) in enumerate(vals2,1):
+                        for i,(v,fmt) in enumerate(zip(vals2,fmts2),1):
                             c=ws.cell(row=ri2,column=i,value=v)
                             c.fill=f(C_ODD if ri2%2==0 else C_EVN)
                             c.border=bdr()
