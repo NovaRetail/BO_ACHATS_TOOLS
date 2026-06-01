@@ -550,7 +550,7 @@ with st.expander("📥 Export Excel — Brief Directeur · Brief Acheteur · Cla
                     c.fill=f(bg);c.font=HF;c.alignment=CTR;c.border=bdr()
                     ws.column_dimensions[get_column_letter(i)].width=w
                 ws.row_dimensions[r].height=22
-                ws.freeze_panes=f"A{r+1}"
+
 
             def drow(ws, r, vals, fmts, is_neg=False):
                 bg_h = C_ODD if r%2==0 else C_EVN
@@ -662,6 +662,7 @@ with st.expander("📥 Export Excel — Brief Directeur · Brief Acheteur · Cla
                     c.fill=f(SUB); c.alignment=LFT; ws.row_dimensions[cur2].height=22; cur2+=1
 
                     hrow(ws,cur2,["Code","Article","CA (FCFA)","Marge (FCFA)","% Marge","Marge HP","Marge Promo","Écart Promo","Action"],
+
                          [12,46,14,14,10,12,14,14,28],SUB)
                     cur2+=1
 
@@ -713,6 +714,8 @@ with st.expander("📥 Export Excel — Brief Directeur · Brief Acheteur · Cla
                         "Casse (Valeur)":"Casse (FCFA)","Casse (Qté)":"Casse qté"}
                 widths=[12,44,14,22,14,14,10,10,12,14,14,12]
                 hrow(ws_cl,cur3,[labels.get(c,c) for c in cols_cl],widths[:len(cols_cl)]); cur3+=1
+                ws_cl.freeze_panes = "A2"
+
                 if df_cl.empty:
                     ws_cl.cell(row=cur3,column=1,value="Aucune donnée"); cur3+=1
                 else:
