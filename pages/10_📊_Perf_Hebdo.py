@@ -610,7 +610,7 @@ with st.expander("📥 Export Excel — Brief Directeur · Brief Acheteur · Cla
                       row["ecart_promo"] or 0,int(row["nb_neg"]),
                       "✅ OK" if pm>=seuil else "⚠️ Surveiller" if pm>=seuil*0.85 else "🔴 Action"]
                 fmts=[None,"#,##0","#,##0","0.0%","0.0%","+0.0%","0.0%","0.0%","0.0%","#,##0",None]
-                for i,(v,fmt) in enumerate(vals,1):
+                for i,(v,fmt) in enumerate(zip(vals,fmts),1):
                     c=ws1.cell(row=ri,column=i,value=v)
                     c.fill=f(bg_col) if i in [4,6,11] else f(C_ODD if ri%2==0 else C_EVN)
                     c.font=NF;c.border=bdr()
