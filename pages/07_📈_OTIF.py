@@ -221,7 +221,7 @@ def load_watchlist(file_bytes: bytes, filename: str) -> dict:
         for col in wdf.columns:
             if col == code_col:
                 continue
-            if any(kw in col.lower() for kw in ["class", "segment", "categ", "tier", "niveau", "groupe"]):
+            if any(kw in col.lower() for kw in ["class", "type", "segment", "categ", "tier", "niveau", "groupe"]):
                 classe_col = col
                 break
         # Si toujours pas trouvé et qu'il y a une 2e colonne, on la prend
