@@ -203,7 +203,14 @@ def load_watchlist(file_bytes: bytes, filename: str) -> dict:
         if filename.lower().endswith((".xlsx", ".xls")):
             wdf = pd.read_excel(BytesIO(file_bytes))
         else:
-            wdf = pd.read_csv(BytesIO(file_bytes), sep=None, engine="python")
+            for enc in ("utf-8", "latin-1", "cp1252"):
+                try:
+                    wdf = pd.read_csv(BytesIO(file_bytes), sep=None, engine="python", encoding=enc)
+                    break
+                except (UnicodeDecodeError, Exception):
+                    continue
+            else:
+                raise ValueError("Impossible de décoder le fichier (UTF-8, Latin-1, CP1252 tous échoués)")
 
         wdf.columns = [str(c).strip() for c in wdf.columns]
 
