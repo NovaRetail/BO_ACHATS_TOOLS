@@ -43,20 +43,59 @@ CIBLE_FALLBACK = 23.5  # rayon non listé ci-dessus
 
 st.markdown(f"""
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+html, body, [class*="css"] {{
+    font-family: 'Inter', 'Calibri', -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
+}}
 .stApp {{ background-color: {BG}; }}
-.block-container {{ padding-top: 2rem; max-width: 1200px; }}
-.card {{ background:#fff; border-radius:14px; padding:18px 20px; margin-bottom:12px;
-        box-shadow:0 1px 3px rgba(0,0,0,0.06); }}
-.kpi-card {{ background:#fff; border-radius:12px; padding:14px 16px;
-            box-shadow:0 1px 3px rgba(0,0,0,0.06); }}
-.kpi-label {{ font-size:12px; color:{GREY}; margin-bottom:4px; }}
-.kpi-value {{ font-size:24px; font-weight:600; color:{DARK}; }}
-.kpi-sub {{ font-size:12px; color:{GREY}; margin-top:2px; }}
-.headline {{ font-size:26px; font-weight:600; color:{DARK}; }}
-.so-what {{ background:{DARK}; color:#fff; border-radius:14px; padding:18px 22px;
-           font-size:15px; line-height:1.7; }}
-.badge {{ display:inline-block; padding:2px 10px; border-radius:6px;
-         font-size:11px; font-weight:600; }}
+.block-container {{ padding-top: 1.5rem; padding-bottom: 2rem; max-width: 1280px; }}
+
+/* Sidebar blanche (jamais sombre) */
+[data-testid="stSidebar"] {{ background-color: #FFFFFF; border-right: 1px solid #E5E5EA; }}
+
+/* Cards */
+.card {{ background:#FFFFFF; border-radius:14px; padding:18px 20px; margin-bottom:12px;
+        border:1px solid #E5E5EA; box-shadow:0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04); }}
+.kpi-card {{ background:#FFFFFF; border-radius:12px; padding:16px 20px;
+            border:1px solid #E5E5EA; box-shadow:0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04); }}
+.kpi-label {{ font-size:11px; font-weight:500; color:{GREY}; text-transform:uppercase;
+             letter-spacing:0.5px; margin-bottom:6px; }}
+.kpi-value {{ font-size:22px; font-weight:700; color:{DARK}; line-height:1.1; }}
+.kpi-sub {{ font-size:11px; color:{GREY}; margin-top:4px; }}
+
+/* Section header */
+.section-header {{ font-size:13px; font-weight:600; color:#3A3A3C; text-transform:uppercase;
+                  letter-spacing:0.5px; margin:8px 0 12px; padding-bottom:6px;
+                  border-bottom:2px solid #E5E5EA; }}
+
+/* Headline & so-what */
+.headline {{ font-size:26px; font-weight:700; color:{DARK}; }}
+.so-what {{ background:#FFFFFF; color:{DARK}; border-radius:14px; padding:18px 22px;
+           font-size:15px; line-height:1.7; border:1px solid #E5E5EA; border-left:4px solid {BLUE};
+           box-shadow:0 1px 3px rgba(0,0,0,0.08); }}
+.so-what strong {{ color:{BLUE}; }}
+
+/* Period / info badge */
+.period-badge {{ background:#EAF4FF; border:1px solid #B8D9FF; border-radius:10px;
+                padding:12px 20px; margin-bottom:20px; }}
+.period-label {{ font-size:11px; font-weight:600; color:{BLUE}; text-transform:uppercase; letter-spacing:0.5px; }}
+.period-value {{ font-size:15px; font-weight:700; color:{BLUE}; }}
+
+.badge {{ display:inline-block; padding:2px 10px; border-radius:6px; font-size:11px; font-weight:600; }}
+
+/* Hero accueil */
+.hero {{ background:#FFFFFF; border-radius:18px; padding:40px 44px; border:1px solid #E5E5EA;
+        box-shadow:0 1px 3px rgba(0,0,0,0.08); margin-bottom:20px; }}
+.hero-icon {{ font-size:44px; }}
+.hero-title {{ font-size:30px; font-weight:800; color:{DARK}; margin-top:8px; }}
+.hero-sub {{ font-size:16px; color:#3A3A3C; margin-top:6px; line-height:1.6; }}
+.feat {{ background:#FFFFFF; border-radius:14px; padding:18px 20px; border:1px solid #E5E5EA;
+        box-shadow:0 1px 3px rgba(0,0,0,0.06); height:100%; }}
+.feat-icon {{ font-size:24px; }}
+.feat-title {{ font-size:14px; font-weight:700; color:{DARK}; margin-top:8px; }}
+.feat-text {{ font-size:13px; color:#3A3A3C; margin-top:4px; line-height:1.55; }}
+
 h1, h2, h3 {{ color:{DARK}; }}
 </style>
 """, unsafe_allow_html=True)
@@ -328,13 +367,71 @@ def build_excel(ecarts_df, rayon_label):
 st.title("💰 Module Marge")
 st.caption("Analyse de rentabilité multi-rayon · export PowerBI")
 
-up = st.file_uploader("Déposez votre export PowerBI (.xlsx)", type=['xlsx'])
+# --- Upload dans la sidebar (charte SmartBuyer) ---
+with st.sidebar:
+    st.markdown("### 📥 Import")
+    up = st.file_uploader("Export PowerBI (.xlsx)", type=['xlsx'])
+    st.markdown("---")
+    st.caption("SmartBuyer Hub · Module Marge")
+
+# --- PAGE D'ACCUEIL EXPLICATIVE (avant tout chargement) ---
 if up is None:
-    st.info("⬆️ Importez un export PBI pour démarrer l'analyse.")
+    st.markdown(
+        f"<div class='hero'>"
+        f"<div class='hero-icon'>💰</div>"
+        f"<div class='hero-title'>Diagnostic de rentabilité réseau</div>"
+        f"<div class='hero-sub'>Déposez votre export PowerBI dans le panneau de gauche. "
+        f"Le module analyse automatiquement vos marges par site, famille et article — "
+        f"et identifie ce qui détruit la rentabilité, magasin par magasin.</div>"
+        f"</div>", unsafe_allow_html=True)
+
+    st.markdown("<div class='section-header'>Ce que fait le module</div>", unsafe_allow_html=True)
+    f1, f2, f3 = st.columns(3)
+    feats = [
+        (f1, "🩺", "Il diagnostique",
+         "Marge réseau vs objectif par rayon. Classement des sites par niveau d'alerte, "
+         "comme une prise de sang : ce qui est hors norme ressort immédiatement."),
+        (f2, "⚠️", "Il détecte les destructeurs",
+         "Moteur automatique : familles déficitaires, promo destructrice de marge, "
+         "articles vendus à perte. Triés par marge perdue en FCFA."),
+        (f3, "⚖️", "Il explique pourquoi",
+         "Décomposition Mix / Taux : l'écart vient-il des mauvais produits, "
+         "ou de mauvaises marges sur les mêmes produits ? Réponse chiffrée."),
+    ]
+    for col, ic, ti, tx in feats:
+        with col:
+            st.markdown(f"<div class='feat'><div class='feat-icon'>{ic}</div>"
+                        f"<div class='feat-title'>{ti}</div>"
+                        f"<div class='feat-text'>{tx}</div></div>", unsafe_allow_html=True)
+
+    st.write("")
+    g1, g2 = st.columns(2)
+    with g1:
+        st.markdown("<div class='section-header'>Deux lectures selon le public</div>", unsafe_allow_html=True)
+        st.markdown(
+            f"<div class='card'>"
+            f"<b style='color:{BLUE}'>Vue Executive</b> — pour le CODIR. Situation en un coup d'œil, "
+            f"3 signaux à arbitrer, phrase de synthèse prête à présenter.<br><br>"
+            f"<b style='color:{GREEN}'>Vue Opérationnelle</b> — pour l'acheteur. 4 onglets de détail : "
+            f"diagnostic site, destructeurs, Bennet Mix/Taux, écarts inter-sites.</div>",
+            unsafe_allow_html=True)
+    with g2:
+        st.markdown("<div class='section-header'>Objectifs de marge en vigueur</div>", unsafe_allow_html=True)
+        lignes = "".join(
+            f"<tr><td style='padding:4px 0;color:#3A3A3C'>{r.title()}</td>"
+            f"<td style='padding:4px 0;text-align:right;font-weight:700;color:{DARK}'>{c:.1f}%</td></tr>"
+            for r, c in CIBLES_DEFAUT.items())
+        st.markdown(
+            f"<div class='card'><table style='width:100%;border-collapse:collapse;font-size:14px'>{lignes}</table>"
+            f"<div style='font-size:11px;color:{GREY};margin-top:8px'>Modifiables à tout moment dans les paramètres.</div></div>",
+            unsafe_allow_html=True)
     st.stop()
 
-art = load_pbi(up.getvalue())
+# --- Chargement avec loading latéral ---
+with st.spinner("Analyse de l'export en cours…"):
+    art = load_pbi(up.getvalue())
 rayons = sorted(art['RayonLib'].dropna().unique().tolist())
+st.sidebar.success(f"✓ {len(art):,}".replace(",", " ") + f" lignes · {art['Site'].nunique()} sites")
 
 # --- Barre de paramètres ---
 with st.container():
@@ -406,9 +503,19 @@ nb_crit = (sites['niveau'] == 'critique').sum()
 # VUE EXECUTIVE
 # ============================================================
 
+def fmt_fcfa(x):
+    """Montant complet avec séparateur de milliers (espace) : 2 097 461 199 FCFA."""
+    try:
+        return f"{x:,.0f}".replace(",", " ") + " FCFA"
+    except (ValueError, TypeError):
+        return "—"
+
 def fmt_m(x):
-    """Formate en M FCFA."""
-    return f"{x/1e6:,.0f} M".replace(",", " ")
+    """Affichage compact pour KPI : 2 097 M (millions, séparateur espace)."""
+    try:
+        return f"{x/1e6:,.0f}".replace(",", " ") + " M"
+    except (ValueError, TypeError):
+        return "—"
 
 def color_for(ecart):
     if ecart > 5: return RED
@@ -564,7 +671,7 @@ else:
                 f"<div><span style='background:{RED}22;color:{RED};border-radius:5px;padding:2px 8px;font-weight:600;font-size:12px'>{i}</span> "
                 f"<span style='font-weight:600;margin-left:8px'>{d['nom']}</span>"
                 f"<div style='color:{GREY};font-size:11px;margin-top:2px'>{d['type']}</div></div>"
-                f"<div style='text-align:right'><div style='font-size:18px;font-weight:600;color:{RED}'>{fmt_m(d['perte'])}</div>"
+                f"<div style='text-align:right'><div style='font-size:18px;font-weight:600;color:{RED}'>{fmt_fcfa(d['perte'])}</div>"
                 f"<div style='font-size:10px;color:{GREY}'>marge perdue vs réseau</div></div></div>"
                 f"{extra}<div style='margin-top:8px'>{tags_html}</div></div>", unsafe_allow_html=True)
 
@@ -632,4 +739,4 @@ else:
             neg = neg.sort_values('Marge')
             st.dataframe(neg.rename(columns={'ArtLib': 'Article', 'FamLib': 'Famille'}),
                          hide_index=True, use_container_width=True)
-            st.caption(f"{len(neg)} article(s) en marge négative · perte cumulée {fmt_m(neg['Marge'].sum())}")
+            st.caption(f"{len(neg)} article(s) en marge négative · perte cumulée {fmt_fcfa(neg['Marge'].sum())}")
