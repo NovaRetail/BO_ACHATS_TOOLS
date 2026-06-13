@@ -374,57 +374,77 @@ with st.sidebar:
     st.markdown("---")
     st.caption("SmartBuyer Hub · Module Marge")
 
-# --- PAGE D'ACCUEIL EXPLICATIVE (avant tout chargement) ---
+# --- PAGE D'ACCUEIL EXPLICATIVE (format SmartBuyer · cf. Performance Promotion) ---
 if up is None:
+    # Bloc bleu "À quoi sert ce module ?"
     st.markdown(
-        f"<div class='hero'>"
-        f"<div class='hero-icon'>💰</div>"
-        f"<div class='hero-title'>Diagnostic de rentabilité réseau</div>"
-        f"<div class='hero-sub'>Déposez votre export PowerBI dans le panneau de gauche. "
-        f"Le module analyse automatiquement vos marges par site, famille et article — "
-        f"et identifie ce qui détruit la rentabilité, magasin par magasin.</div>"
+        f"<div style='background:linear-gradient(135deg,#EAF4FF 0%,#F5FAFF 100%);"
+        f"border-left:4px solid {BLUE};border-radius:12px;padding:24px 28px;margin-bottom:32px'>"
+        f"<div style='font-size:19px;font-weight:700;color:{DARK};margin-bottom:12px'>ℹ️ À quoi sert ce module ?</div>"
+        f"<div style='font-size:15px;color:#3A3A3C;line-height:1.6'>"
+        f"Ce module mesure la <b>rentabilité du réseau</b> à partir de l'export PBI des ventes. "
+        f"Il analyse vos marges par site, famille et article pour répondre à 4 questions clés :</div>"
+        f"<div style='margin-top:16px;font-size:15px;color:#3A3A3C;line-height:2'>"
+        f"<b>1. Où perd-on de la marge ?</b> — Classement des sites vs objectif par rayon<br>"
+        f"<b>2. Qu'est-ce qui détruit la rentabilité ?</b> — Familles et articles déficitaires, triés par perte en FCFA<br>"
+        f"<b>3. Pourquoi cet écart ?</b> — Décomposition Mix (mauvais produits) vs Taux (mauvaises marges)<br>"
+        f"<b>4. Même article, marges différentes ?</b> — Écarts de taux d'un magasin à l'autre</div>"
         f"</div>", unsafe_allow_html=True)
 
-    st.markdown("<div class='section-header'>Ce que fait le module</div>", unsafe_allow_html=True)
-    f1, f2, f3 = st.columns(3)
-    feats = [
-        (f1, "🩺", "Il diagnostique",
-         "Marge réseau vs objectif par rayon. Classement des sites par niveau d'alerte, "
-         "comme une prise de sang : ce qui est hors norme ressort immédiatement."),
-        (f2, "⚠️", "Il détecte les destructeurs",
-         "Moteur automatique : familles déficitaires, promo destructrice de marge, "
-         "articles vendus à perte. Triés par marge perdue en FCFA."),
-        (f3, "⚖️", "Il explique pourquoi",
-         "Décomposition Mix / Taux : l'écart vient-il des mauvais produits, "
-         "ou de mauvaises marges sur les mêmes produits ? Réponse chiffrée."),
-    ]
-    for col, ic, ti, tx in feats:
-        with col:
-            st.markdown(f"<div class='feat'><div class='feat-icon'>{ic}</div>"
-                        f"<div class='feat-title'>{ti}</div>"
-                        f"<div class='feat-text'>{tx}</div></div>", unsafe_allow_html=True)
+    st.markdown("<div class='section-header'>LES 4 ANALYSES CLÉS</div>", unsafe_allow_html=True)
 
-    st.write("")
-    g1, g2 = st.columns(2)
-    with g1:
-        st.markdown("<div class='section-header'>Deux lectures selon le public</div>", unsafe_allow_html=True)
-        st.markdown(
-            f"<div class='card'>"
-            f"<b style='color:{BLUE}'>Vue Executive</b> — pour le CODIR. Situation en un coup d'œil, "
-            f"3 signaux à arbitrer, phrase de synthèse prête à présenter.<br><br>"
-            f"<b style='color:{GREEN}'>Vue Opérationnelle</b> — pour l'acheteur. 4 onglets de détail : "
-            f"diagnostic site, destructeurs, Bennet Mix/Taux, écarts inter-sites.</div>",
-            unsafe_allow_html=True)
-    with g2:
-        st.markdown("<div class='section-header'>Objectifs de marge en vigueur</div>", unsafe_allow_html=True)
-        lignes = "".join(
-            f"<tr><td style='padding:4px 0;color:#3A3A3C'>{r.title()}</td>"
-            f"<td style='padding:4px 0;text-align:right;font-weight:700;color:{DARK}'>{c:.1f}%</td></tr>"
-            for r, c in CIBLES_DEFAUT.items())
-        st.markdown(
-            f"<div class='card'><table style='width:100%;border-collapse:collapse;font-size:14px'>{lignes}</table>"
-            f"<div style='font-size:11px;color:{GREY};margin-top:8px'>Modifiables à tout moment dans les paramètres.</div></div>",
-            unsafe_allow_html=True)
+    def feat_card(icon, titre, desc, formule, note, couleur):
+        return (
+            f"<div style='background:#FFFFFF;border-radius:14px;padding:20px 24px;"
+            f"border:1px solid #E5E5EA;border-left:4px solid {couleur};"
+            f"box-shadow:0 1px 3px rgba(0,0,0,0.06);margin-bottom:16px'>"
+            f"<div style='font-size:18px;font-weight:700;color:{DARK}'>{icon}&nbsp;&nbsp;{titre}</div>"
+            f"<div style='font-size:14px;color:#3A3A3C;margin-top:10px'>{desc}</div>"
+            f"<div style='background:#F5F5F7;border-radius:8px;padding:10px 14px;margin-top:12px;"
+            f"font-family:monospace;font-size:14px;color:{couleur}'>{formule}</div>"
+            f"<div style='font-size:13px;color:{GREY};font-style:italic;margin-top:12px'>{note}</div>"
+            f"</div>")
+
+    r1c1, r1c2 = st.columns(2)
+    with r1c1:
+        st.markdown(feat_card(
+            "🏪", "Diagnostic site",
+            "Taux de marge de chaque magasin comparé à l'objectif de son rayon.",
+            "Niveau = Cible rayon − Tx marge réalisé",
+            "Un écart > 5 pts classe le site en alerte critique.", BLUE), unsafe_allow_html=True)
+    with r1c2:
+        st.markdown(feat_card(
+            "⚠️", "Destructeurs de rentabilité",
+            "Familles et articles qui font perdre de la marge vs la référence réseau.",
+            "Perte = (Tx site − Tx réseau) × CA local",
+            "Triés par perte en FCFA : on attaque l'enjeu le plus lourd d'abord.", RED), unsafe_allow_html=True)
+
+    r2c1, r2c2 = st.columns(2)
+    with r2c1:
+        st.markdown(feat_card(
+            "⚖️", "Bennet Mix / Taux",
+            "Décompose l'écart d'un site : vend-il les mauvais produits, ou à de mauvaises marges ?",
+            "Écart = Effet Mix + Effet Taux",
+            "Un effet Taux dominant = problème de prix d'achat ou de promo.", AMBER), unsafe_allow_html=True)
+    with r2c2:
+        st.markdown(feat_card(
+            "🔍", "Écarts inter-sites",
+            "Même article, taux de marge très différents d'un magasin à l'autre.",
+            "Écart = Tx max site − Tx min site",
+            "Aligner le site faible sur le fort récupère de la marge sans rien changer.", GREEN), unsafe_allow_html=True)
+
+    # Objectifs en vigueur
+    st.markdown("<div class='section-header'>OBJECTIFS DE MARGE EN VIGUEUR</div>", unsafe_allow_html=True)
+    cells = "".join(
+        f"<div style='background:#FFFFFF;border:1px solid #E5E5EA;border-radius:12px;"
+        f"padding:16px 20px;box-shadow:0 1px 3px rgba(0,0,0,0.06);text-align:center'>"
+        f"<div style='font-size:11px;color:{GREY};text-transform:uppercase;letter-spacing:0.5px'>{r.title()}</div>"
+        f"<div style='font-size:26px;font-weight:800;color:{BLUE};margin-top:4px'>{c:.1f}%</div></div>"
+        for r, c in CIBLES_DEFAUT.items())
+    st.markdown(
+        f"<div style='display:grid;grid-template-columns:repeat({len(CIBLES_DEFAUT)},1fr);gap:12px'>{cells}</div>"
+        f"<div style='font-size:12px;color:{GREY};margin-top:12px'>📥 Déposez votre export PowerBI dans le panneau de gauche pour démarrer l'analyse.</div>",
+        unsafe_allow_html=True)
     st.stop()
 
 # --- Chargement avec loading latéral ---
