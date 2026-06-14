@@ -46,57 +46,55 @@ st.markdown(f"""
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 
 html, body, [class*="css"] {{
-    font-family: 'Inter', 'Calibri', -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
+    font-family: 'Inter', -apple-system, 'SF Pro Display', BlinkMacSystemFont, Calibri, sans-serif;
 }}
 .stApp {{ background-color: {BG}; }}
 .block-container {{ padding-top: 1.5rem; padding-bottom: 2rem; max-width: 1280px; }}
 
-/* Sidebar blanche (jamais sombre) */
 [data-testid="stSidebar"] {{ background-color: #FFFFFF; border-right: 1px solid #E5E5EA; }}
+hr {{ border-color: #E5E5EA !important; margin: 1rem 0 !important; }}
+
+/* Titres — charte exacte */
+.page-title {{ font-size: 28px; font-weight: 700; color: {DARK}; letter-spacing: -0.03em; margin: 0; }}
+.page-caption {{ font-size: 13px; color: {GREY}; margin-top: 3px; margin-bottom: 1.5rem; }}
+.section-label {{ font-size: 11px; font-weight: 600; color: {GREY};
+                 text-transform: uppercase; letter-spacing: 0.07em; margin: 18px 0 10px; }}
 
 /* Cards */
-.card {{ background:#FFFFFF; border-radius:14px; padding:18px 20px; margin-bottom:12px;
-        border:1px solid #E5E5EA; box-shadow:0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04); }}
-.kpi-card {{ background:#FFFFFF; border-radius:12px; padding:16px 20px;
-            border:1px solid #E5E5EA; box-shadow:0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04); }}
-.kpi-label {{ font-size:11px; font-weight:500; color:{GREY}; text-transform:uppercase;
-             letter-spacing:0.5px; margin-bottom:6px; }}
-.kpi-value {{ font-size:22px; font-weight:700; color:{DARK}; line-height:1.1; }}
-.kpi-sub {{ font-size:11px; color:{GREY}; margin-top:4px; }}
+.card {{ background:#FFFFFF; border-radius:12px; padding:16px 18px; margin-bottom:10px;
+        border:1px solid #E5E5EA; box-shadow:0 1px 3px rgba(0,0,0,0.04); }}
 
-/* Section header */
-.section-header {{ font-size:13px; font-weight:600; color:#3A3A3C; text-transform:uppercase;
-                  letter-spacing:0.5px; margin:8px 0 12px; padding-bottom:6px;
-                  border-bottom:2px solid #E5E5EA; }}
+/* KPI — charte exacte (24px / 700 / -0.02em) */
+.kpi-card {{ background:#FFFFFF; border-radius:12px; padding:16px 18px;
+            border:1px solid #E5E5EA; box-shadow:0 1px 3px rgba(0,0,0,0.04); }}
+.kpi-label {{ font-size:11px; font-weight:500; color:{GREY};
+             text-transform:uppercase; letter-spacing:0.04em; margin-bottom:3px; }}
+.kpi-value {{ font-size:24px; font-weight:700; color:{DARK}; letter-spacing:-0.02em; line-height:1.1; }}
+.kpi-sub {{ font-size:12px; color:{GREY}; margin-top:3px; }}
 
 /* Headline & so-what */
-.headline {{ font-size:26px; font-weight:700; color:{DARK}; }}
-.so-what {{ background:#FFFFFF; color:{DARK}; border-radius:14px; padding:18px 22px;
-           font-size:15px; line-height:1.7; border:1px solid #E5E5EA; border-left:4px solid {BLUE};
-           box-shadow:0 1px 3px rgba(0,0,0,0.08); }}
+.headline {{ font-size:24px; font-weight:700; color:{DARK}; letter-spacing:-0.02em; }}
+.so-what {{ background:#F0F8FF; color:{DARK}; border-radius:12px; padding:16px 18px;
+           font-size:13px; line-height:1.6; border-left:3px solid {BLUE}; }}
 .so-what strong {{ color:{BLUE}; }}
 
-/* Period / info badge */
-.period-badge {{ background:#EAF4FF; border:1px solid #B8D9FF; border-radius:10px;
-                padding:12px 20px; margin-bottom:20px; }}
-.period-label {{ font-size:11px; font-weight:600; color:{BLUE}; text-transform:uppercase; letter-spacing:0.5px; }}
-.period-value {{ font-size:15px; font-weight:700; color:{BLUE}; }}
+/* Bloc info accueil (style alert-blue de la charte) */
+.info-box {{ background:#F0F8FF; border-left:3px solid {BLUE}; border-radius:10px;
+            padding:16px 20px; margin-bottom:24px; }}
+.info-box .it {{ font-size:15px; font-weight:700; color:{DARK}; margin-bottom:10px; }}
+.info-box .ip {{ font-size:13px; color:#1C1C1E; line-height:1.6; }}
+.info-box .iq {{ margin-top:14px; font-size:13px; color:#1C1C1E; line-height:1.9; }}
+
+/* Card analyse accueil */
+.feat {{ background:#FFFFFF; border-radius:12px; padding:16px 18px; border:1px solid #E5E5EA;
+        box-shadow:0 1px 3px rgba(0,0,0,0.04); margin-bottom:10px; }}
+.feat .ft {{ font-size:15px; font-weight:700; color:{DARK}; }}
+.feat .fd {{ font-size:13px; color:#3A3A3C; margin-top:8px; line-height:1.5; }}
+.feat .ff {{ background:#F5F5F7; border-radius:8px; padding:9px 13px; margin-top:10px;
+            font-family:'SF Mono',Menlo,monospace; font-size:13px; }}
+.feat .fn {{ font-size:12px; color:{GREY}; font-style:italic; margin-top:10px; }}
 
 .badge {{ display:inline-block; padding:2px 10px; border-radius:6px; font-size:11px; font-weight:600; }}
-
-/* Hero accueil */
-.hero {{ background:#FFFFFF; border-radius:18px; padding:40px 44px; border:1px solid #E5E5EA;
-        box-shadow:0 1px 3px rgba(0,0,0,0.08); margin-bottom:20px; }}
-.hero-icon {{ font-size:44px; }}
-.hero-title {{ font-size:30px; font-weight:800; color:{DARK}; margin-top:8px; }}
-.hero-sub {{ font-size:16px; color:#3A3A3C; margin-top:6px; line-height:1.6; }}
-.feat {{ background:#FFFFFF; border-radius:14px; padding:18px 20px; border:1px solid #E5E5EA;
-        box-shadow:0 1px 3px rgba(0,0,0,0.06); height:100%; }}
-.feat-icon {{ font-size:24px; }}
-.feat-title {{ font-size:14px; font-weight:700; color:{DARK}; margin-top:8px; }}
-.feat-text {{ font-size:13px; color:#3A3A3C; margin-top:4px; line-height:1.55; }}
-
-h1, h2, h3 {{ color:{DARK}; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -364,8 +362,10 @@ def build_excel(ecarts_df, rayon_label):
 # INTERFACE
 # ============================================================
 
-st.title("💰 Module Marge")
-st.caption("Analyse de rentabilité multi-rayon · export PowerBI")
+st.markdown("<div class='page-title'>💰 Module Marge</div>"
+            "<div class='page-caption'>Diagnostic de rentabilité réseau · Site × Famille × Article · Mix/Taux · Écarts inter-sites</div>",
+            unsafe_allow_html=True)
+st.markdown("<hr>", unsafe_allow_html=True)
 
 # --- Upload dans la sidebar (charte SmartBuyer) ---
 with st.sidebar:
@@ -376,34 +376,27 @@ with st.sidebar:
 
 # --- PAGE D'ACCUEIL EXPLICATIVE (format SmartBuyer · cf. Performance Promotion) ---
 if up is None:
-    # Bloc bleu "À quoi sert ce module ?"
     st.markdown(
-        f"<div style='background:linear-gradient(135deg,#EAF4FF 0%,#F5FAFF 100%);"
-        f"border-left:4px solid {BLUE};border-radius:12px;padding:24px 28px;margin-bottom:32px'>"
-        f"<div style='font-size:19px;font-weight:700;color:{DARK};margin-bottom:12px'>ℹ️ À quoi sert ce module ?</div>"
-        f"<div style='font-size:15px;color:#3A3A3C;line-height:1.6'>"
-        f"Ce module mesure la <b>rentabilité du réseau</b> à partir de l'export PBI des ventes. "
+        f"<div class='info-box'>"
+        f"<div class='it'>ℹ️ À quoi sert ce module ?</div>"
+        f"<div class='ip'>Ce module mesure la <b>rentabilité du réseau</b> à partir de l'export PBI des ventes. "
         f"Il analyse vos marges par site, famille et article pour répondre à 4 questions clés :</div>"
-        f"<div style='margin-top:16px;font-size:15px;color:#3A3A3C;line-height:2'>"
+        f"<div class='iq'>"
         f"<b>1. Où perd-on de la marge ?</b> — Classement des sites vs objectif par rayon<br>"
         f"<b>2. Qu'est-ce qui détruit la rentabilité ?</b> — Familles et articles déficitaires, triés par perte en FCFA<br>"
         f"<b>3. Pourquoi cet écart ?</b> — Décomposition Mix (mauvais produits) vs Taux (mauvaises marges)<br>"
         f"<b>4. Même article, marges différentes ?</b> — Écarts de taux d'un magasin à l'autre</div>"
         f"</div>", unsafe_allow_html=True)
 
-    st.markdown("<div class='section-header'>LES 4 ANALYSES CLÉS</div>", unsafe_allow_html=True)
+    st.markdown("<div class='section-label'>LES 4 ANALYSES CLÉS</div>", unsafe_allow_html=True)
 
     def feat_card(icon, titre, desc, formule, note, couleur):
         return (
-            f"<div style='background:#FFFFFF;border-radius:14px;padding:20px 24px;"
-            f"border:1px solid #E5E5EA;border-left:4px solid {couleur};"
-            f"box-shadow:0 1px 3px rgba(0,0,0,0.06);margin-bottom:16px'>"
-            f"<div style='font-size:18px;font-weight:700;color:{DARK}'>{icon}&nbsp;&nbsp;{titre}</div>"
-            f"<div style='font-size:14px;color:#3A3A3C;margin-top:10px'>{desc}</div>"
-            f"<div style='background:#F5F5F7;border-radius:8px;padding:10px 14px;margin-top:12px;"
-            f"font-family:monospace;font-size:14px;color:{couleur}'>{formule}</div>"
-            f"<div style='font-size:13px;color:{GREY};font-style:italic;margin-top:12px'>{note}</div>"
-            f"</div>")
+            f"<div class='feat' style='border-left:3px solid {couleur}'>"
+            f"<div class='ft'>{icon}&nbsp;&nbsp;{titre}</div>"
+            f"<div class='fd'>{desc}</div>"
+            f"<div class='ff' style='color:{couleur}'>{formule}</div>"
+            f"<div class='fn'>{note}</div></div>")
 
     r1c1, r1c2 = st.columns(2)
     with r1c1:
@@ -433,16 +426,14 @@ if up is None:
             "Écart = Tx max site − Tx min site",
             "Aligner le site faible sur le fort récupère de la marge sans rien changer.", GREEN), unsafe_allow_html=True)
 
-    # Objectifs en vigueur
-    st.markdown("<div class='section-header'>OBJECTIFS DE MARGE EN VIGUEUR</div>", unsafe_allow_html=True)
+    st.markdown("<div class='section-label'>OBJECTIFS DE MARGE EN VIGUEUR</div>", unsafe_allow_html=True)
     cells = "".join(
-        f"<div style='background:#FFFFFF;border:1px solid #E5E5EA;border-radius:12px;"
-        f"padding:16px 20px;box-shadow:0 1px 3px rgba(0,0,0,0.06);text-align:center'>"
-        f"<div style='font-size:11px;color:{GREY};text-transform:uppercase;letter-spacing:0.5px'>{r.title()}</div>"
-        f"<div style='font-size:26px;font-weight:800;color:{BLUE};margin-top:4px'>{c:.1f}%</div></div>"
+        f"<div class='kpi-card' style='text-align:center'>"
+        f"<div class='kpi-label'>{r.title()}</div>"
+        f"<div class='kpi-value' style='color:{BLUE}'>{c:.1f}%</div></div>"
         for r, c in CIBLES_DEFAUT.items())
     st.markdown(
-        f"<div style='display:grid;grid-template-columns:repeat({len(CIBLES_DEFAUT)},1fr);gap:12px'>{cells}</div>"
+        f"<div style='display:grid;grid-template-columns:repeat({len(CIBLES_DEFAUT)},1fr);gap:10px'>{cells}</div>"
         f"<div style='font-size:12px;color:{GREY};margin-top:12px'>📥 Déposez votre export PowerBI dans le panneau de gauche pour démarrer l'analyse.</div>",
         unsafe_allow_html=True)
     st.stop()
