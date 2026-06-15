@@ -1,27 +1,67 @@
 """
-SmartBuyer · On Time In Full — v6.1 (fix KeyError is_watched)
-─────────────────────────────────────────────────────────────
-Correction v6.1 :
-  - `is_watched` ajouté dans les sélections de colonnes (detail_cols, export_df)
-    avant tout sort_values qui s'en sert.
-  - Tri défensif partout : on ne trie que sur les colonnes réellement présentes.
-  - `is_watched` retiré juste avant l'écriture Excel pour ne pas polluer l'export.
+SmartBuyer · On Time In Full — v6.2 (encodage robuste universel)
+─────────────────────────────────────────────────────────────────
+Correctifs v6.2 :
+  - Suppression totale de `from io import BytesIO` pour les LECTURES.
+  - `load_erp` utilise `read_csv_robust()` → gère UTF-8, UTF-8-BOM,
+    CP1252, Latin-1, ISO-8859-15 sans jamais lever UnicodeDecodeError.
+  - `load_watchlist` utilise `read_csv_robust()` pour la branche CSV
+    (la boucle d'essai manuelle est supprimée).
+  - `read_excel_robust()` utilisé pour la branche Excel de watchlist.
+  - `clean_dataframe()` appliqué systématiquement post-lecture.
+  - BytesIO conservé UNIQUEMENT dans les fonctions d'export Excel
+    (build_export_excel, build_fiche_excel, build_export_all_fiches,
+     build_recap_fournisseur_excel) où il sert à produire des bytes
+     en SORTIE — c'est un usage correct et volontaire.
+  - `is_watched` KeyError résolu (hérité de v6.1, conservé).
+  - Tri défensif `safe_sort` conservé partout.
 
-Nouveauté v6 (préservée) :
-  - load_watchlist retourne un dict {code: classe}.
-  - Colonne "Surveillance" affiche la classe (GOLD, SILVER, A, B…).
-  - Fond doré Excel + filtre conservés, label = classe.
+Règle permanente SmartBuyer Hub :
+  Toute lecture de fichier uploadé passe par utils_io.read_csv_robust
+  ou utils_io.read_excel_robust. Jamais pd.read_csv(BytesIO(...)) nu.
 """
 
 import streamlit as st
 import pandas as pd
 import numpy as np
-from io import BytesIO
+from io import BytesIO          # ← UNIQUEMENT pour les exports Excel en sortie
 from datetime import date as _date
 from openpyxl import Workbook
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 import plotly.graph_objects as go
+
+# ── Import module I/O robuste SmartBuyer Hub ──────────────────────────────
+# utils_io.py doit être à la RACINE du repo (même niveau que ce fichier).
+# Il fournit read_csv_robust, read_excel_robust, clean_dataframe.
+try:
+    from utils_io import read_csv_robust, read_excel_robust, clean_dataframe
+except ImportError:
+    # Fallback minimal si utils_io absent (ne devrait pas arriver en prod)
+    import io as _io
+
+    def read_csv_robust(file_bytes, sep=";", decimal=",", **kw):
+        for enc in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
+            try:
+                return pd.read_csv(_io.BytesIO(file_bytes), sep=sep, decimal=decimal,
+                                   encoding=enc, low_memory=False, **kw)
+            except (UnicodeDecodeError, UnicodeError):
+                continue
+        return pd.read_csv(_io.BytesIO(file_bytes), sep=sep, decimal=decimal,
+                           encoding="latin-1", encoding_errors="replace",
+                           low_memory=False, **kw)
+
+    def read_excel_robust(file_bytes, **kw):
+        return pd.read_excel(_io.BytesIO(file_bytes), engine="openpyxl", **kw)
+
+    def clean_dataframe(df, strip_strings=True):
+        df = df.loc[:, ~df.columns.str.contains(r"^Unnamed", na=False)]
+        df.columns = df.columns.str.strip()
+        if strip_strings:
+            sc = df.select_dtypes(include="object").columns
+            df[sc] = df[sc].apply(lambda c: c.str.strip() if c.dtype == "object" else c)
+        return df
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # CONFIG PAGE
@@ -172,10 +212,7 @@ WATCH_LIGHT_HEX = "FFFDE7"
 # HELPER GÉNÉRIQUE — Tri défensif
 # ══════════════════════════════════════════════════════════════════════════════
 def safe_sort(df: pd.DataFrame, keys, ascending) -> pd.DataFrame:
-    """
-    Trie un DataFrame uniquement sur les colonnes réellement présentes.
-    Évite les KeyError si une colonne attendue est manquante.
-    """
+    """Trie uniquement sur les colonnes présentes — évite les KeyError."""
     if df is None or df.empty:
         return df
     present = [(k, a) for k, a in zip(keys, ascending) if k in df.columns]
@@ -187,7 +224,8 @@ def safe_sort(df: pd.DataFrame, keys, ascending) -> pd.DataFrame:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# CHARGEMENT LISTE SURVEILLANCE — retourne dict {code_str: classe}
+# CHARGEMENT LISTE SURVEILLANCE
+# Utilise read_csv_robust / read_excel_robust → encodage automatique garanti
 # ══════════════════════════════════════════════════════════════════════════════
 @st.cache_data(show_spinner=False)
 def load_watchlist(file_bytes: bytes, filename: str) -> dict:
@@ -195,24 +233,20 @@ def load_watchlist(file_bytes: bytes, filename: str) -> dict:
     Charge la liste de surveillance depuis un CSV ou Excel.
     Cherche :
       - une colonne 'code/article/ref/ean' → codes articles
-      - une colonne 'classe/class/segment/categ' → libellé de classe (GOLD, A, B…)
+      - une colonne 'classe/class/segment/categ' → libellé de classe
     Retourne un dict {code_normalisé: classe_str}.
-    Si pas de colonne classe trouvée, la classe = "⭐" par défaut.
     """
     try:
-        if filename.lower().endswith((".xlsx", ".xls")):
-            wdf = pd.read_excel(BytesIO(file_bytes))
+        fname_lower = filename.lower()
+        if fname_lower.endswith((".xlsx", ".xls", ".xlsm")):
+            # ── Excel : read_excel_robust (engine openpyxl avec fallback xlrd)
+            wdf = read_excel_robust(file_bytes)
         else:
-            for enc in ("utf-8", "latin-1", "cp1252"):
-                try:
-                    wdf = pd.read_csv(BytesIO(file_bytes), sep=None, engine="python", encoding=enc)
-                    break
-                except (UnicodeDecodeError, Exception):
-                    continue
-            else:
-                raise ValueError("Impossible de décoder le fichier (UTF-8, Latin-1, CP1252 tous échoués)")
+            # ── CSV : read_csv_robust (détection encodage automatique)
+            # sep=None + engine=python pour auto-détecter le séparateur
+            wdf = read_csv_robust(file_bytes, sep=None, engine="python")
 
-        wdf.columns = [str(c).strip() for c in wdf.columns]
+        wdf = clean_dataframe(wdf)
 
         # Détection colonne code
         code_col = None
@@ -231,7 +265,6 @@ def load_watchlist(file_bytes: bytes, filename: str) -> dict:
             if any(kw in col.lower() for kw in ["class", "type", "segment", "categ", "tier", "niveau", "groupe"]):
                 classe_col = col
                 break
-        # Si toujours pas trouvé et qu'il y a une 2e colonne, on la prend
         if classe_col is None and len(wdf.columns) >= 2:
             classe_col = [c for c in wdf.columns if c != code_col][0]
 
@@ -260,12 +293,10 @@ def normalise_code(v) -> str:
 
 
 def watchdict_codes(watchdict: dict) -> set:
-    """Retourne l'ensemble des codes de la watchlist."""
     return set(watchdict.keys())
 
 
 def get_classe(code, watchdict: dict) -> str:
-    """Retourne la classe de l'article ou '' s'il n'est pas dans la watchlist."""
     return watchdict.get(normalise_code(code), "")
 
 
@@ -315,6 +346,8 @@ def safe_div(a, b) -> float:
 
 # ══════════════════════════════════════════════════════════════════════════════
 # CHARGEMENT & NETTOYAGE ERP
+# ── v6.2 : read_csv_robust remplace pd.read_csv(BytesIO(...))
+#            → gère CP1252, Latin-1, UTF-8, UTF-8-BOM automatiquement
 # ══════════════════════════════════════════════════════════════════════════════
 def detect_expected_date_column(df: pd.DataFrame):
     for col in DATE_EXPECTED_CANDIDATES:
@@ -324,14 +357,43 @@ def detect_expected_date_column(df: pd.DataFrame):
     return None
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner="⏳ Chargement du fichier ERP…")
 def load_erp(file_bytes: bytes, filename: str) -> pd.DataFrame:
-    df = pd.read_csv(BytesIO(file_bytes), sep=";", low_memory=False)
+    """
+    Lecture robuste du CSV ERP.
+    Détecte automatiquement l'encodage (UTF-8, CP1252, Latin-1, UTF-8-BOM…).
+    Ne lève JAMAIS UnicodeDecodeError.
+    """
+    try:
+        df = read_csv_robust(
+            file_bytes,
+            sep=";",
+            decimal=",",
+            thousands=" ",
+            low_memory=False,
+        )
+    except Exception as e:
+        st.error(
+            f"❌ Impossible de lire le fichier **{filename}**.\n\n"
+            f"Vérifiez que c'est bien un CSV avec séparateur `;`.\n\n"
+            f"Détail : `{e}`"
+        )
+        st.stop()
+
+    # Nettoyage post-import standard
+    df = clean_dataframe(df)
+
+    # Nettoyage spécifique ERP : BOM résiduel sur première colonne, ponctuation finale
     df.columns = [str(c).replace("\ufeff", "").strip().rstrip(",.") for c in df.columns]
+
+    # Supprimer colonnes vides
     df = df.dropna(axis=1, how="all")
-    df = df.drop(columns=[c for c in df.columns if c.startswith("Unnamed:")], errors="ignore")
+
+    # Valeurs objet → None propre
     for col in df.select_dtypes(include="object").columns:
         df[col] = df[col].astype(str).str.strip().replace({"nan": None, "": None})
+
+    # Parsing dates
     date_cols = [
         "Dt Rec", "Date de commande", "Date", "Date facture",
         "Date comptable du rapprochement", "H Date", "Date livraison", "Date prévue",
@@ -339,6 +401,8 @@ def load_erp(file_bytes: bytes, filename: str) -> pd.DataFrame:
     for col in date_cols:
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], format="%d/%m/%Y", errors="coerce")
+
+    # Parsing numériques
     num_cols = [
         "Site", "Département", "N° Cde", "Sit", "Fou", "Famille", "Sous-famille",
         "Code", "Article", "Qté cde", "Poids cde", "Qté rec", "Poids rec",
@@ -348,6 +412,7 @@ def load_erp(file_bytes: bytes, filename: str) -> pd.DataFrame:
     for col in num_cols:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
+
     return df
 
 
@@ -404,8 +469,7 @@ def prepare_dataset(df: pd.DataFrame, exclude_technical: bool = True,
     work["otif"]    = ((work["qte_rec_retained"] >= work["qte_cde"]) & work["on_time"]).astype(int)
     work["criticality_score"] = work["service_gap_value"] * (1 - work["line_fill_rate"])
 
-    # ── FLAG SURVEILLANCE : colonnes "watch_classe" + "is_watched" + "code_str"
-    # Toujours créées (avec valeurs neutres si pas de watchdict) pour éviter les KeyError ailleurs
+    # ── FLAG SURVEILLANCE : toujours créé (valeurs neutres si pas de watchdict)
     if "Code" in work.columns:
         work["code_str"] = work["Code"].apply(normalise_code)
     else:
@@ -516,7 +580,6 @@ def agg_article(df: pd.DataFrame, watchdict: dict = None) -> pd.DataFrame:
     )
     g = _enrich(g).sort_values("criticality_score", ascending=False).reset_index(drop=True)
 
-    # Colonne Classe (vide si hors watchlist)
     if watchdict and "Code" in g.columns:
         g["code_str"]  = g["Code"].apply(normalise_code)
         g["Classe"]    = g["code_str"].map(watchdict).fillna("")
@@ -544,7 +607,6 @@ def bar_h(data: pd.DataFrame, x_col: str, y_col: str, color: str,
     top = data.head(15).sort_values(x_col)
     texts = [fmt_fn(v) if fmt_fn else f"{v:,.0f}" for v in top[x_col]]
 
-    # Couleur barre : dorée si article surveillé
     if classe_col and classe_col in top.columns:
         bar_colors = [
             "#FFD60A" if str(c).strip() != "" else color
@@ -553,7 +615,6 @@ def bar_h(data: pd.DataFrame, x_col: str, y_col: str, color: str,
     else:
         bar_colors = color
 
-    # Label Y : préfixe avec la classe si surveillé
     y_labels = top[y_col].astype(str).tolist()
     if classe_col and classe_col in top.columns:
         y_labels = [
@@ -604,6 +665,7 @@ def render_kpi_row(kpi: dict, watch_kpi: dict = None):
 
 # ══════════════════════════════════════════════════════════════════════════════
 # EXPORT EXCEL — helpers couleur classe
+# Note : BytesIO ici = PRODUCTION de bytes en sortie. Usage correct et voulu.
 # ══════════════════════════════════════════════════════════════════════════════
 GOLD_FILL    = PatternFill("solid", fgColor=WATCH_GOLD_HEX)
 GOLDL_FILL   = PatternFill("solid", fgColor=WATCH_LIGHT_HEX)
@@ -612,7 +674,6 @@ SILVERL_FILL = PatternFill("solid", fgColor="F5F5F5")
 
 
 def _classe_fills(classe: str):
-    """Retourne (fill_ligne, fill_badge) selon la classe."""
     c = str(classe).strip().upper()
     if c == "GOLD":
         return GOLDL_FILL, GOLD_FILL
@@ -659,7 +720,6 @@ def build_export_excel(df, by_supplier, by_site, by_article, quality,
     H_FONT = Font(bold=True, color="FFFFFF", size=11)
     CTR    = Alignment(horizontal="center", vertical="center")
 
-    # ── Onglet 1 : Synthèse qualité
     ws1 = wb.active
     ws1.title = "Synthese"
     synthese = pd.DataFrame([
@@ -677,10 +737,6 @@ def build_export_excel(df, by_supplier, by_site, by_article, quality,
     ], columns=["Indicateur", "Valeur"])
     _xl_write_sheet(ws1, "Synthèse qualité de données", synthese, H_FILL, H_FONT, CTR)
 
-    art_cols = list(by_article.columns)
-    classe_idx = (art_cols.index("Classe") + 1) if "Classe" in art_cols else None
-
-    # by_article peut contenir code_str (technique) → on l'enlève pour l'export
     by_article_export = by_article.drop(columns=["code_str"], errors="ignore")
     art_cols_export = list(by_article_export.columns)
     classe_idx_export = (art_cols_export.index("Classe") + 1) if "Classe" in art_cols_export else None
@@ -690,7 +746,6 @@ def build_export_excel(df, by_supplier, by_site, by_article, quality,
     _xl_write_sheet(wb.create_sheet("Par article"),     "Analyse article",     by_article_export,  H_FILL, H_FONT, CTR,
                     classe_col_idx=classe_idx_export)
 
-    # ── Onglet Articles Surveillés
     if watchdict and "Classe" in by_article_export.columns:
         watched_art = by_article_export[by_article_export["Classe"] != ""].copy()
         if not watched_art.empty:
@@ -702,26 +757,22 @@ def build_export_excel(df, by_supplier, by_site, by_article, quality,
                 c.fill = PatternFill("solid", fgColor=WATCH_GOLD_HEX)
                 c.font = Font(bold=True, color="1C1C1E", size=11)
 
-    # ── Lignes critiques (FIX KeyError : is_watched inclus pour le tri puis retiré)
+    # Lignes critiques — is_watched inclus pour tri, retiré de l'export
     detail_cols = [c for c in [
         "date_received", "date_expected", "site_label", "supplier_name",
         "Code", "article_label", "N° Cde", "qte_cde", "qte_rec_retained",
         "qty_missing", "service_gap_value", "on_time", "otif", "delay_days",
-        "watch_classe", "is_watched",   # ← inclus pour permettre le tri
+        "watch_classe", "is_watched",
     ] if c in df.columns]
 
     crit = df[df["otif"] == 0][detail_cols].copy()
-
-    # Tri défensif sur les clés disponibles
     crit = safe_sort(crit,
                      keys=["is_watched", "qty_missing", "service_gap_value"],
                      ascending=[False, False, False])
     crit = crit.head(500)
 
-    # is_watched servait uniquement au tri → on le retire de l'export
     if "is_watched" in crit.columns:
         crit = crit.drop(columns=["is_watched"])
-
     if "watch_classe" in crit.columns:
         crit = crit.rename(columns={"watch_classe": "Classe"})
 
@@ -785,7 +836,7 @@ def build_fiche_excel(fournisseur: str, df_all: pd.DataFrame, df_bad: pd.DataFra
             return ""
         return watchdict.get(normalise_code(code), "")
 
-    # ── Onglet 1 : Synthèse KPI
+    # Onglet 1 : Synthèse KPI
     ws1 = wb.active
     ws1.title = "Synthèse KPI"
     ws1.row_dimensions[1].height = 30
@@ -817,7 +868,7 @@ def build_fiche_excel(fournisseur: str, df_all: pd.DataFrame, df_bad: pd.DataFra
         ws1.cell(i, 3, comment).alignment = LFT; ws1.cell(i, 3).border = THIN
     auto_width(ws1)
 
-    # ── Onglet 2 : Par magasin
+    # Onglet 2 : Par magasin
     ws2 = wb.create_sheet("Par magasin")
     ws2.cell(1, 1, f"Livraisons incomplètes par magasin — seuil Fill Rate < {seuil}%").font = T_FONT
     ws2.append([])
@@ -835,7 +886,7 @@ def build_fiche_excel(fournisseur: str, df_all: pd.DataFrame, df_bad: pd.DataFra
         if f: ws2.cell(n, 2).fill = f
     auto_width(ws2)
 
-    # ── Onglet 3 : Par article (avec colonne Classe)
+    # Onglet 3 : Par article
     ws3 = wb.create_sheet("Par article")
     ws3.cell(1, 1, f"Livraisons incomplètes par article — seuil Fill Rate < {seuil}%").font = T_FONT
     ws3.append([])
@@ -846,8 +897,7 @@ def build_fiche_excel(fournisseur: str, df_all: pd.DataFrame, df_bad: pd.DataFra
         code   = r.get("Code", "")
         classe = get_code_classe(code)
         row_data = [
-            classe,
-            code, r.get("article_label",""),
+            classe, code, r.get("article_label",""),
             r.get("Fill Rate",""), r.get("Vol. manquant",""),
             r.get("Impact CA proxy",""), r.get("nb_sites",""), r.get("nb_cdes",""),
         ]
@@ -860,13 +910,13 @@ def build_fiche_excel(fournisseur: str, df_all: pd.DataFrame, df_bad: pd.DataFra
             fill_l, fill_b = _classe_fills(classe)
             for col_i in range(1, 9):
                 ws3.cell(n, col_i).fill = fill_l
-            ws3.cell(n, 1).fill = fill_b   # badge classe plus sombre
+            ws3.cell(n, 1).fill = fill_b
         else:
             f = kpi_fill(str(r.get("Fill Rate", ""))) if r.get("Fill Rate") else None
             if f: ws3.cell(n, 4).fill = f
     auto_width(ws3)
 
-    # ── Onglet 4 : Détail lignes
+    # Onglet 4 : Détail lignes
     ws4 = wb.create_sheet("Détail lignes")
     ws4.cell(1, 1, f"Détail des livraisons incomplètes — {fournisseur}  (Fill Rate < {seuil}%)").font = T_FONT
     ws4.append([])
@@ -925,7 +975,7 @@ def build_fiche_excel(fournisseur: str, df_all: pd.DataFrame, df_bad: pd.DataFra
             if fr_fill:
                 ws4.cell(n, 11).fill = fr_fill
 
-    # ── Onglet 5 : Articles surveillés uniquement
+    # Onglet 5 : Articles surveillés uniquement
     if watchdict:
         df_bad_watched = df_bad[df_bad["is_watched"]] if "is_watched" in df_bad.columns else df_bad.iloc[0:0]
         if not df_bad_watched.empty:
@@ -1032,7 +1082,6 @@ def build_export_all_fiches(df: pd.DataFrame, by_supplier: pd.DataFrame,
     export_df = df[mask].copy()
     export_df = export_df.merge(sup_meta, on="supplier_name", how="left")
 
-    # Tri défensif (is_watched peut être absent en théorie)
     export_df = safe_sort(
         export_df,
         keys=["is_watched", "crit_sup", "qty_missing", "service_gap_value"],
@@ -1089,7 +1138,6 @@ def build_export_all_fiches(df: pd.DataFrame, by_supplier: pd.DataFrame,
             elif "Critique"   in str(niv): ws.cell(n, 5).fill = RED_FILL
             ws.cell(n, 17).fill = GRN_FILL if ot == 1 else RED_FILL
 
-    # Onglet surveillance uniquement
     if watchdict:
         ws_w = wb.create_sheet("⭐ Articles surveillés")
         ws_w.cell(1, 1, "ARTICLES SURVEILLANCE — TOUS FOURNISSEURS").font = T_FONT
@@ -1166,18 +1214,6 @@ def build_export_all_fiches(df: pd.DataFrame, by_supplier: pd.DataFrame,
 # EXPORT EXCEL — RÉCAP PRIORISATION FOURNISSEURS
 # ══════════════════════════════════════════════════════════════════════════════
 def build_recap_fournisseur_excel(df: pd.DataFrame, watchdict: dict = None) -> BytesIO:
-    """
-    Export récap fournisseur orienté priorisation d'actions.
-    1 ligne par fournisseur avec :
-      - Refs totales commandées / Refs effectivement livrées (qte_rec > 0) / Taux couverture
-      - Fill Rate / On Time / OTIF / Score / Niveau
-      - Sites impactés (avec livraison incomplète) / Sites total
-      - Vol. manquant / Impact CA proxy
-      - Nb refs GOLD / Nb refs SILVER en sous-service (fill rate < 97%)
-      - Rang criticité
-    Trié par score de criticité décroissant.
-    Filtre automatique + freeze + mise en forme conditionnelle couleur.
-    """
     wb = Workbook()
     ws = wb.active
     ws.title = "Récap priorisation fournisseurs"
@@ -1194,7 +1230,7 @@ def build_recap_fournisseur_excel(df: pd.DataFrame, watchdict: dict = None) -> B
     THIN_SIDE = Side(style="thin", color="E5E5EA")
     THIN      = Border(left=THIN_SIDE, right=THIN_SIDE, top=THIN_SIDE, bottom=THIN_SIDE)
 
-    # ── Titre + sous-titre
+    total_cols = 19 if watchdict else 17
     ws.cell(1, 1, "RÉCAP PRIORISATION FOURNISSEURS — OTIF").font = T_FONT
     ws.cell(2, 1,
         f"Généré le {today_str}  ·  "
@@ -1202,15 +1238,12 @@ def build_recap_fournisseur_excel(df: pd.DataFrame, watchdict: dict = None) -> B
         "Réfs livrées = au moins 1 unité reçue sur la période"
         + ("  ·  Cols GOLD/SILVER = nb réfs en sous-service (FR < 97%)" if watchdict else "")
     ).font = Font(size=9, italic=True, color="8E8E93")
-    total_cols = 19 if watchdict else 17
     ws.merge_cells(f"A1:{get_column_letter(total_cols)}1")
     ws.merge_cells(f"A2:{get_column_letter(total_cols)}2")
     ws.append([])
 
-    # ── Construction des colonnes selon présence watchdict
     HEADERS = [
-        "Rang",
-        "Fournisseur", "Code Fou.",
+        "Rang", "Fournisseur", "Code Fou.",
         "Réfs commandées", "Réfs livrées", "Taux couverture réfs",
         "Fill Rate", "On Time", "OTIF", "Score", "Niveau",
         "Sites impactés", "Sites total",
@@ -1228,9 +1261,7 @@ def build_recap_fournisseur_excel(df: pd.DataFrame, watchdict: dict = None) -> B
         c.alignment = CTR; c.border = THIN
     ws.row_dimensions[hdr_row].height = 30
 
-    # ── Agrégation par fournisseur
     grp = df.groupby(["Fou", "supplier_name"], as_index=False)
-
     agg = grp.agg(
         refs_total    =("Code",              "nunique"),
         qte_cde_sum   =("qte_cde",           "sum"),
@@ -1244,7 +1275,6 @@ def build_recap_fournisseur_excel(df: pd.DataFrame, watchdict: dict = None) -> B
         sites_total   =("site_label",         "nunique"),
     )
 
-    # Refs livrées : codes avec qte_rec > 0 (au moins 1 unité)
     refs_livrees = (
         df[df["qte_rec_retained"] > 0]
         .groupby(["Fou", "supplier_name"], as_index=False)["Code"]
@@ -1254,7 +1284,6 @@ def build_recap_fournisseur_excel(df: pd.DataFrame, watchdict: dict = None) -> B
     agg = agg.merge(refs_livrees, on=["Fou", "supplier_name"], how="left")
     agg["refs_livrees"] = agg["refs_livrees"].fillna(0).astype(int)
 
-    # Sites impactés = sites avec au moins une ligne fill rate < 100%
     sites_impactes = (
         df[df["line_fill_rate"] < 1.0]
         .groupby(["Fou", "supplier_name"], as_index=False)["site_label"]
@@ -1264,7 +1293,6 @@ def build_recap_fournisseur_excel(df: pd.DataFrame, watchdict: dict = None) -> B
     agg = agg.merge(sites_impactes, on=["Fou", "supplier_name"], how="left")
     agg["sites_impactes"] = agg["sites_impactes"].fillna(0).astype(int)
 
-    # KPIs calculés
     agg["fill_rate"]       = np.where(agg["qte_cde_sum"] > 0, agg["qte_rec_sum"] / agg["qte_cde_sum"] * 100, 0.0)
     agg["on_time_pct"]     = agg["on_time_mean"] * 100
     agg["otif_pct"]        = agg["otif_mean"]    * 100
@@ -1274,11 +1302,9 @@ def build_recap_fournisseur_excel(df: pd.DataFrame, watchdict: dict = None) -> B
     agg                    = agg.sort_values("criticality", ascending=False).reset_index(drop=True)
     agg["rang"]            = agg.index + 1
 
-    # Refs 20/80 en sous-service par fournisseur
     if watchdict:
         df_w = df.copy()
         df_w["watch_c"] = df_w["Code"].apply(normalise_code).map(watchdict).fillna("")
-        # Agrégation fill rate par (fournisseur, code)
         art_fr = (
             df_w.groupby(["Fou", "supplier_name", "Code", "watch_c"], as_index=False)
             .agg(qte_c=("qte_cde","sum"), qte_r=("qte_rec_retained","sum"))
@@ -1301,7 +1327,6 @@ def build_recap_fournisseur_excel(df: pd.DataFrame, watchdict: dict = None) -> B
         agg["refs_gold_under"]   = agg["refs_gold_under"].fillna(0).astype(int)
         agg["refs_silver_under"] = agg["refs_silver_under"].fillna(0).astype(int)
 
-    # ── Écriture des lignes
     def _niveau(score):
         if score >= SEUIL_EXCELLENT:  return "Excellent"
         if score >= SEUIL_SURVEILLER: return "À surveiller"
@@ -1349,18 +1374,12 @@ def build_recap_fournisseur_excel(df: pd.DataFrame, watchdict: dict = None) -> B
             cell.border = THIN
             cell.alignment = LFT if col_i == 2 else CTR
 
-        # Coloration Fill Rate (col 7)
         ws.cell(n, 7).fill  = _score_fill(fr)
-        # Coloration OTIF (col 9)
         ws.cell(n, 9).fill  = _score_fill(otif)
-        # Coloration Score (col 10)
         ws.cell(n, 10).fill = _score_fill(score)
-        # Coloration Niveau (col 11)
         ws.cell(n, 11).fill = _score_fill(score)
-        # Taux couverture (col 6)
         ws.cell(n, 6).fill  = _score_fill(taux_cov)
 
-        # GOLD/SILVER : fond doré/gris si > 0
         if watchdict:
             if int(row["refs_gold_under"]) > 0:
                 ws.cell(n, 18).fill = PatternFill("solid", fgColor=WATCH_GOLD_HEX)
@@ -1368,7 +1387,6 @@ def build_recap_fournisseur_excel(df: pd.DataFrame, watchdict: dict = None) -> B
             if int(row["refs_silver_under"]) > 0:
                 ws.cell(n, 19).fill = PatternFill("solid", fgColor="E8E8E8")
 
-    # ── Mise en forme finale
     col_widths = [6, 30, 10, 16, 14, 20, 12, 12, 10, 10, 16, 14, 12, 16, 22, 14, 12]
     if watchdict:
         col_widths += [18, 20]
@@ -1380,7 +1398,6 @@ def build_recap_fournisseur_excel(df: pd.DataFrame, watchdict: dict = None) -> B
     ws.row_dimensions[1].height = 22
     ws.row_dimensions[2].height = 14
 
-    # ── Onglet légende
     ws_leg = wb.create_sheet("Légende")
     ws_leg.cell(1, 1, "LÉGENDE — Récap priorisation fournisseurs").font = Font(bold=True, size=12, color="1C3557")
     leg_data = [
@@ -1437,7 +1454,6 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # ── LISTE SURVEILLANCE
     st.markdown("<div style='font-size:11px;font-weight:600;color:#8E8E93;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px'>⭐ Liste de surveillance</div>", unsafe_allow_html=True)
     st.caption("CSV ou Excel — colonnes : Code article + Classe (GOLD, SILVER, A, B…)")
     watch_file  = st.file_uploader("Liste articles à surveiller", type=["csv", "xlsx", "xls"], key="watchlist")
@@ -1453,7 +1469,7 @@ with st.sidebar:
         else:
             st.warning("Aucun code détecté — vérifiez le format du fichier")
 
-    watchlist = watchdict_codes(watchdict)   # set de codes pour compatibilité
+    watchlist = watchdict_codes(watchdict)
 
     st.markdown("---")
     st.markdown("<div style='font-size:11px;font-weight:600;color:#8E8E93;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px'>Règles métier</div>", unsafe_allow_html=True)
@@ -1690,7 +1706,6 @@ with tab4:
             w_lines = view[view["is_watched"]]
             wk = compute_global_kpis(w_lines)
 
-            # KPIs par classe
             classes_present = sorted(watched_arts["Classe"].unique())
             if len(classes_present) > 1:
                 st.markdown(f"<div class='section-label'>KPIs par classe ({', '.join(classes_present)})</div>", unsafe_allow_html=True)
