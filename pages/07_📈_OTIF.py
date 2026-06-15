@@ -41,6 +41,11 @@ except ImportError:
     import io as _io
 
     def read_csv_robust(file_bytes, sep=";", decimal=",", **kw):
+        # Retirer les params gérés explicitement pour éviter les doublons dans **kw
+        kw.pop("low_memory", None)
+        kw.pop("thousands", None)
+        kw.pop("dtype", None)
+        kw.pop("parse_dates", None)
         for enc in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
             try:
                 return pd.read_csv(_io.BytesIO(file_bytes), sep=sep, decimal=decimal,
