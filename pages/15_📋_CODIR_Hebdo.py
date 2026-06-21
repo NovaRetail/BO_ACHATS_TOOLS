@@ -111,16 +111,27 @@ def kpi_card(label, value, sub=None, sub_class=""):
             f"<div class='kpi-value'>{value}</div>{sub_html}</div>")
 
 # ============================================================
-# CHARGEMENT — EXPORT RAYON (Rayon → Famille → Sous Famille)
+# CHARGEMENT — EXPORT ARTICLE UNIQUE (Rayon → Famille → Sous Famille → Article)
+# Toute la hiérarchie (réseau / rayon / famille / article) est dérivée de ce
+# seul fichier — c'est lui que l'on charge chaque semaine.
 # ============================================================
 @st.cache_data(show_spinner=False)
-def load_rayon(file_bytes):
-    df = pd.read_excel(io.BytesIO(file_bytes))
-    df.columns = [str(c).lstrip('\ufeff') for c in df.columns]
-    # Lignes "Total" parasites en bas de l'export PBI + note de filtres
-    df = df[df['Rayon'].notna()].copy()
+def load_export(file_bytes):
+    raw = pd.read_excel(io.BytesIO(file_bytes))
+    raw.columns = [str(c).lstrip('\ufeff') for c in raw.columns]
+
+    # La note "Filtres appliqués : ..." (dernière ligne) décrit le périmètre exact
+    # (sites, enseigne, période) — utile pour vérifier la cohérence semaine après semaine.
+    perimetre = None
+    note_rows = raw[raw['Rayon'].astype(str).str.startswith('Filtres', na=False)]
+    if not note_rows.empty:
+        perimetre = str(note_rows.iloc[0]['Rayon'])
+
+    df = raw[raw['Rayon'].notna()].copy()
     df = df[~df['Rayon'].astype(str).str.startswith('Filtres')]
-    return df
+    if 'Article' not in df.columns:
+        df['Article'] = np.nan
+    return df, perimetre
 
 def kpis_globaux_rayon(df):
     g = df[df['Rayon'] == 'Total']
@@ -174,14 +185,9 @@ def top_familles(df, n=5, by='perte_ca'):
     return out.reset_index(drop=True)
 
 # ============================================================
-# CHARGEMENT — EXPORT ARTICLE (Rayon → Famille → Sous Famille → Article)
+# DÉRIVATION — VUE ARTICLE (à partir du même dataframe)
 # ============================================================
-@st.cache_data(show_spinner=False)
-def load_articles(file_bytes):
-    df = pd.read_excel(io.BytesIO(file_bytes))
-    df.columns = [str(c).lstrip('\ufeff') for c in df.columns]
-    df = df[df['Rayon'].notna()].copy()
-    df = df[~df['Rayon'].astype(str).str.startswith('Filtres')]
+def prep_articles(df):
     # lignes article réelles uniquement (pas les sous-totaux Rayon/Famille/Sous-Famille)
     art = df[df['Article'].notna() & (df['Article'] != 'Total') & (df['Rayon'] != 'Total')].copy()
     art['Rayon_aff'] = art['Rayon'].astype(str).str.split(' - ').str[-1].str.strip()
@@ -278,13 +284,14 @@ def build_excel_codir(kpis, perf_rayon, tops):
 # ============================================================
 st.markdown("<div class='page-title'>📋 Module CODIR Hebdo</div>"
             "<div class='page-caption'>Vue réseau PGC (Rayon) + Destructeurs/Performeurs (Article) · "
-            "objectifs marge alignés Méti</div>", unsafe_allow_html=True)
+            "objectifs marge alignés Méti · une seule extraction à charger</div>", unsafe_allow_html=True)
 st.markdown("<hr>", unsafe_allow_html=True)
 
 with st.sidebar:
-    st.markdown("### 📥 Imports")
-    up_rayon = st.file_uploader("Export Rayon hebdo (.xlsx)", type=['xlsx'], key="up_rayon")
-    up_art = st.file_uploader("Export Article hebdo (.xlsx)", type=['xlsx'], key="up_art")
+    st.markdown("### 📥 Import")
+    up = st.file_uploader("Export Article hebdo (.xlsx)", type=['xlsx'], key="up_export")
+    st.caption("L'extraction Article contient déjà les sous-totaux Rayon et Famille — "
+               "tout le module en est dérivé, rien d'autre à charger.")
     st.markdown("---")
     st.markdown("##### ⚙️ Paramètres")
     n_top = st.slider("Nombre de lignes par classement", 5, 30, 15)
@@ -292,13 +299,13 @@ with st.sidebar:
     st.markdown("---")
     st.caption("SmartBuyer Hub · Module CODIR Hebdo")
 
-if up_rayon is None and up_art is None:
+if up is None:
     st.markdown(
         f"<div class='info-box'>"
         f"<div class='it'>ℹ️ À quoi sert ce module ?</div>"
-        f"<div class='ip'>Ce module prépare le point hebdo réseau pour le CODIR à partir de deux exports PBI "
-        f"indépendants : un export agrégé <b>Rayon → Famille → Sous-Famille</b>, et un export détaillé "
-        f"<b>jusqu'à l'Article</b>. Chargez l'un, l'autre, ou les deux dans la barre latérale.</div>"
+        f"<div class='ip'>Ce module prépare le point hebdo réseau pour le CODIR à partir de l'export PBI "
+        f"<b>Rayon → Famille → Sous-Famille → Article</b>. Un seul fichier à charger chaque semaine, "
+        f"dans la barre latérale.</div>"
         f"<div class='iq'>"
         f"<b>Onglet Dashboard CODIR</b> — CA, marge, quantités vs N-1 · performance par rayon vs objectifs Méti · "
         f"top familles en baisse de CA / casse / poids promo<br>"
@@ -307,112 +314,111 @@ if up_rayon is None and up_art is None:
         f"</div>", unsafe_allow_html=True)
     st.stop()
 
+df, perimetre = load_export(up.getvalue())
+art = prep_articles(df)
+
+if perimetre:
+    with st.expander("🔎 Périmètre détecté dans le fichier"):
+        st.code(perimetre, language=None)
+
 tab1, tab2 = st.tabs(["📋 Dashboard CODIR", "💥 Destructeurs & Performeurs"])
 
 # ---------------- TAB 1 : DASHBOARD CODIR (RAYON) ----------------
 with tab1:
-    if up_rayon is None:
-        st.info("Chargez l'export **Rayon** dans la barre latérale pour afficher cette vue.")
+    k = kpis_globaux_rayon(df)
+    if k is None:
+        st.error("Ligne de total réseau ('Total') introuvable dans l'export — vérifiez le fichier.")
     else:
-        df_r = load_rayon(up_rayon.getvalue())
-        k = kpis_globaux_rayon(df_r)
-        if k is None:
-            st.error("Ligne de total réseau ('Total') introuvable dans l'export — vérifiez le fichier.")
-        else:
-            st.markdown("<div class='section-label'>VUE D'ENSEMBLE RÉSEAU</div>", unsafe_allow_html=True)
-            c1, c2, c3, c4, c5 = st.columns(5)
-            c1.markdown(kpi_card("CA", f"{fmt(k['ca'])} FCFA",
-                        f"{k['evol_ca']*100:+.1f}% vs N-1", "pos" if k['evol_ca'] >= 0 else "neg"), unsafe_allow_html=True)
-            c2.markdown(kpi_card("Marge", f"{fmt(k['marge'])} FCFA"), unsafe_allow_html=True)
-            evo_tx = k['tx_marge'] - k['tx_marge_n1'] if pd.notna(k['tx_marge_n1']) else np.nan
-            c3.markdown(kpi_card("Taux de marge", fmt_pct(k['tx_marge'], 2),
-                        fmt_delta(evo_tx), "pos" if (pd.notna(evo_tx) and evo_tx >= 0) else "neg"), unsafe_allow_html=True)
-            evo_qte = (k['qte']/k['qte_n1']-1)*100 if k['qte_n1'] else np.nan
-            c4.markdown(kpi_card("Qté vendue", fmt(k['qte']),
-                        f"{evo_qte:+.1f}% vs N-1" if pd.notna(evo_qte) else None,
-                        "pos" if (pd.notna(evo_qte) and evo_qte >= 0) else "neg"), unsafe_allow_html=True)
-            pct_casse = k['casse']/k['ca']*100 if k['ca'] else np.nan
-            c5.markdown(kpi_card("Casse", f"{fmt(k['casse'])} FCFA", fmt_pct(pct_casse, 2) + " du CA"), unsafe_allow_html=True)
+        st.markdown("<div class='section-label'>VUE D'ENSEMBLE RÉSEAU</div>", unsafe_allow_html=True)
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.markdown(kpi_card("CA", f"{fmt(k['ca'])} FCFA",
+                    f"{k['evol_ca']*100:+.1f}% vs N-1", "pos" if k['evol_ca'] >= 0 else "neg"), unsafe_allow_html=True)
+        c2.markdown(kpi_card("Marge", f"{fmt(k['marge'])} FCFA"), unsafe_allow_html=True)
+        evo_tx = k['tx_marge'] - k['tx_marge_n1'] if pd.notna(k['tx_marge_n1']) else np.nan
+        c3.markdown(kpi_card("Taux de marge", fmt_pct(k['tx_marge'], 2),
+                    fmt_delta(evo_tx), "pos" if (pd.notna(evo_tx) and evo_tx >= 0) else "neg"), unsafe_allow_html=True)
+        evo_qte = (k['qte']/k['qte_n1']-1)*100 if k['qte_n1'] else np.nan
+        c4.markdown(kpi_card("Qté vendue", fmt(k['qte']),
+                    f"{evo_qte:+.1f}% vs N-1" if pd.notna(evo_qte) else None,
+                    "pos" if (pd.notna(evo_qte) and evo_qte >= 0) else "neg"), unsafe_allow_html=True)
+        pct_casse = k['casse']/k['ca']*100 if k['ca'] else np.nan
+        c5.markdown(kpi_card("Casse", f"{fmt(k['casse'])} FCFA", fmt_pct(pct_casse, 2) + " du CA"), unsafe_allow_html=True)
 
-            st.markdown("<div class='section-label'>PERFORMANCE PAR RAYON VS OBJECTIFS MARGE (MÉTI)</div>", unsafe_allow_html=True)
-            perf = perf_par_rayon(df_r, CIBLES_DEFAUT)
-            disp = perf.copy()
-            for c in ['Évol CA %', 'Évol Qté %', 'Taux Marge %', 'Objectif %']:
-                disp[c] = disp[c].map(lambda v: fmt_pct(v))
-            disp['Écart (pts)'] = perf['Écart (pts)'].map(fmt_delta)
-            disp['CA'] = perf['CA'].map(lambda v: fmt(v))
-            st.dataframe(disp, use_container_width=True, hide_index=True)
+        st.markdown("<div class='section-label'>PERFORMANCE PAR RAYON VS OBJECTIFS MARGE (MÉTI)</div>", unsafe_allow_html=True)
+        perf = perf_par_rayon(df, CIBLES_DEFAUT)
+        disp = perf.copy()
+        for c in ['Évol CA %', 'Évol Qté %', 'Taux Marge %', 'Objectif %']:
+            disp[c] = disp[c].map(lambda v: fmt_pct(v))
+        disp['Écart (pts)'] = perf['Écart (pts)'].map(fmt_delta)
+        disp['CA'] = perf['CA'].map(lambda v: fmt(v))
+        st.dataframe(disp, use_container_width=True, hide_index=True)
 
-            st.markdown("<div class='section-label'>TOP FAMILLES À SURVEILLER</div>", unsafe_allow_html=True)
-            tcol1, tcol2, tcol3 = st.columns(3)
-            with tcol1:
-                st.markdown(f"**🔻 Top {min(5,n_top)} — Baisse de CA**")
-                t = top_familles(df_r, min(5, n_top), 'perte_ca')
-                t_disp = t.rename(columns={'Rayon_aff':'Rayon','Famille_aff':'Famille'})
-                t_disp['CA'] = t_disp['CA'].map(fmt); t_disp['CA N-1'] = t_disp['CA N-1'].map(fmt)
-                t_disp['Perte CA'] = t_disp['Perte CA'].map(fmt); t_disp['Tx Marge %'] = t_disp['Tx Marge %'].map(lambda v: fmt_pct(v))
-                st.dataframe(t_disp, hide_index=True, use_container_width=True)
-            with tcol2:
-                st.markdown(f"**📉 Top {min(5,n_top)} — Casse en valeur**")
-                t = top_familles(df_r, min(5, n_top), 'casse')
-                t_disp = t.rename(columns={'Rayon_aff':'Rayon','Famille_aff':'Famille','Casse (Valeur)':'Casse','%Casse (Valeur)':'% Casse'})
-                t_disp['CA'] = t_disp['CA'].map(fmt); t_disp['Casse'] = t_disp['Casse'].map(fmt)
-                t_disp['% Casse'] = t_disp['% Casse'].map(lambda v: fmt_pct(v*100, 2))
-                st.dataframe(t_disp, hide_index=True, use_container_width=True)
-            with tcol3:
-                st.markdown(f"**🎯 Top {min(5,n_top)} — Poids promo (CA>1M)**")
-                t = top_familles(df_r, min(5, n_top), 'promo')
-                t_disp = t.rename(columns={'Rayon_aff':'Rayon','Famille_aff':'Famille','%CA Poids Promo':'Poids Promo',
-                                             '%Marge Promo':'Tx M. Promo','%Marge Hors Promo':'Tx M. HP'})
-                t_disp['CA'] = t_disp['CA'].map(fmt)
-                for c in ['Poids Promo','Tx M. Promo','Tx M. HP']:
-                    t_disp[c] = t_disp[c].map(lambda v: fmt_pct(v*100))
-                st.dataframe(t_disp, hide_index=True, use_container_width=True)
+        st.markdown("<div class='section-label'>TOP FAMILLES À SURVEILLER</div>", unsafe_allow_html=True)
+        tcol1, tcol2, tcol3 = st.columns(3)
+        with tcol1:
+            st.markdown(f"**🔻 Top {min(5,n_top)} — Baisse de CA**")
+            t = top_familles(df, min(5, n_top), 'perte_ca')
+            t_disp = t.rename(columns={'Rayon_aff':'Rayon','Famille_aff':'Famille'})
+            t_disp['CA'] = t_disp['CA'].map(fmt); t_disp['CA N-1'] = t_disp['CA N-1'].map(fmt)
+            t_disp['Perte CA'] = t_disp['Perte CA'].map(fmt); t_disp['Tx Marge %'] = t_disp['Tx Marge %'].map(lambda v: fmt_pct(v))
+            st.dataframe(t_disp, hide_index=True, use_container_width=True)
+        with tcol2:
+            st.markdown(f"**📉 Top {min(5,n_top)} — Casse en valeur**")
+            t = top_familles(df, min(5, n_top), 'casse')
+            t_disp = t.rename(columns={'Rayon_aff':'Rayon','Famille_aff':'Famille','Casse (Valeur)':'Casse','%Casse (Valeur)':'% Casse'})
+            t_disp['CA'] = t_disp['CA'].map(fmt); t_disp['Casse'] = t_disp['Casse'].map(fmt)
+            t_disp['% Casse'] = t_disp['% Casse'].map(lambda v: fmt_pct(v*100, 2))
+            st.dataframe(t_disp, hide_index=True, use_container_width=True)
+        with tcol3:
+            st.markdown(f"**🎯 Top {min(5,n_top)} — Poids promo (CA>1M)**")
+            t = top_familles(df, min(5, n_top), 'promo')
+            t_disp = t.rename(columns={'Rayon_aff':'Rayon','Famille_aff':'Famille','%CA Poids Promo':'Poids Promo',
+                                         '%Marge Promo':'Tx M. Promo','%Marge Hors Promo':'Tx M. HP'})
+            t_disp['CA'] = t_disp['CA'].map(fmt)
+            for c in ['Poids Promo','Tx M. Promo','Tx M. HP']:
+                t_disp[c] = t_disp[c].map(lambda v: fmt_pct(v*100))
+            st.dataframe(t_disp, hide_index=True, use_container_width=True)
 
-            st.markdown("<div class='section-label'>EXPORT</div>", unsafe_allow_html=True)
-            xls = build_excel_codir(k, perf, None)
-            st.download_button("📥 Télécharger le récap CODIR (.xlsx)", xls,
-                                file_name="CODIR_Hebdo_Rayon.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        st.markdown("<div class='section-label'>EXPORT</div>", unsafe_allow_html=True)
+        xls = build_excel_codir(k, perf, None)
+        st.download_button("📥 Télécharger le récap CODIR (.xlsx)", xls,
+                            file_name="CODIR_Hebdo_Rayon.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 # ---------------- TAB 2 : DESTRUCTEURS & PERFORMEURS (ARTICLE) ----------------
 with tab2:
-    if up_art is None:
-        st.info("Chargez l'export **Article** dans la barre latérale pour afficher cette vue.")
-    else:
-        art = load_articles(up_art.getvalue())
-        st.caption(f"{len(art):,} lignes article chargées · seuil de matérialité : {fmt(seuil_ca)} FCFA "
-                   f"(modifiable dans la barre latérale)".replace(",", " "))
-        res = destructeurs_performeurs(art, n=n_top, seuil_ca=seuil_ca)
+    st.caption(f"{len(art):,} lignes article chargées · seuil de matérialité : {fmt(seuil_ca)} FCFA "
+               f"(modifiable dans la barre latérale)".replace(",", " "))
+    res = destructeurs_performeurs(art, n=n_top, seuil_ca=seuil_ca)
 
-        st.markdown(f"<span class='badge' style='background:#FFD6D4;color:{RED}'>A · Marge négative</span>", unsafe_allow_html=True)
-        show_table(res['A_marge_neg'], ['CA','Marge','Tx Marge %','Qté Vente'],
-                   {'CA': fmt, 'Marge': fmt, 'Tx Marge %': lambda v: fmt_pct(v), 'Qté Vente': fmt})
+    st.markdown(f"<span class='badge' style='background:#FFD6D4;color:{RED}'>A · Marge négative</span>", unsafe_allow_html=True)
+    show_table(res['A_marge_neg'], ['CA','Marge','Tx Marge %','Qté Vente'],
+               {'CA': fmt, 'Marge': fmt, 'Tx Marge %': lambda v: fmt_pct(v), 'Qté Vente': fmt})
 
-        st.markdown(f"<span class='badge' style='background:#FFD6D4;color:{RED}'>B · Dégradation du taux de marge (marge encore positive)</span>", unsafe_allow_html=True)
-        show_table(res['B_degrad_marge'], ['CA','Tx Marge %','Écart Tx Marge (pts)'],
-                   {'CA': fmt, 'Tx Marge %': lambda v: fmt_pct(v), 'Écart Tx Marge (pts)': fmt_delta})
+    st.markdown(f"<span class='badge' style='background:#FFD6D4;color:{RED}'>B · Dégradation du taux de marge (marge encore positive)</span>", unsafe_allow_html=True)
+    show_table(res['B_degrad_marge'], ['CA','Tx Marge %','Écart Tx Marge (pts)'],
+               {'CA': fmt, 'Tx Marge %': lambda v: fmt_pct(v), 'Écart Tx Marge (pts)': fmt_delta})
 
-        st.markdown(f"<span class='badge' style='background:#D7F5DE;color:#1A7A3A'>C · Performeurs — gain de marge en valeur</span>", unsafe_allow_html=True)
-        show_table(res['C_perf_gain_marge'], ['CA','Gain Marge (FCFA)','Tx Marge %'],
-                   {'CA': fmt, 'Gain Marge (FCFA)': fmt, 'Tx Marge %': lambda v: fmt_pct(v)})
+    st.markdown(f"<span class='badge' style='background:#D7F5DE;color:#1A7A3A'>C · Performeurs — gain de marge en valeur</span>", unsafe_allow_html=True)
+    show_table(res['C_perf_gain_marge'], ['CA','Gain Marge (FCFA)','Tx Marge %'],
+               {'CA': fmt, 'Gain Marge (FCFA)': fmt, 'Tx Marge %': lambda v: fmt_pct(v)})
 
-        st.markdown(f"<span class='badge' style='background:#D7F5DE;color:#1A7A3A'>D · Plus forte croissance de CA</span>", unsafe_allow_html=True)
-        d4 = res['D_croissance_ca'].copy()
-        if not d4.empty:
-            d4['Évol CA %'] = (d4['CA']/d4['CA N-1']-1)*100
-        show_table(d4, ['CA','CA N-1','Évol CA %','Tx Marge %'],
-                   {'CA': fmt, 'CA N-1': fmt, 'Évol CA %': lambda v: fmt_pct(v), 'Tx Marge %': lambda v: fmt_pct(v)})
-        st.caption("⚠️ Une forte évolution % peut refléter un effet de base (article quasi absent en N-1) plutôt qu'une vraie dynamique.")
+    st.markdown(f"<span class='badge' style='background:#D7F5DE;color:#1A7A3A'>D · Plus forte croissance de CA</span>", unsafe_allow_html=True)
+    d4 = res['D_croissance_ca'].copy()
+    if not d4.empty:
+        d4['Évol CA %'] = (d4['CA']/d4['CA N-1']-1)*100
+    show_table(d4, ['CA','CA N-1','Évol CA %','Tx Marge %'],
+               {'CA': fmt, 'CA N-1': fmt, 'Évol CA %': lambda v: fmt_pct(v), 'Tx Marge %': lambda v: fmt_pct(v)})
+    st.caption("⚠️ Une forte évolution % peut refléter un effet de base (article quasi absent en N-1) plutôt qu'une vraie dynamique.")
 
-        st.markdown(f"<span class='badge' style='background:#FFD6D4;color:{RED}'>E · Plus forte baisse de CA</span>", unsafe_allow_html=True)
-        show_table(res['E_baisse_ca'], ['CA','CA N-1','Perte CA (FCFA)'],
-                   {'CA': fmt, 'CA N-1': fmt, 'Perte CA (FCFA)': fmt})
+    st.markdown(f"<span class='badge' style='background:#FFD6D4;color:{RED}'>E · Plus forte baisse de CA</span>", unsafe_allow_html=True)
+    show_table(res['E_baisse_ca'], ['CA','CA N-1','Perte CA (FCFA)'],
+               {'CA': fmt, 'CA N-1': fmt, 'Perte CA (FCFA)': fmt})
 
-        st.markdown(f"<span class='badge' style='background:#D7F5DE;color:#1A7A3A'>F · Plus forte hausse de quantité vendue</span>", unsafe_allow_html=True)
-        show_table(res['F_hausse_qte'], ['Qté Vente','Qté Vente N-1','Variation Qté','CA'],
-                   {'Qté Vente': fmt, 'Qté Vente N-1': fmt, 'Variation Qté': lambda v: f"{v:+,.0f}".replace(",", " "), 'CA': fmt})
+    st.markdown(f"<span class='badge' style='background:#D7F5DE;color:#1A7A3A'>F · Plus forte hausse de quantité vendue</span>", unsafe_allow_html=True)
+    show_table(res['F_hausse_qte'], ['Qté Vente','Qté Vente N-1','Variation Qté','CA'],
+               {'Qté Vente': fmt, 'Qté Vente N-1': fmt, 'Variation Qté': lambda v: f"{v:+,.0f}".replace(",", " "), 'CA': fmt})
 
-        st.markdown(f"<span class='badge' style='background:#FFD6D4;color:{RED}'>G · Plus forte baisse de quantité vendue</span>", unsafe_allow_html=True)
-        show_table(res['G_baisse_qte'], ['Qté Vente','Qté Vente N-1','Variation Qté','CA'],
-                   {'Qté Vente': fmt, 'Qté Vente N-1': fmt, 'Variation Qté': lambda v: f"{v:+,.0f}".replace(",", " "), 'CA': fmt})
+    st.markdown(f"<span class='badge' style='background:#FFD6D4;color:{RED}'>G · Plus forte baisse de quantité vendue</span>", unsafe_allow_html=True)
+    show_table(res['G_baisse_qte'], ['Qté Vente','Qté Vente N-1','Variation Qté','CA'],
+               {'Qté Vente': fmt, 'Qté Vente N-1': fmt, 'Variation Qté': lambda v: f"{v:+,.0f}".replace(",", " "), 'CA': fmt})
