@@ -69,6 +69,13 @@ hr {{ border-color: #E5E5EA !important; margin: 1rem 0 !important; }}
 .info-box .ip {{ font-size:13px; color:#1C1C1E; line-height:1.6; }}
 .info-box .iq {{ margin-top:14px; font-size:13px; color:#1C1C1E; line-height:1.9; }}
 
+.recap-card {{ background:#FFFFFF; border-radius:12px; padding:14px 18px; margin-bottom:18px;
+              border:1px solid #E5E5EA; box-shadow:0 1px 3px rgba(0,0,0,0.04); }}
+.recap-line1 {{ font-size:15px; font-weight:700; color:{DARK}; letter-spacing:-0.01em; line-height:1.5; }}
+.recap-line2 {{ font-size:13px; color:{DARK}; margin-top:8px; padding-top:8px;
+               border-top:1px solid #F0F0F2; line-height:1.5; }}
+.recap-line2 b {{ color:{BLUE}; }}
+
 .badge {{ display:inline-block; padding:2px 10px; border-radius:6px; font-size:11px; font-weight:600; }}
 </style>
 """, unsafe_allow_html=True)
@@ -186,7 +193,32 @@ def family_metrics(df):
     sub['Écart Tx Marge (pts)'] = sub['Tx Marge %'] - sub['Tx Marge N-1 %']
     return sub
 
-def top_familles(df, n=5, by='perte_ca'):
+def build_headline(k, perf, fam):
+    """Récap en 2 lignes : ligne 1 = synthèse complète des KPIs, ligne 2 = point d'attention prioritaire."""
+    evol_ca = k['evol_ca'] * 100 if pd.notna(k['evol_ca']) else np.nan
+    evo_tx = k['tx_marge'] - k['tx_marge_n1'] if pd.notna(k['tx_marge_n1']) else np.nan
+    evol_qte = (k['qte']/k['qte_n1'] - 1) * 100 if k['qte_n1'] else np.nan
+    pct_casse = k['casse']/k['ca']*100 if k['ca'] else np.nan
+
+    line1 = (
+        f"CA {fmt(k['ca'])} FCFA ({evol_ca:+.1f}%) &nbsp;·&nbsp; "
+        f"Marge {fmt(k['marge'])} FCFA, taux {k['tx_marge']:.1f}% ({fmt_delta(evo_tx)}) &nbsp;·&nbsp; "
+        f"Qté {fmt(k['qte'])} ({evol_qte:+.1f}%) &nbsp;·&nbsp; "
+        f"Casse {pct_casse:.2f}% du CA &nbsp;·&nbsp; "
+        f"Promo {k['poids_promo']:.1f}% du CA"
+    )
+
+    bits = []
+    if perf is not None and perf['Écart (pts)'].notna().any():
+        wr = perf.loc[perf['Écart (pts)'].idxmin()]
+        bits.append(f"rayon à surveiller : <b>{wr['Rayon']}</b> ({fmt_delta(wr['Écart (pts)'])} vs objectif)")
+    if fam is not None and len(fam) and fam['Perte CA'].notna().any():
+        wf = fam.loc[fam['Perte CA'].idxmin()]
+        bits.append(f"famille la plus en repli : <b>{wf['Famille_aff']}</b> ({fmt(wf['Perte CA'])} FCFA vs N-1)")
+    line2 = "📌 " + " &nbsp;·&nbsp; ".join(bits) if bits else ""
+    return line1, line2
+
+
     """Top/Flop N familles selon le critère choisi (conserve la version courte pour compatibilité)."""
     sub = family_metrics(df)
     if by == 'perte_ca':
@@ -350,6 +382,14 @@ with tab1:
     if k is None:
         st.error("Ligne de total réseau ('Total') introuvable dans l'export — vérifiez le fichier.")
     else:
+        perf = perf_par_rayon(df, CIBLES_DEFAUT)
+        fam = family_metrics(df)
+        line1, line2 = build_headline(k, perf, fam)
+        st.markdown(
+            f"<div class='recap-card'><div class='recap-line1'>{line1}</div>"
+            + (f"<div class='recap-line2'>{line2}</div>" if line2 else "")
+            + "</div>", unsafe_allow_html=True)
+
         st.markdown("<div class='section-label'>VUE D'ENSEMBLE RÉSEAU</div>", unsafe_allow_html=True)
         c1, c2, c3, c4, c5 = st.columns(5)
         c1.markdown(kpi_card("CA", f"{fmt(k['ca'])} FCFA",
@@ -366,7 +406,6 @@ with tab1:
         c5.markdown(kpi_card("Casse", f"{fmt(k['casse'])} FCFA", fmt_pct(pct_casse, 2) + " du CA"), unsafe_allow_html=True)
 
         st.markdown("<div class='section-label'>PERFORMANCE PAR RAYON VS OBJECTIFS MARGE (MÉTI)</div>", unsafe_allow_html=True)
-        perf = perf_par_rayon(df, CIBLES_DEFAUT)
         disp = perf.copy()
         for c in ['Évol CA %', 'Évol Qté %', 'Taux Marge %', 'Objectif %']:
             disp[c] = disp[c].map(lambda v: fmt_pct(v))
@@ -375,7 +414,6 @@ with tab1:
         st.dataframe(disp, use_container_width=True, hide_index=True)
 
         st.markdown("<div class='section-label'>TOP & FLOP PAR FAMILLE</div>", unsafe_allow_html=True)
-        fam = family_metrics(df)
 
         def pair(title_top, title_flop, metric, cols, fmt_map, ca_floor=0):
             cA, cB = st.columns(2)
