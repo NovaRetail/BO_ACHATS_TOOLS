@@ -1,5 +1,5 @@
 """
-15_📋_CODIR_Hebdo.py — Module CODIR Hebdo · SmartBuyer Hub
+15_📋_COPIL_Hebdo.py — Module COPIL Hebdo · SmartBuyer Hub
 Vue réseau (Rayon) + Destructeurs/Performeurs (Article) sur exports PowerBI hebdo.
 Deux exports indépendants : Rayon→Famille→Sous-Famille, et Rayon→Famille→Sous-Famille→Article.
 """
@@ -16,7 +16,7 @@ from openpyxl.formatting.rule import CellIsRule
 # ============================================================
 # CONFIG & CHARTE (identique au reste du Hub)
 # ============================================================
-st.set_page_config(page_title="CODIR Hebdo", page_icon="📋", layout="wide")
+st.set_page_config(page_title="COPIL Hebdo", page_icon="📋", layout="wide")
 
 BLUE = "#007AFF"
 GREEN = "#34C759"
@@ -309,10 +309,10 @@ def show_table(d, extra_cols, fmt_map=None):
 
 # ============================================================
 # EXPORT EXCEL (valeurs figées — recalcul natif via Data_Semaine/Data_Articles
-# conseillé pour le suivi hebdo continu, ce bouton sert aux exports ponctuels CODIR)
+# conseillé pour le suivi hebdo continu, ce bouton sert aux exports ponctuels COPIL)
 # ============================================================
 def build_excel_full(k, perf, fam, n_top, art_res, perimetre):
-    """Reproduit le classeur de référence : Dashboard CODIR (5+ sections) + Destructeurs & Performeurs (A-G)."""
+    """Reproduit le classeur de référence : Dashboard COPIL (5+ sections) + Destructeurs & Performeurs (A-G)."""
     BLUE_H = "FF007AFF"; DARK_H = "FF1C1C1E"; RED_H = "FFFF3B30"; GREEN_H = "FF34C759"
     WHITE_H = "FFFFFFFF"; LGREY_H = "FFE5E5EA"; ARIAL = "Arial"
     thin = Side(style="thin", color="FFD1D1D6")
@@ -348,12 +348,12 @@ def build_excel_full(k, perf, fam, n_top, art_res, perimetre):
 
     wb = Workbook()
 
-    # ============== FEUILLE 1 : DASHBOARD CODIR ==============
+    # ============== FEUILLE 1 : DASHBOARD COPIL ==============
     ws = wb.active
-    ws.title = "Dashboard CODIR"
+    ws.title = "Dashboard COPIL"
     ws.sheet_view.showGridLines = False
     ws.merge_cells("A1:H1")
-    ws["A1"] = "DASHBOARD CODIR HEBDO — PGC (Épicerie · Boissons · Droguerie · Parfumerie Hygiène)"
+    ws["A1"] = "DASHBOARD COPIL HEBDO — PGC (Épicerie · Boissons · Droguerie · Parfumerie Hygiène)"
     ws["A1"].font = Font(name=ARIAL, bold=True, size=14, color=WHITE_H)
     ws["A1"].fill = PatternFill("solid", fgColor=BLUE_H)
     ws["A1"].alignment = Alignment(horizontal="left", vertical="center", indent=1)
@@ -533,7 +533,7 @@ def top_familles_for_excel(fam, n, by):
 # ============================================================
 # INTERFACE
 # ============================================================
-st.markdown("<div class='page-title'>📋 Module CODIR Hebdo</div>"
+st.markdown("<div class='page-title'>📋 Module COPIL Hebdo</div>"
             "<div class='page-caption'>Vue réseau PGC (Rayon) + Destructeurs/Performeurs (Article) · "
             "objectifs marge alignés Méti · une seule extraction à charger</div>", unsafe_allow_html=True)
 st.markdown("<hr>", unsafe_allow_html=True)
@@ -548,17 +548,17 @@ with st.sidebar:
     n_top = st.slider("Nombre de lignes par classement", 5, 30, 15)
     seuil_ca = st.number_input("Seuil CA mini — performeurs/croissance (FCFA)", 0, 5_000_000, 100_000, step=10_000)
     st.markdown("---")
-    st.caption("SmartBuyer Hub · Module CODIR Hebdo")
+    st.caption("SmartBuyer Hub · Module COPIL Hebdo")
 
 if up is None:
     st.markdown(
         f"<div class='info-box'>"
         f"<div class='it'>ℹ️ À quoi sert ce module ?</div>"
-        f"<div class='ip'>Ce module prépare le point hebdo réseau pour le CODIR à partir de l'export PBI "
+        f"<div class='ip'>Ce module prépare le point hebdo réseau pour le COPIL à partir de l'export PBI "
         f"<b>Rayon → Famille → Sous-Famille → Article</b>. Un seul fichier à charger chaque semaine, "
         f"dans la barre latérale.</div>"
         f"<div class='iq'>"
-        f"<b>Onglet Dashboard CODIR</b> — CA, marge, quantités vs N-1 · performance par rayon vs objectifs Méti · "
+        f"<b>Onglet Dashboard COPIL</b> — CA, marge, quantités vs N-1 · performance par rayon vs objectifs Méti · "
         f"top familles en baisse de CA / casse / poids promo<br>"
         f"<b>Onglet Destructeurs &amp; Performeurs</b> — articles en marge négative, dégradation de taux de marge, "
         f"gain de marge, croissance/baisse de CA et de quantité</div>"
@@ -572,9 +572,9 @@ if perimetre:
     with st.expander("🔎 Périmètre détecté dans le fichier"):
         st.code(perimetre, language=None)
 
-tab1, tab2 = st.tabs(["📋 Dashboard CODIR", "💥 Destructeurs & Performeurs"])
+tab1, tab2 = st.tabs(["📋 Dashboard COPIL", "💥 Destructeurs & Performeurs"])
 
-# ---------------- TAB 1 : DASHBOARD CODIR (RAYON) ----------------
+# ---------------- TAB 1 : DASHBOARD COPIL (RAYON) ----------------
 with tab1:
     k = kpis_globaux_rayon(df)
     if k is None:
@@ -678,10 +678,10 @@ with tab1:
         st.markdown("<div class='section-label'>EXPORT</div>", unsafe_allow_html=True)
         art_res_export = destructeurs_performeurs(art, n=n_top, seuil_ca=seuil_ca)
         xls = build_excel_full(k, perf, fam, n_top, art_res_export, perimetre)
-        st.download_button("📥 Télécharger le récap complet CODIR + Articles (.xlsx)", xls,
-                            file_name="CODIR_Hebdo.xlsx",
+        st.download_button("📥 Télécharger le récap complet COPIL + Articles (.xlsx)", xls,
+                            file_name="COPIL_Hebdo.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        st.caption("Le fichier contient 2 feuilles : Dashboard CODIR (réseau/rayon/famille) "
+        st.caption("Le fichier contient 2 feuilles : Dashboard COPIL (réseau/rayon/famille) "
                    "et Destructeurs & Performeurs (article).")
 
 # ---------------- TAB 2 : DESTRUCTEURS & PERFORMEURS (ARTICLE) ----------------
