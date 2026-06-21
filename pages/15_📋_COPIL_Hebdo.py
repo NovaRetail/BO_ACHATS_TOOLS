@@ -242,10 +242,15 @@ def top_familles(df, n=5, by='perte_ca'):
         out = mat.nlargest(n, '%CA Poids Promo')[['Rayon_aff','Famille_aff','CA','%CA Poids Promo','%Marge Promo','%Marge Hors Promo']]
     return out.reset_index(drop=True)
 
-def top_flop_table(sub, metric, n, mode, cols, ca_floor=0):
-    """mode='top' -> nlargest, mode='flop' -> nsmallest. ca_floor filtre les familles trop petites (bruit)."""
+def top_flop_table(sub, metric, n, mode, cols, ca_floor=0, directional=True):
+    """mode='top' -> nlargest, mode='flop' -> nsmallest. ca_floor filtre les familles trop petites (bruit).
+    directional=True : un Top n'a de sens que pour les valeurs > 0 (gain réel), un Flop que pour les
+    valeurs < 0 (perte réelle) — on ne complète jamais avec des lignes du mauvais côté de zéro juste
+    pour atteindre n lignes. directional=False : métrique de niveau (ex. taux de marge), pas de plafond."""
     base = sub[sub['CA'] > ca_floor] if ca_floor else sub
     base = base[base[metric].notna()]
+    if directional:
+        base = base[base[metric] > 0] if mode == 'top' else base[base[metric] < 0]
     out = base.nlargest(n, metric) if mode == 'top' else base.nsmallest(n, metric)
     return out[['Rayon_aff','Famille_aff'] + cols].reset_index(drop=True)
 
@@ -281,14 +286,20 @@ def destructeurs_performeurs(art, n=15, seuil_ca=100_000):
     res = {}
     res['A_marge_neg'] = art[art['Marge'] < 0].nsmallest(n, 'Marge')
     pos = art[art['Marge'] >= 0].copy()
-    res['B_degrad_marge'] = pos[pos['Écart Tx Marge (pts)'].notna()].nsmallest(n, 'Écart Tx Marge (pts)')
+    deg = pos[pos['Écart Tx Marge (pts)'].notna() & (pos['Écart Tx Marge (pts)'] < 0)]
+    res['B_degrad_marge'] = deg.nsmallest(n, 'Écart Tx Marge (pts)')
     mat = art[art['CA'] > seuil_ca]
-    res['C_perf_gain_marge'] = mat.nlargest(n, 'Gain Marge (FCFA)')
+    gain = mat[mat['Gain Marge (FCFA)'].notna() & (mat['Gain Marge (FCFA)'] > 0)]
+    res['C_perf_gain_marge'] = gain.nlargest(n, 'Gain Marge (FCFA)')
     mat_n1 = mat[mat['CA N-1'] > 0].assign(_evol=lambda d: d['CA']/d['CA N-1']-1)
-    res['D_croissance_ca'] = mat_n1.nlargest(n, '_evol')
-    res['E_baisse_ca'] = art.nsmallest(n, 'Perte CA (FCFA)')
-    res['F_hausse_qte'] = art.nlargest(n, 'Variation Qté')
-    res['G_baisse_qte'] = art.nsmallest(n, 'Variation Qté')
+    mat_n1_pos = mat_n1[mat_n1['_evol'] > 0]
+    res['D_croissance_ca'] = mat_n1_pos.nlargest(n, '_evol')
+    baisse = art[art['Perte CA (FCFA)'] < 0]
+    res['E_baisse_ca'] = baisse.nsmallest(n, 'Perte CA (FCFA)')
+    hausse_q = art[art['Variation Qté'] > 0]
+    res['F_hausse_qte'] = hausse_q.nlargest(n, 'Variation Qté')
+    baisse_q = art[art['Variation Qté'] < 0]
+    res['G_baisse_qte'] = baisse_q.nsmallest(n, 'Variation Qté')
     return res
 
 DISPLAY_COLS = ['Rayon_aff','Famille_aff','SousFamille_aff','Article_aff']
@@ -456,7 +467,7 @@ def build_excel_full(k, perf, fam, n_top, art_res, perimetre):
             r += 1
         r += 1
 
-    top_section(f"4.  TOP {n_top} — PLUS FORTE BAISSE DE CA (par Famille)",
+    top_section(f"4.  FLOP {n_top} — PLUS FORTE BAISSE DE CA (par Famille)",
                 top_flop_table(fam, 'Perte CA', n_top, 'flop', ['CA','CA N-1','Évol CA %','Perte CA','Tx Marge %']),
                 {'Rayon_aff':'Rayon','Famille_aff':'Famille','CA':'CA (FCFA)','CA N-1':'CA N-1','Évol CA %':'Évol %','Perte CA':'Perte (FCFA)','Tx Marge %':'Taux Marge'},
                 {'CA':'amount','CA N-1':'amount','Évol CA %':'pct100','Perte CA':'amount','Tx Marge %':'pct100'})
@@ -467,7 +478,7 @@ def build_excel_full(k, perf, fam, n_top, art_res, perimetre):
                 {'CA':'amount','CA N-1':'amount','Évol CA %':'pct100','Perte CA':'amount','Tx Marge %':'pct100'},
                 color=GREEN_H)
 
-    top_section(f"6.  TOP {n_top} — CASSE EN VALEUR (par Famille)",
+    top_section(f"6.  FLOP {n_top} — CASSE EN VALEUR (par Famille)",
                 top_familles_for_excel(fam, n_top, 'casse'),
                 {'Rayon_aff':'Rayon','Famille_aff':'Famille','CA':'CA (FCFA)','Casse (Valeur)':'Casse (FCFA)','%Casse (Valeur)':'% Casse'},
                 {'CA':'amount','Casse (Valeur)':'amount','%Casse (Valeur)':'pct1'})
@@ -523,11 +534,11 @@ def build_excel_full(k, perf, fam, n_top, art_res, perimetre):
         r2 += 1
 
     cm_neg = {'Rayon_aff':'Rayon','Famille_aff':'Famille','SousFamille_aff':'Sous Famille','Article_aff':'Article','CA':'CA','Marge':'Marge','Tx Marge %':'Taux Marge'}
-    art_section(f"A.  TOP {n_top} — ARTICLES EN MARGE NÉGATIVE", art_res['A_marge_neg'], cm_neg,
+    art_section(f"A.  FLOP {n_top} — ARTICLES EN MARGE NÉGATIVE", art_res['A_marge_neg'], cm_neg,
                 {'CA':'amount','Marge':'amount','Tx Marge %':'pct100'}, RED_H)
 
     cm_deg = {'Rayon_aff':'Rayon','Famille_aff':'Famille','SousFamille_aff':'Sous Famille','Article_aff':'Article','CA':'CA','Tx Marge %':'Taux Marge','Écart Tx Marge (pts)':'Écart pts'}
-    art_section(f"B.  TOP {n_top} — DÉGRADATION DU TAUX DE MARGE (marge encore positive)", art_res['B_degrad_marge'], cm_deg,
+    art_section(f"B.  FLOP {n_top} — DÉGRADATION DU TAUX DE MARGE (marge encore positive)", art_res['B_degrad_marge'], cm_deg,
                 {'CA':'amount','Tx Marge %':'pct100','Écart Tx Marge (pts)':'pts'}, RED_H)
 
     cm_gain = {'Rayon_aff':'Rayon','Famille_aff':'Famille','SousFamille_aff':'Sous Famille','Article_aff':'Article','CA':'CA','Gain Marge (FCFA)':'Gain Marge','Tx Marge %':'Taux Marge'}
@@ -542,13 +553,13 @@ def build_excel_full(k, perf, fam, n_top, art_res, perimetre):
                 {'CA':'amount','CA N-1':'amount','Évol CA %':'pct100','Tx Marge %':'pct100'}, GREEN_H)
 
     cm_baisse = {'Rayon_aff':'Rayon','Famille_aff':'Famille','SousFamille_aff':'Sous Famille','Article_aff':'Article','CA':'CA','CA N-1':'CA N-1','Perte CA (FCFA)':'Perte (FCFA)'}
-    art_section(f"E.  TOP {n_top} — PLUS FORTE BAISSE DE CA", art_res['E_baisse_ca'], cm_baisse,
+    art_section(f"E.  FLOP {n_top} — PLUS FORTE BAISSE DE CA", art_res['E_baisse_ca'], cm_baisse,
                 {'CA':'amount','CA N-1':'amount','Perte CA (FCFA)':'amount'}, RED_H)
 
     cm_qte = {'Rayon_aff':'Rayon','Famille_aff':'Famille','SousFamille_aff':'Sous Famille','Article_aff':'Article','Qté Vente':'Qté Vente','Qté Vente N-1':'Qté N-1','Variation Qté':'Variation','CA':'CA'}
     kinds_qte = {'Qté Vente':'qty','Qté Vente N-1':'qty','Variation Qté':'amount_signed','CA':'amount'}
     art_section(f"F.  TOP {n_top} — PLUS FORTE HAUSSE DE QUANTITÉ VENDUE", art_res['F_hausse_qte'], cm_qte, kinds_qte, GREEN_H)
-    art_section(f"G.  TOP {n_top} — PLUS FORTE BAISSE DE QUANTITÉ VENDUE", art_res['G_baisse_qte'], cm_qte, kinds_qte, RED_H)
+    art_section(f"G.  FLOP {n_top} — PLUS FORTE BAISSE DE QUANTITÉ VENDUE", art_res['G_baisse_qte'], cm_qte, kinds_qte, RED_H)
 
     autosize(ws2, {'A':7,'B':20,'C':24,'D':22,'E':38,'F':13,'G':13,'H':13,'I':13})
 
@@ -660,22 +671,28 @@ with tab1:
 
         st.markdown("<div class='section-label'>TOP & FLOP PAR FAMILLE</div>", unsafe_allow_html=True)
 
-        def pair(title_top, title_flop, metric, cols, fmt_map, ca_floor=0):
+        def pair(title_top, title_flop, metric, cols, fmt_map, ca_floor=0, directional=True):
             cA, cB = st.columns(2)
             with cA:
                 st.markdown(f"**🟢 {title_top}**")
-                t = top_flop_table(fam, metric, n_top, 'top', cols, ca_floor)
+                t = top_flop_table(fam, metric, n_top, 'top', cols, ca_floor, directional)
                 t = t.rename(columns={'Rayon_aff':'Rayon','Famille_aff':'Famille'})
-                for c, f in fmt_map.items():
-                    if c in t.columns: t[c] = t[c].map(f)
-                st.dataframe(t, hide_index=True, use_container_width=True)
+                if t.empty:
+                    st.caption("Aucune famille ne respecte ce sens sur la période.")
+                else:
+                    for c, f in fmt_map.items():
+                        if c in t.columns: t[c] = t[c].map(f)
+                    st.dataframe(t, hide_index=True, use_container_width=True)
             with cB:
                 st.markdown(f"**🔴 {title_flop}**")
-                t = top_flop_table(fam, metric, n_top, 'flop', cols, ca_floor)
+                t = top_flop_table(fam, metric, n_top, 'flop', cols, ca_floor, directional)
                 t = t.rename(columns={'Rayon_aff':'Rayon','Famille_aff':'Famille'})
-                for c, f in fmt_map.items():
-                    if c in t.columns: t[c] = t[c].map(f)
-                st.dataframe(t, hide_index=True, use_container_width=True)
+                if t.empty:
+                    st.caption("Aucune famille ne respecte ce sens sur la période.")
+                else:
+                    for c, f in fmt_map.items():
+                        if c in t.columns: t[c] = t[c].map(f)
+                    st.dataframe(t, hide_index=True, use_container_width=True)
 
         st.markdown("##### 📈 Évolution du CA (classement en valeur FCFA)")
         pair(f"Top {n_top} — Meilleur gain de CA", f"Flop {n_top} — Plus forte perte de CA",
@@ -685,7 +702,7 @@ with tab1:
         st.markdown("##### 💰 Taux de marge")
         pair(f"Top {n_top} — Meilleur taux de marge", f"Flop {n_top} — Taux de marge le plus faible",
              'Tx Marge %', ['CA','Marge','Tx Marge %'],
-             {'CA': fmt, 'Marge': fmt, 'Tx Marge %': lambda v: fmt_pct(v)}, ca_floor=1_000_000)
+             {'CA': fmt, 'Marge': fmt, 'Tx Marge %': lambda v: fmt_pct(v)}, ca_floor=1_000_000, directional=False)
 
         st.markdown("##### 📊 Évolution du taux de marge (pts vs N-1)")
         pair(f"Top {n_top} — Meilleure progression", f"Flop {n_top} — Plus forte dégradation",
