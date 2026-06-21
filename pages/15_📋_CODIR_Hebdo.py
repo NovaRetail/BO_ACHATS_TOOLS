@@ -11,6 +11,7 @@ import io
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
+from openpyxl.formatting.rule import CellIsRule
 
 # ============================================================
 # CONFIG & CHARTE (identique au reste du Hub)
@@ -310,38 +311,224 @@ def show_table(d, extra_cols, fmt_map=None):
 # EXPORT EXCEL (valeurs figées — recalcul natif via Data_Semaine/Data_Articles
 # conseillé pour le suivi hebdo continu, ce bouton sert aux exports ponctuels CODIR)
 # ============================================================
-def build_excel_codir(kpis, perf_rayon, tops):
+def build_excel_full(k, perf, fam, n_top, art_res, perimetre):
+    """Reproduit le classeur de référence : Dashboard CODIR (5+ sections) + Destructeurs & Performeurs (A-G)."""
+    BLUE_H = "FF007AFF"; DARK_H = "FF1C1C1E"; RED_H = "FFFF3B30"; GREEN_H = "FF34C759"
+    WHITE_H = "FFFFFFFF"; LGREY_H = "FFE5E5EA"; ARIAL = "Arial"
+    thin = Side(style="thin", color="FFD1D1D6")
+    box = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    def section_bar(ws, row, ncols, text, color=DARK_H):
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=ncols)
+        c = ws.cell(row=row, column=1, value=text)
+        c.font = Font(name=ARIAL, bold=True, size=11, color=WHITE_H)
+        c.fill = PatternFill("solid", fgColor=color)
+        c.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+        ws.row_dimensions[row].height = 20
+
+    def header_row(ws, row, labels):
+        for i, lbl in enumerate(labels, start=1):
+            c = ws.cell(row=row, column=i, value=lbl)
+            c.font = Font(name=ARIAL, bold=True, size=10, color=WHITE_H)
+            c.fill = PatternFill("solid", fgColor=BLUE_H)
+            c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    def data_row(ws, row, values, zebra=False, left_cols=()):
+        fillc = LGREY_H if zebra else "FFFFFFFF"
+        for i, v in enumerate(values, start=1):
+            c = ws.cell(row=row, column=i, value=v)
+            c.font = Font(name=ARIAL, size=10)
+            c.border = box
+            c.fill = PatternFill("solid", fgColor=fillc)
+            c.alignment = Alignment(horizontal="left" if i in left_cols else "center")
+
+    def autosize(ws, widths):
+        for col, w in widths.items():
+            ws.column_dimensions[col].width = w
+
     wb = Workbook()
+
+    # ============== FEUILLE 1 : DASHBOARD CODIR ==============
     ws = wb.active
-    ws.title = "CODIR Hebdo"
-    bold = Font(bold=True, color="FFFFFFFF")
-    fill = PatternFill("solid", fgColor="FF007AFF")
-    ws.append(["Indicateur", "Valeur", "N-1", "Évolution"])
-    for c in range(1, 5):
-        ws.cell(row=1, column=c).font = bold
-        ws.cell(row=1, column=c).fill = fill
-    rows = [
-        ("CA (FCFA)", kpis['ca'], kpis['ca_n1'], kpis['evol_ca']),
-        ("Marge (FCFA)", kpis['marge'], kpis['marge_n1'], None),
-        ("Taux de marge", kpis['tx_marge'], kpis['tx_marge_n1'], None),
-        ("Qté vendue", kpis['qte'], kpis['qte_n1'], None),
-        ("Casse (FCFA)", kpis['casse'], None, None),
+    ws.title = "Dashboard CODIR"
+    ws.sheet_view.showGridLines = False
+    ws.merge_cells("A1:H1")
+    ws["A1"] = "DASHBOARD CODIR HEBDO — PGC (Épicerie · Boissons · Droguerie · Parfumerie Hygiène)"
+    ws["A1"].font = Font(name=ARIAL, bold=True, size=14, color=WHITE_H)
+    ws["A1"].fill = PatternFill("solid", fgColor=BLUE_H)
+    ws["A1"].alignment = Alignment(horizontal="left", vertical="center", indent=1)
+    ws.row_dimensions[1].height = 26
+    ws["A2"] = "Période :"; ws["A2"].font = Font(name=ARIAL, bold=True, size=10)
+    ws["B2"] = "Voir export source"; ws["B2"].font = Font(name=ARIAL, size=10, color="FF0000FF", bold=True)
+    if perimetre:
+        ws["A3"] = "Périmètre :"; ws["A3"].font = Font(name=ARIAL, size=9, italic=True, color="FF8E8E93")
+        ws["B3"] = perimetre.replace("\n", " ")[:200]
+        ws["B3"].font = Font(name=ARIAL, size=9, italic=True, color="FF8E8E93")
+
+    r = 5
+    section_bar(ws, r, 8, "1.  VUE D'ENSEMBLE RÉSEAU"); r += 1
+    header_row(ws, r, ["Indicateur", "Cette semaine", "N-1", "Évolution"]); r += 1
+    evo_tx = k['tx_marge'] - k['tx_marge_n1'] if pd.notna(k['tx_marge_n1']) else None
+    evol_qte = (k['qte']/k['qte_n1']-1) if k['qte_n1'] else None
+    pct_casse = k['casse']/k['ca'] if k['ca'] else None
+    kpi_rows = [
+        ("CA (FCFA)", k['ca'], k['ca_n1'], k['evol_ca']),
+        ("Marge (FCFA)", k['marge'], k['marge_n1'], None),
+        ("Taux de marge", k['tx_marge']/100, k['tx_marge_n1']/100 if pd.notna(k['tx_marge_n1']) else None, evo_tx),
+        ("Qté vendue", k['qte'], k['qte_n1'], evol_qte),
+        ("Poids Promo (% CA)", k['poids_promo']/100, None, None),
+        ("Casse (FCFA)", k['casse'], None, pct_casse),
     ]
-    for label, v, n1, evo in rows:
-        ws.append([label, v, n1, evo])
-    ws.append([])
-    ws.append(["Rayon", "CA", "Évol CA %", "Taux Marge %", "Objectif %", "Écart (pts)"])
-    for c in range(1, 7):
-        cell = ws.cell(row=ws.max_row, column=c)
-        cell.font = bold
-        cell.fill = fill
-    for _, r in perf_rayon.iterrows():
-        ws.append([r['Rayon'], r['CA'], r['Évol CA %'], r['Taux Marge %'], r['Objectif %'], r['Écart (pts)']])
-    for col in range(1, 7):
-        ws.column_dimensions[get_column_letter(col)].width = 18
+    r0kpi = r
+    for i, (label, v, n1, evo) in enumerate(kpi_rows):
+        zebra = i % 2 == 1
+        fillc = LGREY_H if zebra else "FFFFFFFF"
+        for col in range(1, 5): ws.cell(row=r, column=col).fill = PatternFill("solid", fgColor=fillc); ws.cell(row=r, column=col).border = box; ws.cell(row=r, column=col).font = Font(name=ARIAL, size=10)
+        ws.cell(row=r, column=1, value=label).alignment = Alignment(horizontal="left", indent=1)
+        ws.cell(row=r, column=2, value=v); ws.cell(row=r, column=2).number_format = "0.00%" if "marge" in label.lower() and "%" not in label else ("0.0%" if "Promo" in label else "#,##0")
+        if n1 is not None:
+            ws.cell(row=r, column=3, value=n1); ws.cell(row=r, column=3).number_format = ws.cell(row=r, column=2).number_format
+        if evo is not None:
+            ws.cell(row=r, column=4, value=evo)
+            ws.cell(row=r, column=4).number_format = '+0.00" pts";-0.00" pts"' if label == "Taux de marge" else '+0.00%;-0.00%'
+        r += 1
+    ws.conditional_formatting.add(f"D{r0kpi}:D{r-1}", CellIsRule(operator="lessThan", formula=["0"], fill=PatternFill("solid", fgColor="FFFFD6D4")))
+    ws.conditional_formatting.add(f"D{r0kpi}:D{r-1}", CellIsRule(operator="greaterThanOrEqual", formula=["0"], fill=PatternFill("solid", fgColor="FFD7F5DE")))
+    r += 1
+
+    section_bar(ws, r, 8, "2.  PERFORMANCE PAR RAYON VS OBJECTIFS MARGE (MÉTI)"); r += 1
+    header_row(ws, r, ["Rayon", "CA (FCFA)", "Évol CA", "Évol Qté", "Taux Marge", "Objectif Méti", "Écart (pts)"]); r += 1
+    r0r = r
+    for i, (_, row_) in enumerate(perf.iterrows()):
+        data_row(ws, r, [row_['Rayon'], row_['CA'], row_['Évol CA %']/100, row_['Évol Qté %']/100,
+                          row_['Taux Marge %']/100, row_['Objectif %']/100, row_['Écart (pts)']], zebra=(i%2==1), left_cols=(1,))
+        for col, fmt_ in [(2,"#,##0"),(3,"0.0%"),(4,"0.0%"),(5,"0.00%"),(6,"0.0%"),(7,'+0.00" pts";-0.00" pts"')]:
+            ws.cell(row=r, column=col).number_format = fmt_
+        r += 1
+    ws.conditional_formatting.add(f"G{r0r}:G{r-1}", CellIsRule(operator="lessThan", formula=["0"], fill=PatternFill("solid", fgColor="FFFFD6D4")))
+    ws.conditional_formatting.add(f"G{r0r}:G{r-1}", CellIsRule(operator="greaterThanOrEqual", formula=["0"], fill=PatternFill("solid", fgColor="FFD7F5DE")))
+    r += 1
+
+    section_bar(ws, r, 8, "3.  DÉTAIL PAR FAMILLE — TOUTES FAMILLES (sans objectif)"); r += 1
+    header_row(ws, r, ["Rayon", "Famille", "CA", "Évol CA %", "Marge", "Taux Marge %", "Qté Vente", "Évol Qté %"]); r += 1
+    fam_sorted = fam.sort_values(['Rayon_aff', 'CA'], ascending=[True, False])
+    for i, (_, row_) in enumerate(fam_sorted.iterrows()):
+        data_row(ws, r, [row_['Rayon_aff'], row_['Famille_aff'], row_['CA'],
+                          (row_['Évol CA %']/100 if pd.notna(row_['Évol CA %']) else None), row_['Marge'],
+                          (row_['Tx Marge %']/100 if pd.notna(row_['Tx Marge %']) else None), row_['Qté Vente'],
+                          (row_['Évol Qté %']/100 if pd.notna(row_['Évol Qté %']) else None)], zebra=(i%2==1), left_cols=(1,2))
+        for col, fmt_ in [(3,"#,##0"),(4,"0.0%"),(5,"#,##0"),(6,"0.0%"),(7,"#,##0"),(8,"0.0%")]:
+            ws.cell(row=r, column=col).number_format = fmt_
+        r += 1
+    r += 1
+
+    def top_section(title, dframe, cols_map, color=RED_H):
+        nonlocal r
+        section_bar(ws, r, 8, title, color=color); r += 1
+        header_row(ws, r, ["Rang"] + list(cols_map.values())); r += 1
+        for i, (_, row_) in enumerate(dframe.iterrows()):
+            vals = [i+1] + [row_[c] for c in cols_map.keys()]
+            data_row(ws, r, vals, zebra=(i%2==1), left_cols=(2,3))
+            r += 1
+        r += 1
+
+    top_section(f"4.  TOP {n_top} — PLUS FORTE BAISSE DE CA (par Famille)",
+                top_flop_table(fam, 'Perte CA', n_top, 'flop', ['CA','CA N-1','Évol CA %','Perte CA','Tx Marge %']),
+                {'Rayon_aff':'Rayon','Famille_aff':'Famille','CA':'CA (FCFA)','CA N-1':'CA N-1','Évol CA %':'Évol %','Perte CA':'Perte (FCFA)','Tx Marge %':'Taux Marge'})
+
+    top_section(f"5.  TOP {n_top} — MEILLEUR GAIN DE CA (par Famille)",
+                top_flop_table(fam, 'Perte CA', n_top, 'top', ['CA','CA N-1','Évol CA %','Perte CA','Tx Marge %']),
+                {'Rayon_aff':'Rayon','Famille_aff':'Famille','CA':'CA (FCFA)','CA N-1':'CA N-1','Évol CA %':'Évol %','Perte CA':'Gain (FCFA)','Tx Marge %':'Taux Marge'},
+                color=GREEN_H)
+
+    top_section(f"6.  TOP {n_top} — CASSE EN VALEUR (par Famille)",
+                top_familles_for_excel(fam, n_top, 'casse'),
+                {'Rayon_aff':'Rayon','Famille_aff':'Famille','CA':'CA (FCFA)','Casse (Valeur)':'Casse (FCFA)','%Casse (Valeur)':'% Casse'})
+
+    top_section(f"7.  TOP {n_top} — POIDS PROMO LE PLUS ÉLEVÉ (Famille, CA > 1M)",
+                top_familles_for_excel(fam, n_top, 'promo'),
+                {'Rayon_aff':'Rayon','Famille_aff':'Famille','CA':'CA (FCFA)','%CA Poids Promo':'Poids Promo','%Marge Promo':'Tx M. Promo','%Marge Hors Promo':'Tx M. HP'},
+                color="FFFF9500")
+
+    autosize(ws, {'A':22,'B':26,'C':16,'D':13,'E':16,'F':13,'G':13,'H':13})
+    ws.freeze_panes = "A6"
+
+    # ============== FEUILLE 2 : DESTRUCTEURS & PERFORMEURS ==============
+    ws2 = wb.create_sheet("Destructeurs Performeurs")
+    ws2.sheet_view.showGridLines = False
+    ws2.merge_cells("A1:I1")
+    ws2["A1"] = "DESTRUCTEURS & PERFORMEURS — NIVEAU ARTICLE"
+    ws2["A1"].font = Font(name=ARIAL, bold=True, size=14, color=WHITE_H)
+    ws2["A1"].fill = PatternFill("solid", fgColor=BLUE_H)
+    ws2["A1"].alignment = Alignment(horizontal="left", vertical="center", indent=1)
+    ws2.row_dimensions[1].height = 26
+
+    r2 = 3
+    def art_section(title, dframe, cols_map, color):
+        nonlocal r2
+        ws2.merge_cells(start_row=r2, start_column=1, end_row=r2, end_column=9)
+        c = ws2.cell(row=r2, column=1, value=title)
+        c.font = Font(name=ARIAL, bold=True, size=11, color=WHITE_H)
+        c.fill = PatternFill("solid", fgColor=color)
+        c.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+        ws2.row_dimensions[r2].height = 20
+        r2 += 1
+        for i, lbl in enumerate(["Rang"] + list(cols_map.values()), start=1):
+            cell = ws2.cell(row=r2, column=i, value=lbl)
+            cell.font = Font(name=ARIAL, bold=True, size=10, color=WHITE_H)
+            cell.fill = PatternFill("solid", fgColor=BLUE_H)
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        r2 += 1
+        for i, (_, row_) in enumerate(dframe.iterrows()):
+            vals = [i+1] + [row_.get(c, None) for c in cols_map.keys()]
+            fillc = LGREY_H if i % 2 == 1 else "FFFFFFFF"
+            for j, v in enumerate(vals, start=1):
+                cell = ws2.cell(row=r2, column=j, value=v)
+                cell.font = Font(name=ARIAL, size=10)
+                cell.border = box
+                cell.fill = PatternFill("solid", fgColor=fillc)
+                cell.alignment = Alignment(horizontal="left" if j in (2,3,4,5) else "center")
+            r2 += 1
+        r2 += 1
+
+    cm_neg = {'Rayon_aff':'Rayon','Famille_aff':'Famille','SousFamille_aff':'Sous Famille','Article_aff':'Article','CA':'CA','Marge':'Marge','Tx Marge %':'Taux Marge'}
+    art_section(f"A.  TOP {n_top} — ARTICLES EN MARGE NÉGATIVE", art_res['A_marge_neg'], cm_neg, RED_H)
+
+    cm_deg = {'Rayon_aff':'Rayon','Famille_aff':'Famille','SousFamille_aff':'Sous Famille','Article_aff':'Article','CA':'CA','Tx Marge %':'Taux Marge','Écart Tx Marge (pts)':'Écart pts'}
+    art_section(f"B.  TOP {n_top} — DÉGRADATION DU TAUX DE MARGE (marge encore positive)", art_res['B_degrad_marge'], cm_deg, RED_H)
+
+    cm_gain = {'Rayon_aff':'Rayon','Famille_aff':'Famille','SousFamille_aff':'Sous Famille','Article_aff':'Article','CA':'CA','Gain Marge (FCFA)':'Gain Marge','Tx Marge %':'Taux Marge'}
+    art_section(f"C.  TOP {n_top} — PERFORMEURS : GAIN DE MARGE EN VALEUR", art_res['C_perf_gain_marge'], cm_gain, GREEN_H)
+
+    d4 = art_res['D_croissance_ca'].copy()
+    if not d4.empty:
+        d4['Évol CA %'] = (d4['CA']/d4['CA N-1']-1)*100
+    cm_croi = {'Rayon_aff':'Rayon','Famille_aff':'Famille','SousFamille_aff':'Sous Famille','Article_aff':'Article','CA':'CA','CA N-1':'CA N-1','Évol CA %':'Évol %','Tx Marge %':'Taux Marge'}
+    art_section(f"D.  TOP {n_top} — PLUS FORTE CROISSANCE DE CA", d4, cm_croi, GREEN_H)
+
+    cm_baisse = {'Rayon_aff':'Rayon','Famille_aff':'Famille','SousFamille_aff':'Sous Famille','Article_aff':'Article','CA':'CA','CA N-1':'CA N-1','Perte CA (FCFA)':'Perte (FCFA)'}
+    art_section(f"E.  TOP {n_top} — PLUS FORTE BAISSE DE CA", art_res['E_baisse_ca'], cm_baisse, RED_H)
+
+    cm_qte = {'Rayon_aff':'Rayon','Famille_aff':'Famille','SousFamille_aff':'Sous Famille','Article_aff':'Article','Qté Vente':'Qté Vente','Qté Vente N-1':'Qté N-1','Variation Qté':'Variation','CA':'CA'}
+    art_section(f"F.  TOP {n_top} — PLUS FORTE HAUSSE DE QUANTITÉ VENDUE", art_res['F_hausse_qte'], cm_qte, GREEN_H)
+    art_section(f"G.  TOP {n_top} — PLUS FORTE BAISSE DE QUANTITÉ VENDUE", art_res['G_baisse_qte'], cm_qte, RED_H)
+
+    pct_cols_idx = []  # formats appliqués colonne par colonne ensuite
+    autosize(ws2, {'A':7,'B':20,'C':24,'D':22,'E':38,'F':13,'G':13,'H':13,'I':13})
+
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
+
+def top_familles_for_excel(fam, n, by):
+    """Variante de top_familles qui part directement d'un family_metrics déjà calculé."""
+    if by == 'casse':
+        sub = fam[fam['Casse (Valeur)'].notna()]
+        out = sub.nsmallest(n, 'Casse (Valeur)')[['Rayon_aff','Famille_aff','CA','Casse (Valeur)','%Casse (Valeur)']]
+    elif by == 'promo':
+        mat = fam[fam['CA'] > 1_000_000]
+        out = mat.nlargest(n, '%CA Poids Promo')[['Rayon_aff','Famille_aff','CA','%CA Poids Promo','%Marge Promo','%Marge Hors Promo']]
+    return out.reset_index(drop=True)
 
 # ============================================================
 # INTERFACE
@@ -489,10 +676,13 @@ with tab1:
             st.dataframe(t, hide_index=True, use_container_width=True)
 
         st.markdown("<div class='section-label'>EXPORT</div>", unsafe_allow_html=True)
-        xls = build_excel_codir(k, perf, None)
-        st.download_button("📥 Télécharger le récap CODIR (.xlsx)", xls,
-                            file_name="CODIR_Hebdo_Rayon.xlsx",
+        art_res_export = destructeurs_performeurs(art, n=n_top, seuil_ca=seuil_ca)
+        xls = build_excel_full(k, perf, fam, n_top, art_res_export, perimetre)
+        st.download_button("📥 Télécharger le récap complet CODIR + Articles (.xlsx)", xls,
+                            file_name="CODIR_Hebdo.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        st.caption("Le fichier contient 2 feuilles : Dashboard CODIR (réseau/rayon/famille) "
+                   "et Destructeurs & Performeurs (article).")
 
 # ---------------- TAB 2 : DESTRUCTEURS & PERFORMEURS (ARTICLE) ----------------
 with tab2:
