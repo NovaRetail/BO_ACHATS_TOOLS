@@ -318,6 +318,25 @@ def build_excel_full(k, perf, fam, n_top, art_res, perimetre):
     thin = Side(style="thin", color="FFD1D1D6")
     box = Border(left=thin, right=thin, top=thin, bottom=thin)
 
+    # Format "Comptabilité" Excel natif, sans symbole monétaire (séparateur de milliers,
+    # négatifs alignés, zéro affiché "-"). 'amount_signed' identique mais avec signe +/- explicite.
+    ACC = '_-* #,##0_-;-* #,##0_-;_-* "-"_-;_-@_-'
+    ACC_SIGNED = '_-* +#,##0_-;-* #,##0_-;_-* "-"_-;_-@_-'
+    QTY = "#,##0"
+    PTS = '+0.00" pts";-0.00" pts"'
+    PCT = "0.0%"
+    PCT2 = "0.00%"
+
+    def fmt_value(kind, v):
+        """Convertit v selon le type déclaré : pct100 -> fraction (v/100), sinon inchangé."""
+        if kind == 'pct100' and v is not None and pd.notna(v):
+            return v / 100
+        return v
+
+    def fmt_code(kind):
+        return {'amount': ACC, 'amount_signed': ACC_SIGNED, 'qty': QTY,
+                'pct100': PCT, 'pct1': PCT, 'pts': PTS}.get(kind, "General")
+
     def section_bar(ws, row, ncols, text, color=DARK_H):
         ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=ncols)
         c = ws.cell(row=row, column=1, value=text)
@@ -371,26 +390,27 @@ def build_excel_full(k, perf, fam, n_top, art_res, perimetre):
     evo_tx = k['tx_marge'] - k['tx_marge_n1'] if pd.notna(k['tx_marge_n1']) else None
     evol_qte = (k['qte']/k['qte_n1']-1) if k['qte_n1'] else None
     pct_casse = k['casse']/k['ca'] if k['ca'] else None
+    # (label, valeur, valeur N-1, évolution, kind_valeur, kind_évolution)
     kpi_rows = [
-        ("CA (FCFA)", k['ca'], k['ca_n1'], k['evol_ca']),
-        ("Marge (FCFA)", k['marge'], k['marge_n1'], None),
-        ("Taux de marge", k['tx_marge']/100, k['tx_marge_n1']/100 if pd.notna(k['tx_marge_n1']) else None, evo_tx),
-        ("Qté vendue", k['qte'], k['qte_n1'], evol_qte),
-        ("Poids Promo (% CA)", k['poids_promo']/100, None, None),
-        ("Casse (FCFA)", k['casse'], None, pct_casse),
+        ("CA (FCFA)",          k['ca'],            k['ca_n1'],   k['evol_ca'], 'amount', 'pct1'),
+        ("Marge (FCFA)",       k['marge'],         k['marge_n1'],None,         'amount', None),
+        ("Taux de marge",      k['tx_marge']/100,  (k['tx_marge_n1']/100 if pd.notna(k['tx_marge_n1']) else None), evo_tx, 'pct1', 'pts'),
+        ("Qté vendue",         k['qte'],           k['qte_n1'],  evol_qte,     'qty',    'pct1'),
+        ("Poids Promo (% CA)", k['poids_promo']/100, None,       None,         'pct1',   None),
+        ("Casse (FCFA)",       k['casse'],         None,         pct_casse,    'amount', 'pct1'),
     ]
     r0kpi = r
-    for i, (label, v, n1, evo) in enumerate(kpi_rows):
+    for i, (label, v, n1, evo, kind_v, kind_evo) in enumerate(kpi_rows):
         zebra = i % 2 == 1
         fillc = LGREY_H if zebra else "FFFFFFFF"
         for col in range(1, 5): ws.cell(row=r, column=col).fill = PatternFill("solid", fgColor=fillc); ws.cell(row=r, column=col).border = box; ws.cell(row=r, column=col).font = Font(name=ARIAL, size=10)
         ws.cell(row=r, column=1, value=label).alignment = Alignment(horizontal="left", indent=1)
-        ws.cell(row=r, column=2, value=v); ws.cell(row=r, column=2).number_format = "0.00%" if "marge" in label.lower() and "%" not in label else ("0.0%" if "Promo" in label else "#,##0")
+        ws.cell(row=r, column=2, value=v); ws.cell(row=r, column=2).number_format = fmt_code(kind_v)
         if n1 is not None:
-            ws.cell(row=r, column=3, value=n1); ws.cell(row=r, column=3).number_format = ws.cell(row=r, column=2).number_format
+            ws.cell(row=r, column=3, value=n1); ws.cell(row=r, column=3).number_format = fmt_code(kind_v)
         if evo is not None:
             ws.cell(row=r, column=4, value=evo)
-            ws.cell(row=r, column=4).number_format = '+0.00" pts";-0.00" pts"' if label == "Taux de marge" else '+0.00%;-0.00%'
+            ws.cell(row=r, column=4).number_format = fmt_code(kind_evo)
         r += 1
     ws.conditional_formatting.add(f"D{r0kpi}:D{r-1}", CellIsRule(operator="lessThan", formula=["0"], fill=PatternFill("solid", fgColor="FFFFD6D4")))
     ws.conditional_formatting.add(f"D{r0kpi}:D{r-1}", CellIsRule(operator="greaterThanOrEqual", formula=["0"], fill=PatternFill("solid", fgColor="FFD7F5DE")))
@@ -402,7 +422,7 @@ def build_excel_full(k, perf, fam, n_top, art_res, perimetre):
     for i, (_, row_) in enumerate(perf.iterrows()):
         data_row(ws, r, [row_['Rayon'], row_['CA'], row_['Évol CA %']/100, row_['Évol Qté %']/100,
                           row_['Taux Marge %']/100, row_['Objectif %']/100, row_['Écart (pts)']], zebra=(i%2==1), left_cols=(1,))
-        for col, fmt_ in [(2,"#,##0"),(3,"0.0%"),(4,"0.0%"),(5,"0.00%"),(6,"0.0%"),(7,'+0.00" pts";-0.00" pts"')]:
+        for col, fmt_ in [(2,ACC),(3,PCT),(4,PCT),(5,PCT2),(6,PCT),(7,PTS)]:
             ws.cell(row=r, column=col).number_format = fmt_
         r += 1
     ws.conditional_formatting.add(f"G{r0r}:G{r-1}", CellIsRule(operator="lessThan", formula=["0"], fill=PatternFill("solid", fgColor="FFFFD6D4")))
@@ -417,37 +437,45 @@ def build_excel_full(k, perf, fam, n_top, art_res, perimetre):
                           (row_['Évol CA %']/100 if pd.notna(row_['Évol CA %']) else None), row_['Marge'],
                           (row_['Tx Marge %']/100 if pd.notna(row_['Tx Marge %']) else None), row_['Qté Vente'],
                           (row_['Évol Qté %']/100 if pd.notna(row_['Évol Qté %']) else None)], zebra=(i%2==1), left_cols=(1,2))
-        for col, fmt_ in [(3,"#,##0"),(4,"0.0%"),(5,"#,##0"),(6,"0.0%"),(7,"#,##0"),(8,"0.0%")]:
+        for col, fmt_ in [(3,ACC),(4,PCT),(5,ACC),(6,PCT),(7,QTY),(8,PCT)]:
             ws.cell(row=r, column=col).number_format = fmt_
         r += 1
     r += 1
 
-    def top_section(title, dframe, cols_map, color=RED_H):
+    def top_section(title, dframe, cols_map, kinds, color=RED_H):
+        """kinds : dict {clé_colonne_source: kind} où kind ∈ amount/qty/pct100/pct1/pts."""
         nonlocal r
         section_bar(ws, r, 8, title, color=color); r += 1
         header_row(ws, r, ["Rang"] + list(cols_map.values())); r += 1
+        keys = list(cols_map.keys())
         for i, (_, row_) in enumerate(dframe.iterrows()):
-            vals = [i+1] + [row_[c] for c in cols_map.keys()]
+            vals = [i+1] + [fmt_value(kinds.get(c, 'amount'), row_[c]) for c in keys]
             data_row(ws, r, vals, zebra=(i%2==1), left_cols=(2,3))
+            for j, ck in enumerate(keys, start=2):
+                ws.cell(row=r, column=j).number_format = fmt_code(kinds.get(ck, 'amount'))
             r += 1
         r += 1
 
     top_section(f"4.  TOP {n_top} — PLUS FORTE BAISSE DE CA (par Famille)",
                 top_flop_table(fam, 'Perte CA', n_top, 'flop', ['CA','CA N-1','Évol CA %','Perte CA','Tx Marge %']),
-                {'Rayon_aff':'Rayon','Famille_aff':'Famille','CA':'CA (FCFA)','CA N-1':'CA N-1','Évol CA %':'Évol %','Perte CA':'Perte (FCFA)','Tx Marge %':'Taux Marge'})
+                {'Rayon_aff':'Rayon','Famille_aff':'Famille','CA':'CA (FCFA)','CA N-1':'CA N-1','Évol CA %':'Évol %','Perte CA':'Perte (FCFA)','Tx Marge %':'Taux Marge'},
+                {'CA':'amount','CA N-1':'amount','Évol CA %':'pct100','Perte CA':'amount','Tx Marge %':'pct100'})
 
     top_section(f"5.  TOP {n_top} — MEILLEUR GAIN DE CA (par Famille)",
                 top_flop_table(fam, 'Perte CA', n_top, 'top', ['CA','CA N-1','Évol CA %','Perte CA','Tx Marge %']),
                 {'Rayon_aff':'Rayon','Famille_aff':'Famille','CA':'CA (FCFA)','CA N-1':'CA N-1','Évol CA %':'Évol %','Perte CA':'Gain (FCFA)','Tx Marge %':'Taux Marge'},
+                {'CA':'amount','CA N-1':'amount','Évol CA %':'pct100','Perte CA':'amount','Tx Marge %':'pct100'},
                 color=GREEN_H)
 
     top_section(f"6.  TOP {n_top} — CASSE EN VALEUR (par Famille)",
                 top_familles_for_excel(fam, n_top, 'casse'),
-                {'Rayon_aff':'Rayon','Famille_aff':'Famille','CA':'CA (FCFA)','Casse (Valeur)':'Casse (FCFA)','%Casse (Valeur)':'% Casse'})
+                {'Rayon_aff':'Rayon','Famille_aff':'Famille','CA':'CA (FCFA)','Casse (Valeur)':'Casse (FCFA)','%Casse (Valeur)':'% Casse'},
+                {'CA':'amount','Casse (Valeur)':'amount','%Casse (Valeur)':'pct1'})
 
     top_section(f"7.  TOP {n_top} — POIDS PROMO LE PLUS ÉLEVÉ (Famille, CA > 1M)",
                 top_familles_for_excel(fam, n_top, 'promo'),
                 {'Rayon_aff':'Rayon','Famille_aff':'Famille','CA':'CA (FCFA)','%CA Poids Promo':'Poids Promo','%Marge Promo':'Tx M. Promo','%Marge Hors Promo':'Tx M. HP'},
+                {'CA':'amount','%CA Poids Promo':'pct1','%Marge Promo':'pct1','%Marge Hors Promo':'pct1'},
                 color="FFFF9500")
 
     autosize(ws, {'A':22,'B':26,'C':16,'D':13,'E':16,'F':13,'G':13,'H':13})
@@ -464,7 +492,7 @@ def build_excel_full(k, perf, fam, n_top, art_res, perimetre):
     ws2.row_dimensions[1].height = 26
 
     r2 = 3
-    def art_section(title, dframe, cols_map, color):
+    def art_section(title, dframe, cols_map, kinds, color):
         nonlocal r2
         ws2.merge_cells(start_row=r2, start_column=1, end_row=r2, end_column=9)
         c = ws2.cell(row=r2, column=1, value=title)
@@ -479,8 +507,9 @@ def build_excel_full(k, perf, fam, n_top, art_res, perimetre):
             cell.fill = PatternFill("solid", fgColor=BLUE_H)
             cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
         r2 += 1
+        keys = list(cols_map.keys())
         for i, (_, row_) in enumerate(dframe.iterrows()):
-            vals = [i+1] + [row_.get(c, None) for c in cols_map.keys()]
+            vals = [i+1] + [fmt_value(kinds.get(c, 'amount'), row_.get(c, None)) for c in keys]
             fillc = LGREY_H if i % 2 == 1 else "FFFFFFFF"
             for j, v in enumerate(vals, start=1):
                 cell = ws2.cell(row=r2, column=j, value=v)
@@ -488,32 +517,39 @@ def build_excel_full(k, perf, fam, n_top, art_res, perimetre):
                 cell.border = box
                 cell.fill = PatternFill("solid", fgColor=fillc)
                 cell.alignment = Alignment(horizontal="left" if j in (2,3,4,5) else "center")
+                if j >= 6:
+                    cell.number_format = fmt_code(kinds.get(keys[j-2], 'amount'))
             r2 += 1
         r2 += 1
 
     cm_neg = {'Rayon_aff':'Rayon','Famille_aff':'Famille','SousFamille_aff':'Sous Famille','Article_aff':'Article','CA':'CA','Marge':'Marge','Tx Marge %':'Taux Marge'}
-    art_section(f"A.  TOP {n_top} — ARTICLES EN MARGE NÉGATIVE", art_res['A_marge_neg'], cm_neg, RED_H)
+    art_section(f"A.  TOP {n_top} — ARTICLES EN MARGE NÉGATIVE", art_res['A_marge_neg'], cm_neg,
+                {'CA':'amount','Marge':'amount','Tx Marge %':'pct100'}, RED_H)
 
     cm_deg = {'Rayon_aff':'Rayon','Famille_aff':'Famille','SousFamille_aff':'Sous Famille','Article_aff':'Article','CA':'CA','Tx Marge %':'Taux Marge','Écart Tx Marge (pts)':'Écart pts'}
-    art_section(f"B.  TOP {n_top} — DÉGRADATION DU TAUX DE MARGE (marge encore positive)", art_res['B_degrad_marge'], cm_deg, RED_H)
+    art_section(f"B.  TOP {n_top} — DÉGRADATION DU TAUX DE MARGE (marge encore positive)", art_res['B_degrad_marge'], cm_deg,
+                {'CA':'amount','Tx Marge %':'pct100','Écart Tx Marge (pts)':'pts'}, RED_H)
 
     cm_gain = {'Rayon_aff':'Rayon','Famille_aff':'Famille','SousFamille_aff':'Sous Famille','Article_aff':'Article','CA':'CA','Gain Marge (FCFA)':'Gain Marge','Tx Marge %':'Taux Marge'}
-    art_section(f"C.  TOP {n_top} — PERFORMEURS : GAIN DE MARGE EN VALEUR", art_res['C_perf_gain_marge'], cm_gain, GREEN_H)
+    art_section(f"C.  TOP {n_top} — PERFORMEURS : GAIN DE MARGE EN VALEUR", art_res['C_perf_gain_marge'], cm_gain,
+                {'CA':'amount','Gain Marge (FCFA)':'amount','Tx Marge %':'pct100'}, GREEN_H)
 
     d4 = art_res['D_croissance_ca'].copy()
     if not d4.empty:
         d4['Évol CA %'] = (d4['CA']/d4['CA N-1']-1)*100
     cm_croi = {'Rayon_aff':'Rayon','Famille_aff':'Famille','SousFamille_aff':'Sous Famille','Article_aff':'Article','CA':'CA','CA N-1':'CA N-1','Évol CA %':'Évol %','Tx Marge %':'Taux Marge'}
-    art_section(f"D.  TOP {n_top} — PLUS FORTE CROISSANCE DE CA", d4, cm_croi, GREEN_H)
+    art_section(f"D.  TOP {n_top} — PLUS FORTE CROISSANCE DE CA", d4, cm_croi,
+                {'CA':'amount','CA N-1':'amount','Évol CA %':'pct100','Tx Marge %':'pct100'}, GREEN_H)
 
     cm_baisse = {'Rayon_aff':'Rayon','Famille_aff':'Famille','SousFamille_aff':'Sous Famille','Article_aff':'Article','CA':'CA','CA N-1':'CA N-1','Perte CA (FCFA)':'Perte (FCFA)'}
-    art_section(f"E.  TOP {n_top} — PLUS FORTE BAISSE DE CA", art_res['E_baisse_ca'], cm_baisse, RED_H)
+    art_section(f"E.  TOP {n_top} — PLUS FORTE BAISSE DE CA", art_res['E_baisse_ca'], cm_baisse,
+                {'CA':'amount','CA N-1':'amount','Perte CA (FCFA)':'amount'}, RED_H)
 
     cm_qte = {'Rayon_aff':'Rayon','Famille_aff':'Famille','SousFamille_aff':'Sous Famille','Article_aff':'Article','Qté Vente':'Qté Vente','Qté Vente N-1':'Qté N-1','Variation Qté':'Variation','CA':'CA'}
-    art_section(f"F.  TOP {n_top} — PLUS FORTE HAUSSE DE QUANTITÉ VENDUE", art_res['F_hausse_qte'], cm_qte, GREEN_H)
-    art_section(f"G.  TOP {n_top} — PLUS FORTE BAISSE DE QUANTITÉ VENDUE", art_res['G_baisse_qte'], cm_qte, RED_H)
+    kinds_qte = {'Qté Vente':'qty','Qté Vente N-1':'qty','Variation Qté':'amount_signed','CA':'amount'}
+    art_section(f"F.  TOP {n_top} — PLUS FORTE HAUSSE DE QUANTITÉ VENDUE", art_res['F_hausse_qte'], cm_qte, kinds_qte, GREEN_H)
+    art_section(f"G.  TOP {n_top} — PLUS FORTE BAISSE DE QUANTITÉ VENDUE", art_res['G_baisse_qte'], cm_qte, kinds_qte, RED_H)
 
-    pct_cols_idx = []  # formats appliqués colonne par colonne ensuite
     autosize(ws2, {'A':7,'B':20,'C':24,'D':22,'E':38,'F':13,'G':13,'H':13,'I':13})
 
     buf = io.BytesIO()
