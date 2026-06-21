@@ -218,7 +218,7 @@ def build_headline(k, perf, fam):
     line2 = "📌 " + " &nbsp;·&nbsp; ".join(bits) if bits else ""
     return line1, line2
 
-
+def top_familles(df, n=5, by='perte_ca'):
     """Top/Flop N familles selon le critère choisi (conserve la version courte pour compatibilité)."""
     sub = family_metrics(df)
     if by == 'perte_ca':
