@@ -191,6 +191,11 @@ def family_metrics(df):
     marge_n1 = marge_n1.replace([np.inf, -np.inf], np.nan)
     sub['Tx Marge N-1 %'] = np.where(sub['CA N-1'] > 0, marge_n1/sub['CA N-1']*100, np.nan)
     sub['Écart Tx Marge (pts)'] = sub['Tx Marge %'] - sub['Tx Marge N-1 %']
+    qte = sub.get('Qté Vente', pd.Series(np.nan, index=sub.index))
+    qte_n1 = sub.get('Qté Vente N-1', pd.Series(np.nan, index=sub.index))
+    sub['Qté Vente'] = qte
+    sub['Qté Vente N-1'] = qte_n1
+    sub['Évol Qté %'] = np.where(qte_n1 > 0, (qte/qte_n1 - 1) * 100, np.nan)
     return sub
 
 def build_headline(k, perf, fam):
@@ -214,7 +219,13 @@ def build_headline(k, perf, fam):
         bits.append(f"rayon à surveiller : <b>{wr['Rayon']}</b> ({fmt_delta(wr['Écart (pts)'])} vs objectif)")
     if fam is not None and len(fam) and fam['Perte CA'].notna().any():
         wf = fam.loc[fam['Perte CA'].idxmin()]
-        bits.append(f"famille la plus en repli : <b>{wf['Famille_aff']}</b> ({fmt(wf['Perte CA'])} FCFA vs N-1)")
+        fam_qte = wf.get('Évol Qté %', np.nan)
+        fam_txt = (f"famille à risque : <b>{wf['Famille_aff']}</b> — "
+                   f"CA {fmt(wf['CA'])} FCFA ({wf['Évol CA %']:+.1f}%), "
+                   f"marge {wf['Tx Marge %']:.1f}%")
+        if pd.notna(fam_qte):
+            fam_txt += f", qté {fam_qte:+.1f}%"
+        bits.append(fam_txt)
     line2 = "📌 " + " &nbsp;·&nbsp; ".join(bits) if bits else ""
     return line1, line2
 
@@ -412,6 +423,17 @@ with tab1:
         disp['Écart (pts)'] = perf['Écart (pts)'].map(fmt_delta)
         disp['CA'] = perf['CA'].map(lambda v: fmt(v))
         st.dataframe(disp, use_container_width=True, hide_index=True)
+
+        st.markdown("<div class='section-label'>DÉTAIL PAR FAMILLE — TOUTES FAMILLES (SANS OBJECTIF)</div>", unsafe_allow_html=True)
+        fam_disp = fam[['Rayon_aff','Famille_aff','CA','Évol CA %','Marge','Tx Marge %','Qté Vente','Évol Qté %']].copy()
+        fam_disp = fam_disp.rename(columns={'Rayon_aff':'Rayon','Famille_aff':'Famille','Tx Marge %':'Taux Marge %'})
+        fam_disp = fam_disp.sort_values(['Rayon','CA'], ascending=[True, False])
+        for c in ['CA','Marge','Qté Vente']:
+            fam_disp[c] = fam_disp[c].map(fmt)
+        for c in ['Évol CA %','Taux Marge %','Évol Qté %']:
+            fam_disp[c] = fam_disp[c].map(lambda v: fmt_pct(v))
+        st.dataframe(fam_disp, use_container_width=True, hide_index=True, height=420)
+        st.caption("Pas d'objectif au niveau Famille (le cadrage marge est piloté au niveau Rayon) — vue CA / marge / quantité uniquement.")
 
         st.markdown("<div class='section-label'>TOP & FLOP PAR FAMILLE</div>", unsafe_allow_html=True)
 
