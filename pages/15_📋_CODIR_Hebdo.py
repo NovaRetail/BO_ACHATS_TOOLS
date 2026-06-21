@@ -168,13 +168,27 @@ def perf_par_rayon(df, cibles):
         })
     return pd.DataFrame(rows).sort_values('CA', ascending=False)
 
-def top_familles(df, n=5, by='perte_ca'):
-    """Top N familles (niveau Sous Famille == Total) selon le critère choisi."""
+def family_metrics(df):
+    """Prépare toutes les métriques Top/Flop au niveau Famille (Sous Famille == Total)."""
     sub = df[(df['Sous Famille'] == 'Total') & (df['Famille'] != 'Total') & (df['Rayon'] != 'Total')].copy()
     sub['Rayon_aff'] = sub['Rayon'].astype(str).str.split(' - ').str[-1].str.strip()
     sub['Famille_aff'] = sub['Famille'].astype(str).str.split(' - ').str[-1].str.strip()
+    sub['CA'] = sub['CA'].fillna(0)
+    sub['CA N-1'] = sub['CA N-1'].fillna(0)
     sub['Perte CA'] = sub['CA'] - sub['CA N-1']
-    sub['Tx Marge %'] = sub['Marge'] / sub['CA'].replace(0, np.nan) * 100
+    sub['Évol CA %'] = np.where(sub['CA N-1'] > 0, (sub['CA']/sub['CA N-1']-1)*100, np.nan)
+    sub['Tx Marge %'] = np.where(sub['CA'] > 0, sub['Marge']/sub['CA']*100, np.nan)
+    evol_marge_pct = sub.get('%Vs N-1.1', pd.Series(np.nan, index=sub.index))
+    with np.errstate(divide='ignore', invalid='ignore'):
+        marge_n1 = sub['Marge'] / (1 + evol_marge_pct)
+    marge_n1 = marge_n1.replace([np.inf, -np.inf], np.nan)
+    sub['Tx Marge N-1 %'] = np.where(sub['CA N-1'] > 0, marge_n1/sub['CA N-1']*100, np.nan)
+    sub['Écart Tx Marge (pts)'] = sub['Tx Marge %'] - sub['Tx Marge N-1 %']
+    return sub
+
+def top_familles(df, n=5, by='perte_ca'):
+    """Top/Flop N familles selon le critère choisi (conserve la version courte pour compatibilité)."""
+    sub = family_metrics(df)
     if by == 'perte_ca':
         out = sub.nsmallest(n, 'Perte CA')[['Rayon_aff','Famille_aff','CA','CA N-1','Perte CA','Tx Marge %']]
     elif by == 'casse':
@@ -183,6 +197,13 @@ def top_familles(df, n=5, by='perte_ca'):
         mat = sub[sub['CA'] > 1_000_000]
         out = mat.nlargest(n, '%CA Poids Promo')[['Rayon_aff','Famille_aff','CA','%CA Poids Promo','%Marge Promo','%Marge Hors Promo']]
     return out.reset_index(drop=True)
+
+def top_flop_table(sub, metric, n, mode, cols, ca_floor=0):
+    """mode='top' -> nlargest, mode='flop' -> nsmallest. ca_floor filtre les familles trop petites (bruit)."""
+    base = sub[sub['CA'] > ca_floor] if ca_floor else sub
+    base = base[base[metric].notna()]
+    out = base.nlargest(n, metric) if mode == 'top' else base.nsmallest(n, metric)
+    return out[['Rayon_aff','Famille_aff'] + cols].reset_index(drop=True)
 
 # ============================================================
 # DÉRIVATION — VUE ARTICLE (à partir du même dataframe)
@@ -353,31 +374,59 @@ with tab1:
         disp['CA'] = perf['CA'].map(lambda v: fmt(v))
         st.dataframe(disp, use_container_width=True, hide_index=True)
 
-        st.markdown("<div class='section-label'>TOP FAMILLES À SURVEILLER</div>", unsafe_allow_html=True)
-        tcol1, tcol2, tcol3 = st.columns(3)
-        with tcol1:
-            st.markdown(f"**🔻 Top {min(5,n_top)} — Baisse de CA**")
-            t = top_familles(df, min(5, n_top), 'perte_ca')
-            t_disp = t.rename(columns={'Rayon_aff':'Rayon','Famille_aff':'Famille'})
-            t_disp['CA'] = t_disp['CA'].map(fmt); t_disp['CA N-1'] = t_disp['CA N-1'].map(fmt)
-            t_disp['Perte CA'] = t_disp['Perte CA'].map(fmt); t_disp['Tx Marge %'] = t_disp['Tx Marge %'].map(lambda v: fmt_pct(v))
-            st.dataframe(t_disp, hide_index=True, use_container_width=True)
-        with tcol2:
-            st.markdown(f"**📉 Top {min(5,n_top)} — Casse en valeur**")
-            t = top_familles(df, min(5, n_top), 'casse')
-            t_disp = t.rename(columns={'Rayon_aff':'Rayon','Famille_aff':'Famille','Casse (Valeur)':'Casse','%Casse (Valeur)':'% Casse'})
-            t_disp['CA'] = t_disp['CA'].map(fmt); t_disp['Casse'] = t_disp['Casse'].map(fmt)
-            t_disp['% Casse'] = t_disp['% Casse'].map(lambda v: fmt_pct(v*100, 2))
-            st.dataframe(t_disp, hide_index=True, use_container_width=True)
-        with tcol3:
-            st.markdown(f"**🎯 Top {min(5,n_top)} — Poids promo (CA>1M)**")
-            t = top_familles(df, min(5, n_top), 'promo')
-            t_disp = t.rename(columns={'Rayon_aff':'Rayon','Famille_aff':'Famille','%CA Poids Promo':'Poids Promo',
-                                         '%Marge Promo':'Tx M. Promo','%Marge Hors Promo':'Tx M. HP'})
-            t_disp['CA'] = t_disp['CA'].map(fmt)
+        st.markdown("<div class='section-label'>TOP & FLOP PAR FAMILLE</div>", unsafe_allow_html=True)
+        fam = family_metrics(df)
+
+        def pair(title_top, title_flop, metric, cols, fmt_map, ca_floor=0):
+            cA, cB = st.columns(2)
+            with cA:
+                st.markdown(f"**🟢 {title_top}**")
+                t = top_flop_table(fam, metric, n_top, 'top', cols, ca_floor)
+                t = t.rename(columns={'Rayon_aff':'Rayon','Famille_aff':'Famille'})
+                for c, f in fmt_map.items():
+                    if c in t.columns: t[c] = t[c].map(f)
+                st.dataframe(t, hide_index=True, use_container_width=True)
+            with cB:
+                st.markdown(f"**🔴 {title_flop}**")
+                t = top_flop_table(fam, metric, n_top, 'flop', cols, ca_floor)
+                t = t.rename(columns={'Rayon_aff':'Rayon','Famille_aff':'Famille'})
+                for c, f in fmt_map.items():
+                    if c in t.columns: t[c] = t[c].map(f)
+                st.dataframe(t, hide_index=True, use_container_width=True)
+
+        st.markdown("##### 📈 Évolution du CA (classement en valeur FCFA)")
+        pair(f"Top {n_top} — Meilleur gain de CA", f"Flop {n_top} — Plus forte perte de CA",
+             'Perte CA', ['CA','CA N-1','Évol CA %','Tx Marge %'],
+             {'CA': fmt, 'CA N-1': fmt, 'Évol CA %': lambda v: fmt_pct(v), 'Tx Marge %': lambda v: fmt_pct(v)})
+
+        st.markdown("##### 💰 Taux de marge")
+        pair(f"Top {n_top} — Meilleur taux de marge", f"Flop {n_top} — Taux de marge le plus faible",
+             'Tx Marge %', ['CA','Marge','Tx Marge %'],
+             {'CA': fmt, 'Marge': fmt, 'Tx Marge %': lambda v: fmt_pct(v)}, ca_floor=1_000_000)
+
+        st.markdown("##### 📊 Évolution du taux de marge (pts vs N-1)")
+        pair(f"Top {n_top} — Meilleure progression", f"Flop {n_top} — Plus forte dégradation",
+             'Écart Tx Marge (pts)', ['CA','Tx Marge %','Écart Tx Marge (pts)'],
+             {'CA': fmt, 'Tx Marge %': lambda v: fmt_pct(v), 'Écart Tx Marge (pts)': fmt_delta}, ca_floor=1_000_000)
+
+        st.markdown("##### 💔 Casse & 🎯 Poids promo")
+        cC, cD = st.columns(2)
+        with cC:
+            st.markdown(f"**🔴 Flop {n_top} — Casse en valeur**")
+            t = top_familles(df, n_top, 'casse').rename(
+                columns={'Rayon_aff':'Rayon','Famille_aff':'Famille','Casse (Valeur)':'Casse','%Casse (Valeur)':'% Casse'})
+            t['CA'] = t['CA'].map(fmt); t['Casse'] = t['Casse'].map(fmt)
+            t['% Casse'] = t['% Casse'].map(lambda v: fmt_pct(v*100, 2))
+            st.dataframe(t, hide_index=True, use_container_width=True)
+        with cD:
+            st.markdown(f"**🟠 Top {n_top} — Poids promo (CA&gt;1M)**")
+            t = top_familles(df, n_top, 'promo').rename(
+                columns={'Rayon_aff':'Rayon','Famille_aff':'Famille','%CA Poids Promo':'Poids Promo',
+                         '%Marge Promo':'Tx M. Promo','%Marge Hors Promo':'Tx M. HP'})
+            t['CA'] = t['CA'].map(fmt)
             for c in ['Poids Promo','Tx M. Promo','Tx M. HP']:
-                t_disp[c] = t_disp[c].map(lambda v: fmt_pct(v*100))
-            st.dataframe(t_disp, hide_index=True, use_container_width=True)
+                t[c] = t[c].map(lambda v: fmt_pct(v*100))
+            st.dataframe(t, hide_index=True, use_container_width=True)
 
         st.markdown("<div class='section-label'>EXPORT</div>", unsafe_allow_html=True)
         xls = build_excel_codir(k, perf, None)
