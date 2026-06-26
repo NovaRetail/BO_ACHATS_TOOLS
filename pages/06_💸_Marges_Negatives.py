@@ -1,7 +1,7 @@
 """
 06_💸_Marges_Negatives.py — SmartBuyer Hub
 Diagnostic Rentabilité Réseau · Flop 100 · Analyse par format et rayon
-v2.1 — Ajout code article dans Flop 100 et Analyse Casse
+v2.2 — Onglet 6 : Marges négatives détaillées par magasin
 """
 
 import streamlit as st
@@ -296,6 +296,21 @@ tx_casse    = abs(casse_total) / ca_total * 100 if ca_total > 0 else 0
 nb_art_neg  = int((agg_art["TxMarge"] < 0).sum())
 nb_flop_neg = int((flop100["TxMarge"] < 0).sum())
 
+# ── Données marges négatives par site (utilisé dans Tab Streamlit + export) ───
+art_neg_site = art_site[art_site["TxMarge_site"] < 0].copy()
+art_neg_site = art_neg_site.merge(
+    df_f[["Article","lib_art","code_art","lib_rayon","lib_fam"]].drop_duplicates("Article"),
+    on="Article", how="left"
+)
+# Résoudre les colonnes dupliquées issues du merge
+for col in ["lib_art","code_art","lib_rayon","lib_fam"]:
+    col_x = col + "_x"
+    col_y = col + "_y"
+    if col_x in art_neg_site.columns:
+        art_neg_site[col] = art_neg_site[col_x].combine_first(art_neg_site[col_y])
+        art_neg_site.drop(columns=[col_x, col_y], inplace=True)
+art_neg_site = art_neg_site.sort_values(["lib_rayon","lib_art","TxMarge_site"]).reset_index(drop=True)
+
 # ─── KPIs GLOBAUX ─────────────────────────────────────────────────────────────
 st.markdown(f"<div class='section-label'>{nb_sites_actifs} magasin(s) actifs · {len(sel_rayon)} rayon(s) · {periode}</div>", unsafe_allow_html=True)
 k1,k2,k3,k4,k5,k6 = st.columns(6)
@@ -401,10 +416,10 @@ with tab1:
     disp_rax["Tx Marge"]       = disp_rax["TxMarge"].apply(fmt_pct)
     disp_rax["Tx Marge HP"]    = disp_rax["TxMarge_HP"].apply(fmt_pct)
     disp_rax["Tx Marge Promo"] = disp_rax["TxMarge_Promo"].apply(fmt_pct)
-    disp_rax["Pds Promo"]      = disp_rax["PdsPromo"].apply(fmt_pct)
-    disp_rax["Tx Casse"]       = disp_rax["TxCasse"].apply(lambda x: fmt_pct(x, dec=2))
     disp_rax["Écart HP−Promo"] = (disp_rax["TxMarge_HP"] - disp_rax["TxMarge_Promo"]).apply(
         lambda x: fmt_delta(x) if pd.notna(x) else "—")
+    disp_rax["Pds Promo"]      = disp_rax["PdsPromo"].apply(fmt_pct)
+    disp_rax["Tx Casse"]       = disp_rax["TxCasse"].apply(lambda x: fmt_pct(x, dec=2))
     st.dataframe(
         disp_rax[["Rayon","CA (FCFA)","Poids CA","Marge (FCFA)","Tx Marge",
                   "Tx Marge HP","Tx Marge Promo","Écart HP−Promo","Pds Promo","Tx Casse"]],
@@ -503,7 +518,7 @@ with tab3:
 
     disp_flop = df_flop.copy()
     disp_flop["#"]           = disp_flop["Rang"]
-    disp_flop["Code Art."]   = disp_flop["code_art"]   # ← AJOUT
+    disp_flop["Code Art."]   = disp_flop["code_art"]
     disp_flop["Article"]     = disp_flop["lib_art"]
     disp_flop["Rayon"]       = disp_flop["lib_rayon"]
     disp_flop["Famille"]     = disp_flop["lib_fam"]
@@ -550,7 +565,6 @@ with tab4:
     agg_casse_rax["TxCasse"] = (agg_casse_rax["Casse_V"].abs() / agg_casse_rax["CA"] * 100).where(agg_casse_rax["CA"] > 0)
     agg_casse_rax = agg_casse_rax.sort_values("TxCasse", ascending=False)
 
-    # ── agg_casse_art avec code_art ───────────────────────────────────────────
     agg_casse_art = df_f.groupby(["Article","lib_art","code_art","lib_rayon","lib_fam"]).agg(
         CA=("CA","sum"), Casse_V=(casse_col_v,"sum"),
         **({} if not has_qty else {"Casse_Q": (casse_col_q,"sum")})
@@ -641,7 +655,7 @@ with tab4:
 
     disp_t30 = df_top30.copy()
     disp_t30["#"]            = disp_t30["Rang"]
-    disp_t30["Code Art."]    = disp_t30["code_art"]   # ← AJOUT
+    disp_t30["Code Art."]    = disp_t30["code_art"]
     disp_t30["Article"]      = disp_t30["lib_art"]
     disp_t30["Rayon"]        = disp_t30["lib_rayon"]
     disp_t30["Famille"]      = disp_t30["lib_fam"]
@@ -667,9 +681,10 @@ with tab4:
 with tab5:
     st.markdown("""
 <div class='alert-card alert-blue'>
-  <strong>📋 Contenu de l'export (5 onglets)</strong><br>
+  <strong>📋 Contenu de l'export (6 onglets)</strong><br>
   <strong>Synthèse Réseau</strong> · <strong>Récap Rayon</strong> · <strong>Matrice Marge</strong> ·
-  <strong>Flop 100</strong> (avec Code Art.) · <strong>Analyse Casse</strong> (avec Code Art.)
+  <strong>Flop 100</strong> (avec Code Art.) · <strong>Analyse Casse</strong> (avec Code Art.) ·
+  <strong>Marges Négatives par Site</strong>
 </div>""", unsafe_allow_html=True)
     st.caption(f"Périmètre : {len(sel_site)} magasin(s) · {len(sel_rayon)} rayon(s) · {periode}")
 
@@ -804,7 +819,7 @@ with tab5:
                 ws3.row_dimensions[r5].height=28
             ws3.freeze_panes="B5"
 
-            # ── Onglet 4 : Flop 100 avec Code Art.
+            # ── Onglet 4 : Flop 100
             ws4=wb_exp.create_sheet("Flop 100")
             title_block(ws4,f"FLOP {len(flop100)} — DESTRUCTEURS DE MARGE",span=13)
             hdrs4=["#","Code Art.","Article","Rayon","Famille","CA (FCFA)","Marge (FCFA)","Tx Marge","Pds Promo","Qté",
@@ -842,7 +857,7 @@ with tab5:
                 ws4.row_dimensions[r6].height=30
             ws4.freeze_panes="A5"
 
-            # ── Onglet 5 : Analyse Casse avec Code Art.
+            # ── Onglet 5 : Analyse Casse
             ws5=wb_exp.create_sheet("Analyse Casse")
             title_block(ws5,"ANALYSE CASSE RÉSEAU",span=9)
             kpi_casse=[("Casse Réseau (FCFA)",f"{abs(casse_reseau):,.0f}"),
@@ -916,7 +931,124 @@ with tab5:
                 ws5.row_dimensions[r5s].height=20; r5s+=1
             ws5.freeze_panes="A4"
 
-            buf=BytesIO(); wb_exp.save(buf); buf.seek(0)
+            # ── Onglet 6 : Marges négatives par site ──────────────────────────
+            ws6 = wb_exp.create_sheet("Marges Négatives par Site")
+            title_block(ws6, "ARTICLES À MARGE NÉGATIVE — DÉTAIL PAR MAGASIN", span=11)
+
+            # KPIs bandeau
+            nb_lignes_neg    = len(art_neg_site)
+            nb_art_uniq_neg  = art_neg_site["Article"].nunique()
+            nb_sites_neg     = art_neg_site["lib_site"].nunique()
+            perte_neg_total  = art_neg_site["Marge"].sum()
+            ca_neg_total     = art_neg_site["CA"].sum()
+
+            kpi_neg = [
+                ("Lignes article × site",  str(nb_lignes_neg)),
+                ("Articles distincts",      str(nb_art_uniq_neg)),
+                ("Magasins touchés",        str(nb_sites_neg)),
+                ("Pertes nettes (FCFA)",   f"{abs(perte_neg_total):,.0f}"),
+                ("CA exposé (FCFA)",       f"{ca_neg_total:,.0f}"),
+            ]
+            for ci_n, (lbl, val) in enumerate(kpi_neg):
+                ck = ws6.cell(row=4, column=ci_n + 1, value=lbl)
+                ck.font = Font("Calibri", size=9, bold=True, color=C_WH)
+                ck.fill = xfill(C_SUB); ck.alignment = xctr(); ck.border = xbdr()
+                ck2 = ws6.cell(row=5, column=ci_n + 1, value=val)
+                ck2.font = Font("Calibri", size=12, bold=True, color=C_DK)
+                ck2.fill = xfill("FFFFFF"); ck2.alignment = xctr(); ck2.border = xbdr()
+                ws6.column_dimensions[get_column_letter(ci_n + 1)].width = 22
+            ws6.row_dimensions[4].height = 20
+            ws6.row_dimensions[5].height = 28
+            ws6.row_dimensions[6].height = 8  # espace vide
+
+            # En-têtes tableau
+            r6s = 7
+            hdrs6  = ["#", "Code Art.", "Article", "Rayon", "Famille",
+                      "Magasin", "Format", "CA (FCFA)", "Marge (FCFA)", "Tx Marge", "Qté"]
+            wdths6 = [5,   12,          38,        18,      24,
+                      28,       10,       14,          14,           10,        8]
+            write_header_row(ws6, r6s, hdrs6, wdths6)
+            r6s += 1
+
+            # Palette de fond par rayon (alternance de teintes douces)
+            rayon_palette = [
+                "EBF5FB","E8F8F5","FEF9E7","F5EEF8","FDEDEC",
+                "EAF4FB","E9F7EF","FDFEFE","F4ECF7","FEF5E7",
+            ]
+            rayon_color_map = {}
+            for rayon_name in art_neg_site["lib_rayon"].dropna().unique():
+                idx = len(rayon_color_map) % len(rayon_palette)
+                rayon_color_map[rayon_name] = rayon_palette[idx]
+
+            for ri6, row6 in art_neg_site.reset_index(drop=True).iterrows():
+                rayon_v   = row6.get("lib_rayon")
+                fam_v     = row6.get("lib_fam")
+                art_lib_v = row6.get("lib_art")
+                code_v    = row6.get("code_art")
+                tm_v      = row6["TxMarge_site"]
+                qte_v     = int(row6["Qte"]) if pd.notna(row6.get("Qte")) else None
+
+                # Fond par sévérité de marge
+                if pd.notna(tm_v) and tm_v < -5:
+                    bg6 = "FDECEA"   # rouge pâle — marge < -5%
+                elif pd.notna(tm_v) and tm_v < 0:
+                    bg6 = "FFF3E0"   # orange pâle — marge entre -5% et 0%
+                else:
+                    bg6 = rayon_color_map.get(rayon_v, "FFFFFF")
+
+                vals6 = [
+                    ri6 + 1,
+                    code_v,
+                    art_lib_v,
+                    rayon_v,
+                    fam_v,
+                    row6["lib_site"],
+                    row6["format"],
+                    row6["CA"],
+                    row6["Marge"],
+                    (tm_v / 100) if pd.notna(tm_v) else None,
+                    qte_v,
+                ]
+                fmts6 = [
+                    None, None, None, None, None, None, None,
+                    "#,##0", "#,##0", "0.0%", "#,##0"
+                ]
+
+                for ci6_v, (v, f6) in enumerate(zip(vals6, fmts6)):
+                    c = ws6.cell(row=r6s, column=ci6_v + 1, value=v)
+                    c.fill   = xfill(bg6)
+                    c.border = xbdr()
+                    if f6:
+                        c.number_format = f6
+
+                    # Police : taux de marge en rouge gras si négatif
+                    if ci6_v == 9 and pd.notna(tm_v) and tm_v < 0:
+                        c.font = Font("Calibri", size=10, bold=True, color="C0392B")
+                    else:
+                        c.font = Font("Calibri", size=10, color=C_DK)
+
+                    # Alignement
+                    if ci6_v == 0:
+                        c.alignment = xctr()
+                    elif ci6_v in [7, 8, 10]:
+                        c.alignment = xrgt()
+                    elif ci6_v == 9:
+                        c.alignment = xctr()
+                    else:
+                        c.alignment = xlft(w=(ci6_v in [2, 4]))
+
+                ws6.row_dimensions[r6s].height = 20
+                r6s += 1
+
+            ws6.freeze_panes = f"A8"
+            ws6.auto_filter.ref = (
+                f"A7:{get_column_letter(len(hdrs6))}{r6s - 1}"
+            )
+
+            # ── Sauvegarde ────────────────────────────────────────────────────
+            buf = BytesIO()
+            wb_exp.save(buf)
+            buf.seek(0)
 
         st.download_button(
             label="⬇️ Télécharger le rapport Excel",
