@@ -473,9 +473,19 @@ def marge_negative_par_site(df, site_col):
     out = out.rename(columns={site_col: 'Site'})
     return out.sort_values('Marge Négative (FCFA)').reset_index(drop=True)
 
-def detail_marge_neg_site(df, site_col, n_per_site=10):
-    """Détail articles en marge négative, par site (pour la 3e feuille Excel
-    et l'explorateur du cockpit)."""
+def _site_format(site):
+    """Format magasin dérivé du libellé site (Hyper / Market / Supeco)."""
+    s = str(site).upper()
+    if 'HYPER' in s: return 'Hyper'
+    if 'MARKET' in s: return 'Market'
+    if 'SUPECO' in s: return 'Supeco'
+    return '—'
+
+def detail_marge_neg_site(df, site_col):
+    """Détail EXHAUSTIF des articles en marge négative, ligne article × site
+    (format du récap de référence 'Marges Négatives par Site').
+    Colonnes : Code Art. / Article / Rayon / Famille / Magasin / Format /
+    CA / Marge / Tx Marge % / Qté — trié par libellé article."""
     if not site_col or site_col not in df.columns:
         return None
     art = df[df['Article'].notna() & (df['Article'] != 'Total') & (df['Rayon'] != 'Total')].copy()
@@ -487,12 +497,20 @@ def detail_marge_neg_site(df, site_col, n_per_site=10):
         return None
     art['Rayon_aff'] = art['Rayon'].astype(str).str.split(' - ').str[-1].str.strip()
     art['Famille_aff'] = art['Famille'].astype(str).str.split(' - ').str[-1].str.strip()
-    art['Article_aff'] = art['Article'].astype(str)
+    # Séparation "code - libellé" de l'export PBI
+    art_str = art['Article'].astype(str)
+    has_sep = art_str.str.contains(' - ')
+    art['Code Art.'] = np.where(has_sep, art_str.str.split(' - ').str[0].str.strip(), '')
+    art['Article_aff'] = np.where(has_sep,
+                                  art_str.str.split(' - ', n=1).str[1].str.strip(), art_str)
+    art['Site'] = art[site_col].astype(str).str.split(' - ').str[-1].str.strip()
+    art['Format'] = art['Site'].map(_site_format)
     art['Tx Marge %'] = np.where(art['CA'] > 0, art['Marge']/art['CA']*100, np.nan)
-    art = art.rename(columns={site_col: 'Site'})
-    art = art.sort_values(['Site', 'Marge'])
-    return art.groupby('Site', group_keys=False).head(n_per_site)[
-        ['Site', 'Rayon_aff', 'Famille_aff', 'Article_aff', 'CA', 'Marge', 'Tx Marge %']]
+    qte = art.get('Qté Vente', pd.Series(np.nan, index=art.index))
+    art['Qté'] = qte.fillna(0)
+    return art.sort_values('Article_aff')[
+        ['Code Art.', 'Article_aff', 'Rayon_aff', 'Famille_aff', 'Site', 'Format',
+         'CA', 'Marge', 'Tx Marge %', 'Qté']].reset_index(drop=True)
 
 DISPLAY_COLS = ['Rayon_aff','Famille_aff','SousFamille_aff','Article_aff']
 DISPLAY_RENAME = {'Rayon_aff':'Rayon','Famille_aff':'Famille','SousFamille_aff':'Sous Famille','Article_aff':'Article'}
@@ -771,50 +789,98 @@ def build_excel_full(k, perf, fam, n_top, art_res, perimetre, mns=None, mns_deta
 
     autosize(ws2, {'A':7,'B':20,'C':24,'D':22,'E':38,'F':13,'G':13,'H':13,'I':13})
 
-    # ============== 🆕 FEUILLE 3 : MARGE NÉG PAR SITE (détail) ==============
+    # ============== 🆕 FEUILLE 3 : MARGES NÉGATIVES PAR SITE ==============
+    # Format aligné sur le récap de référence : bandeau KPI + tableau plat
+    # EXHAUSTIF (toutes les lignes article × site en marge négative).
     if mns_detail is not None and not mns_detail.empty:
-        ws3 = wb.create_sheet("Marge Nég par Site")
-        ws3.sheet_view.showGridLines = False
-        ws3.merge_cells("A1:G1")
-        ws3["A1"] = "MARGE NÉGATIVE PAR SITE — DÉTAIL ARTICLES"
-        ws3["A1"].font = Font(name=ARIAL, bold=True, size=14, color=WHITE_H)
-        ws3["A1"].fill = PatternFill("solid", fgColor=RED_H)
-        ws3["A1"].alignment = Alignment(horizontal="left", vertical="center", indent=1)
-        ws3.row_dimensions[1].height = 26
+        NAVY = "FF1B2A4A"; NAVY2 = "FF2E4B7A"; INK = "FF1A1A2E"
+        AMBER_F = "FFFFF3E0"; REDT_F = "FFFDECEA"; RED_TX = "FFC0392B"
+        CAL = "Calibri"
 
-        r3 = 3
-        for site, grp in mns_detail.groupby('Site', sort=True):
-            total_neg = grp['Marge'].sum()
-            ws3.merge_cells(start_row=r3, start_column=1, end_row=r3, end_column=7)
-            c = ws3.cell(row=r3, column=1,
-                         value=f"{site} — {len(grp)} article(s) affiché(s) · marge négative cumulée (affichée) : {int(total_neg):,} FCFA".replace(",", " "))
-            c.font = Font(name=ARIAL, bold=True, size=11, color=WHITE_H)
-            c.fill = PatternFill("solid", fgColor=DARK_H)
-            c.alignment = Alignment(horizontal="left", vertical="center", indent=1)
-            ws3.row_dimensions[r3].height = 20
+        ws3 = wb.create_sheet("Marges Négatives par Site")
+        ws3.sheet_view.showGridLines = False
+
+        ws3.merge_cells("A1:K1")
+        ws3["A1"] = "ARTICLES À MARGE NÉGATIVE — DÉTAIL PAR MAGASIN"
+        ws3["A1"].font = Font(name=CAL, bold=True, size=13, color=WHITE_H)
+        ws3["A1"].fill = PatternFill("solid", fgColor=NAVY)
+        ws3["A1"].alignment = Alignment(horizontal="center", vertical="center")
+        ws3.row_dimensions[1].height = 24
+
+        ws3.merge_cells("A2:K2")
+        per_txt = (perimetre.replace("\n", " ")[:150] if perimetre else "Voir export source")
+        ws3["A2"] = f"  Période : {per_txt}"
+        ws3["A2"].font = Font(name=CAL, size=9, color="FFAABBCC")
+        ws3["A2"].fill = PatternFill("solid", fgColor=NAVY)
+        ws3["A2"].alignment = Alignment(horizontal="left", vertical="center")
+
+        # ---- Bandeau KPI (lignes 4-5) ----
+        pertes = mns_detail['Marge'].sum()
+        kpi_data = [
+            ("Lignes article × site", f"{len(mns_detail):,}"),
+            ("Articles distincts", f"{mns_detail['Code Art.'].replace('', np.nan).fillna(mns_detail['Article_aff']).nunique():,}"),
+            ("Magasins touchés", f"{mns_detail['Site'].nunique():,}"),
+            ("Pertes nettes (FCFA)", f"{abs(pertes):,.0f}"),
+            ("CA exposé (FCFA)", f"{mns_detail['CA'].sum():,.0f}"),
+        ]
+        for j, (lbl, val) in enumerate(kpi_data, start=1):
+            c4 = ws3.cell(row=4, column=j, value=lbl)
+            c4.font = Font(name=CAL, bold=True, size=9, color=WHITE_H)
+            c4.fill = PatternFill("solid", fgColor=NAVY2)
+            c4.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            c5 = ws3.cell(row=5, column=j, value=val)
+            c5.font = Font(name=CAL, bold=True, size=12, color=INK)
+            c5.fill = PatternFill("solid", fgColor=WHITE_H)
+            c5.border = box
+            c5.alignment = Alignment(horizontal="center", vertical="center")
+        ws3.row_dimensions[4].height = 22
+        ws3.row_dimensions[5].height = 20
+
+        # ---- En-tête tableau (ligne 7) ----
+        headers3 = ["#", "Code Art.", "Article", "Rayon", "Famille", "Magasin",
+                    "Format", "CA (FCFA)", "Marge (FCFA)", "Tx Marge", "Qté"]
+        for j, lbl in enumerate(headers3, start=1):
+            c = ws3.cell(row=7, column=j, value=lbl)
+            c.font = Font(name=CAL, bold=True, size=10, color=WHITE_H)
+            c.fill = PatternFill("solid", fgColor=NAVY2)
+            c.alignment = Alignment(horizontal="center", vertical="center")
+
+        # ---- Données (exhaustif, trié par article) ----
+        r3 = 8
+        for i, (_, row_) in enumerate(mns_detail.iterrows(), start=1):
+            tx = row_['Tx Marge %']
+            severe = pd.notna(tx) and tx < -5.0
+            fillc = REDT_F if severe else AMBER_F
+            code = row_['Code Art.']
+            vals = [i,
+                    int(code) if str(code).isdigit() else (code or None),
+                    row_['Article_aff'], row_['Rayon_aff'], row_['Famille_aff'],
+                    row_['Site'], row_['Format'],
+                    row_['CA'], row_['Marge'],
+                    (tx/100 if pd.notna(tx) else None), row_['Qté']]
+            for j, v in enumerate(vals, start=1):
+                cell = ws3.cell(row=r3, column=j, value=v)
+                cell.fill = PatternFill("solid", fgColor=fillc)
+                cell.border = box
+                if j == 10:  # Tx Marge en rouge gras
+                    cell.font = Font(name=CAL, size=10, bold=True, color=RED_TX)
+                    cell.number_format = "0.0%"
+                    cell.alignment = Alignment(horizontal="center")
+                elif j in (8, 9, 11):
+                    cell.font = Font(name=CAL, size=10, color=INK)
+                    cell.number_format = "#,##0"
+                    cell.alignment = Alignment(horizontal="right")
+                elif j == 1:
+                    cell.font = Font(name=CAL, size=10, color=INK)
+                    cell.alignment = Alignment(horizontal="center")
+                else:
+                    cell.font = Font(name=CAL, size=10, color=INK)
+                    cell.alignment = Alignment(horizontal="left")
             r3 += 1
-            for i, lbl in enumerate(["Rang", "Rayon", "Famille", "Article", "CA", "Marge", "Taux Marge"], start=1):
-                cell = ws3.cell(row=r3, column=i, value=lbl)
-                cell.font = Font(name=ARIAL, bold=True, size=10, color=WHITE_H)
-                cell.fill = PatternFill("solid", fgColor=BLUE_H)
-                cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-            r3 += 1
-            for i, (_, row_) in enumerate(grp.iterrows()):
-                vals = [i+1, row_['Rayon_aff'], row_['Famille_aff'], row_['Article_aff'],
-                        row_['CA'], row_['Marge'],
-                        (row_['Tx Marge %']/100 if pd.notna(row_['Tx Marge %']) else None)]
-                fillc = LGREY_H if i % 2 == 1 else "FFFFFFFF"
-                for j, v in enumerate(vals, start=1):
-                    cell = ws3.cell(row=r3, column=j, value=v)
-                    cell.font = Font(name=ARIAL, size=10)
-                    cell.border = box
-                    cell.fill = PatternFill("solid", fgColor=fillc)
-                    cell.alignment = Alignment(horizontal="left" if j in (2, 3, 4) else "center")
-                for col, fmt_ in [(5, ACC), (6, ACC), (7, PCT2)]:
-                    ws3.cell(row=r3, column=col).number_format = fmt_
-                r3 += 1
-            r3 += 1
-        autosize(ws3, {'A':7,'B':20,'C':26,'D':40,'E':14,'F':14,'G':12})
+
+        autosize(ws3, {'A':5,'B':12,'C':38,'D':18,'E':24,'F':28,'G':10,'H':14,'I':14,'J':10,'K':8})
+        ws3.freeze_panes = "A8"
+        ws3.auto_filter.ref = f"A7:K{r3-1}"
 
     buf = io.BytesIO()
     wb.save(buf)
@@ -845,7 +911,6 @@ with st.sidebar:
     st.markdown("##### ⚙️ Paramètres")
     n_top = st.slider("Nombre de lignes par classement", 5, 30, 15)
     seuil_ca = st.number_input("Seuil CA mini — performeurs/croissance (FCFA)", 0, 5_000_000, 100_000, step=10_000)
-    n_site_detail = st.slider("Articles nég. max par site (détail)", 5, 30, 10)
     st.markdown("---")
     st.caption("SmartBuyer Hub · Module COPIL Hebdo · V2")
 
@@ -867,7 +932,7 @@ if up is None:
 df, perimetre, site_col = load_export(up.getvalue())
 art = prep_articles(df)
 mns = marge_negative_par_site(df, site_col)
-mns_detail = detail_marge_neg_site(df, site_col, n_per_site=n_site_detail)
+mns_detail = detail_marge_neg_site(df, site_col)
 
 if perimetre:
     with st.expander("🔎 Périmètre détecté dans le fichier"):
@@ -933,14 +998,18 @@ with tab1:
             st.dataframe(disp_mns, use_container_width=True, hide_index=True)
 
             if mns_detail is not None and not mns_detail.empty:
-                with st.expander("🔍 Détail des articles en marge négative, site par site"):
-                    site_sel = st.selectbox("Site", sorted(mns_detail['Site'].unique()), key="site_neg_sel")
-                    d = mns_detail[mns_detail['Site'] == site_sel].copy()
-                    d = d.rename(columns={'Rayon_aff':'Rayon','Famille_aff':'Famille','Article_aff':'Article'})
+                with st.expander(f"🔍 Détail exhaustif — {len(mns_detail)} lignes article × site en marge négative"):
+                    site_opts = ["Tous les sites"] + sorted(mns_detail['Site'].unique())
+                    site_sel = st.selectbox("Site", site_opts, key="site_neg_sel")
+                    d = mns_detail if site_sel == "Tous les sites" else mns_detail[mns_detail['Site'] == site_sel]
+                    d = d.rename(columns={'Rayon_aff': 'Rayon', 'Famille_aff': 'Famille', 'Article_aff': 'Article'})
+                    d = d.copy()
                     d['CA'] = d['CA'].map(fmt); d['Marge'] = d['Marge'].map(fmt)
                     d['Tx Marge %'] = d['Tx Marge %'].map(lambda v: fmt_pct(v))
-                    st.dataframe(d[['Rayon','Famille','Article','CA','Marge','Tx Marge %']],
-                                 use_container_width=True, hide_index=True)
+                    d['Qté'] = d['Qté'].map(lambda v: f"{v:,.0f}".replace(",", " "))
+                    st.dataframe(d[['Code Art.', 'Article', 'Rayon', 'Famille', 'Site', 'Format',
+                                    'CA', 'Marge', 'Tx Marge %', 'Qté']],
+                                 use_container_width=True, hide_index=True, height=420)
         else:
             st.caption("⚠️ Aucune colonne Site/Magasin détectée dans l'export — vue par site indisponible. "
                        "Ajoutez la dimension Site à l'export PBI pour l'activer.")
@@ -1012,7 +1081,7 @@ with tab1:
         st.download_button("📥 Télécharger le récap complet COPIL (.xlsx)", xls,
                             file_name="COPIL_Hebdo.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        nb_feuilles = "3 feuilles : Dashboard COPIL, Destructeurs & Performeurs, Marge Nég par Site" \
+        nb_feuilles = "3 feuilles : Dashboard COPIL, Destructeurs & Performeurs, Marges Négatives par Site" \
             if (mns_detail is not None and not mns_detail.empty) \
             else "2 feuilles : Dashboard COPIL et Destructeurs & Performeurs"
         st.caption(f"Le fichier contient {nb_feuilles}.")
