@@ -515,11 +515,12 @@ def detail_marge_neg_site(df, site_col):
 DISPLAY_COLS = ['Rayon_aff','Famille_aff','SousFamille_aff','Article_aff']
 DISPLAY_RENAME = {'Rayon_aff':'Rayon','Famille_aff':'Famille','SousFamille_aff':'Sous Famille','Article_aff':'Article'}
 
-def show_table(d, extra_cols, fmt_map=None):
+def show_table(d, extra_cols, fmt_map=None, show_rayon=True):
     if d.empty:
         st.caption("Aucune ligne ne correspond à ce critère sur la période.")
         return
-    cols = DISPLAY_COLS + extra_cols
+    base_cols = DISPLAY_COLS if show_rayon else [c for c in DISPLAY_COLS if c != 'Rayon_aff']
+    cols = base_cols + extra_cols
     disp = d[cols].rename(columns=DISPLAY_RENAME).reset_index(drop=True)
     disp.index = disp.index + 1
     if fmt_map:
@@ -532,7 +533,8 @@ def show_table(d, extra_cols, fmt_map=None):
 # EXPORT EXCEL — 3 feuilles : Dashboard COPIL · Destructeurs & Performeurs ·
 # Marge Nég par Site
 # ============================================================
-def build_excel_full(k, perf, fam, n_top, art_res, perimetre, mns=None, mns_detail=None):
+def build_excel_full(k, perf, fam, n_top, art_res, perimetre, mns=None, mns_detail=None,
+                      art_full=None, seuil_ca=100_000):
     BLUE_H = "FF007AFF"; DARK_H = "FF1D1D1F"; RED_H = "FFFF3B30"; GREEN_H = "FF34C759"
     WHITE_H = "FFFFFFFF"; LGREY_H = "FFF2F2F7"; ARIAL = "Arial"
     thin = Side(style="thin", color="FFD1D1D6")
@@ -718,76 +720,109 @@ def build_excel_full(k, perf, fam, n_top, art_res, perimetre, mns=None, mns_deta
     autosize(ws, {'A':22,'B':26,'C':16,'D':13,'E':16,'F':13,'G':13,'H':13})
     ws.freeze_panes = "A6"
 
-    # ============== FEUILLE 2 : DESTRUCTEURS & PERFORMEURS ==============
+    # ============== FEUILLE 2 : DESTRUCTEURS & PERFORMEURS (réseau) + 🆕 1 feuille par Rayon ==============
+    def fill_destructeurs_sheet(ws_target, header_text, res, n_top_local):
+        """Remplit une feuille Destructeurs & Performeurs (sections A→G) pour
+        n'importe quel périmètre (réseau entier ou un seul Rayon)."""
+        ws_target.sheet_view.showGridLines = False
+        ws_target.merge_cells(start_row=1, start_column=1, end_row=1, end_column=9)
+        c1 = ws_target.cell(row=1, column=1, value=header_text)
+        c1.font = Font(name=ARIAL, bold=True, size=14, color=WHITE_H)
+        c1.fill = PatternFill("solid", fgColor=BLUE_H)
+        c1.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+        ws_target.row_dimensions[1].height = 26
+
+        r_local = 3
+        def art_section(title, dframe, cols_map, kinds, color):
+            nonlocal r_local
+            ws_target.merge_cells(start_row=r_local, start_column=1, end_row=r_local, end_column=9)
+            c = ws_target.cell(row=r_local, column=1, value=title)
+            c.font = Font(name=ARIAL, bold=True, size=11, color=WHITE_H)
+            c.fill = PatternFill("solid", fgColor=color)
+            c.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+            ws_target.row_dimensions[r_local].height = 20
+            r_local += 1
+            for i, lbl in enumerate(["Rang"] + list(cols_map.values()), start=1):
+                cell = ws_target.cell(row=r_local, column=i, value=lbl)
+                cell.font = Font(name=ARIAL, bold=True, size=10, color=WHITE_H)
+                cell.fill = PatternFill("solid", fgColor=BLUE_H)
+                cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            r_local += 1
+            keys = list(cols_map.keys())
+            for i, (_, row_) in enumerate(dframe.iterrows()):
+                vals = [i+1] + [fmt_value(kinds.get(c, 'amount'), row_.get(c, None)) for c in keys]
+                fillc = LGREY_H if i % 2 == 1 else "FFFFFFFF"
+                for j, v in enumerate(vals, start=1):
+                    cell = ws_target.cell(row=r_local, column=j, value=v)
+                    cell.font = Font(name=ARIAL, size=10)
+                    cell.border = box
+                    cell.fill = PatternFill("solid", fgColor=fillc)
+                    cell.alignment = Alignment(horizontal="left" if j in (2,3,4,5) else "center")
+                    if j >= 6:
+                        cell.number_format = fmt_code(kinds.get(keys[j-2], 'amount'))
+                r_local += 1
+            r_local += 1
+
+        cm_neg = {'Rayon_aff':'Rayon','Famille_aff':'Famille','SousFamille_aff':'Sous Famille','Article_aff':'Article','CA':'CA','Marge':'Marge','Tx Marge %':'Taux Marge'}
+        art_section(f"A.  FLOP {n_top_local} — ARTICLES EN MARGE NÉGATIVE", res['A_marge_neg'], cm_neg,
+                    {'CA':'amount','Marge':'amount','Tx Marge %':'pct100'}, RED_H)
+
+        cm_deg = {'Rayon_aff':'Rayon','Famille_aff':'Famille','SousFamille_aff':'Sous Famille','Article_aff':'Article','CA':'CA','Tx Marge %':'Taux Marge','Écart Tx Marge (pts)':'Écart pts'}
+        art_section(f"B.  FLOP {n_top_local} — DÉGRADATION DU TAUX DE MARGE (marge encore positive)", res['B_degrad_marge'], cm_deg,
+                    {'CA':'amount','Tx Marge %':'pct100','Écart Tx Marge (pts)':'pts'}, RED_H)
+
+        cm_gain = {'Rayon_aff':'Rayon','Famille_aff':'Famille','SousFamille_aff':'Sous Famille','Article_aff':'Article','CA':'CA','Gain Marge (FCFA)':'Gain Marge','Tx Marge %':'Taux Marge'}
+        art_section(f"C.  TOP {n_top_local} — PERFORMEURS : GAIN DE MARGE EN VALEUR", res['C_perf_gain_marge'], cm_gain,
+                    {'CA':'amount','Gain Marge (FCFA)':'amount','Tx Marge %':'pct100'}, GREEN_H)
+
+        d4_local = res['D_croissance_ca'].copy()
+        if not d4_local.empty:
+            d4_local['Évol CA %'] = (d4_local['CA']/d4_local['CA N-1']-1)*100
+        cm_croi = {'Rayon_aff':'Rayon','Famille_aff':'Famille','SousFamille_aff':'Sous Famille','Article_aff':'Article','CA':'CA','CA N-1':'CA N-1','Évol CA %':'Évol %','Tx Marge %':'Taux Marge'}
+        art_section(f"D.  TOP {n_top_local} — PLUS FORTE CROISSANCE DE CA", d4_local, cm_croi,
+                    {'CA':'amount','CA N-1':'amount','Évol CA %':'pct100','Tx Marge %':'pct100'}, GREEN_H)
+
+        cm_baisse = {'Rayon_aff':'Rayon','Famille_aff':'Famille','SousFamille_aff':'Sous Famille','Article_aff':'Article','CA':'CA','CA N-1':'CA N-1','Perte CA (FCFA)':'Perte (FCFA)'}
+        art_section(f"E.  FLOP {n_top_local} — PLUS FORTE BAISSE DE CA", res['E_baisse_ca'], cm_baisse,
+                    {'CA':'amount','CA N-1':'amount','Perte CA (FCFA)':'amount'}, RED_H)
+
+        cm_qte = {'Rayon_aff':'Rayon','Famille_aff':'Famille','SousFamille_aff':'Sous Famille','Article_aff':'Article','Qté Vente':'Qté Vente','Qté Vente N-1':'Qté N-1','Variation Qté':'Variation','CA':'CA'}
+        kinds_qte = {'Qté Vente':'qty','Qté Vente N-1':'qty','Variation Qté':'amount_signed','CA':'amount'}
+        art_section(f"F.  TOP {n_top_local} — PLUS FORTE HAUSSE DE QUANTITÉ VENDUE", res['F_hausse_qte'], cm_qte, kinds_qte, GREEN_H)
+        art_section(f"G.  FLOP {n_top_local} — PLUS FORTE BAISSE DE QUANTITÉ VENDUE", res['G_baisse_qte'], cm_qte, kinds_qte, RED_H)
+
+        autosize(ws_target, {'A':7,'B':20,'C':24,'D':22,'E':38,'F':13,'G':13,'H':13,'I':13})
+
     ws2 = wb.create_sheet("Destructeurs Performeurs")
-    ws2.sheet_view.showGridLines = False
-    ws2.merge_cells("A1:I1")
-    ws2["A1"] = "DESTRUCTEURS & PERFORMEURS — NIVEAU ARTICLE (agrégé réseau, tous sites)"
-    ws2["A1"].font = Font(name=ARIAL, bold=True, size=14, color=WHITE_H)
-    ws2["A1"].fill = PatternFill("solid", fgColor=BLUE_H)
-    ws2["A1"].alignment = Alignment(horizontal="left", vertical="center", indent=1)
-    ws2.row_dimensions[1].height = 26
+    fill_destructeurs_sheet(ws2, "DESTRUCTEURS & PERFORMEURS — NIVEAU ARTICLE (agrégé réseau, tous sites)",
+                             art_res, n_top)
 
-    r2 = 3
-    def art_section(title, dframe, cols_map, kinds, color):
-        nonlocal r2
-        ws2.merge_cells(start_row=r2, start_column=1, end_row=r2, end_column=9)
-        c = ws2.cell(row=r2, column=1, value=title)
-        c.font = Font(name=ARIAL, bold=True, size=11, color=WHITE_H)
-        c.fill = PatternFill("solid", fgColor=color)
-        c.alignment = Alignment(horizontal="left", vertical="center", indent=1)
-        ws2.row_dimensions[r2].height = 20
-        r2 += 1
-        for i, lbl in enumerate(["Rang"] + list(cols_map.values()), start=1):
-            cell = ws2.cell(row=r2, column=i, value=lbl)
-            cell.font = Font(name=ARIAL, bold=True, size=10, color=WHITE_H)
-            cell.fill = PatternFill("solid", fgColor=BLUE_H)
-            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        r2 += 1
-        keys = list(cols_map.keys())
-        for i, (_, row_) in enumerate(dframe.iterrows()):
-            vals = [i+1] + [fmt_value(kinds.get(c, 'amount'), row_.get(c, None)) for c in keys]
-            fillc = LGREY_H if i % 2 == 1 else "FFFFFFFF"
-            for j, v in enumerate(vals, start=1):
-                cell = ws2.cell(row=r2, column=j, value=v)
-                cell.font = Font(name=ARIAL, size=10)
-                cell.border = box
-                cell.fill = PatternFill("solid", fgColor=fillc)
-                cell.alignment = Alignment(horizontal="left" if j in (2,3,4,5) else "center")
-                if j >= 6:
-                    cell.number_format = fmt_code(kinds.get(keys[j-2], 'amount'))
-            r2 += 1
-        r2 += 1
+    # ---- 🆕 Une feuille dédiée par Rayon, même structure A→G, filtrée sur ce seul rayon ----
+    if art_full is not None and not art_full.empty:
+        def _safe_sheet_name(base, used):
+            invalid = '[]:*?/\\'
+            name = "".join(ch for ch in base if ch not in invalid).strip()[:31]
+            if not name:
+                name = "Rayon"
+            candidate = name
+            i = 2
+            while candidate in used:
+                suffix = f" {i}"
+                candidate = (name[:31 - len(suffix)] + suffix)
+                i += 1
+            used.add(candidate)
+            return candidate
 
-    cm_neg = {'Rayon_aff':'Rayon','Famille_aff':'Famille','SousFamille_aff':'Sous Famille','Article_aff':'Article','CA':'CA','Marge':'Marge','Tx Marge %':'Taux Marge'}
-    art_section(f"A.  FLOP {n_top} — ARTICLES EN MARGE NÉGATIVE", art_res['A_marge_neg'], cm_neg,
-                {'CA':'amount','Marge':'amount','Tx Marge %':'pct100'}, RED_H)
-
-    cm_deg = {'Rayon_aff':'Rayon','Famille_aff':'Famille','SousFamille_aff':'Sous Famille','Article_aff':'Article','CA':'CA','Tx Marge %':'Taux Marge','Écart Tx Marge (pts)':'Écart pts'}
-    art_section(f"B.  FLOP {n_top} — DÉGRADATION DU TAUX DE MARGE (marge encore positive)", art_res['B_degrad_marge'], cm_deg,
-                {'CA':'amount','Tx Marge %':'pct100','Écart Tx Marge (pts)':'pts'}, RED_H)
-
-    cm_gain = {'Rayon_aff':'Rayon','Famille_aff':'Famille','SousFamille_aff':'Sous Famille','Article_aff':'Article','CA':'CA','Gain Marge (FCFA)':'Gain Marge','Tx Marge %':'Taux Marge'}
-    art_section(f"C.  TOP {n_top} — PERFORMEURS : GAIN DE MARGE EN VALEUR", art_res['C_perf_gain_marge'], cm_gain,
-                {'CA':'amount','Gain Marge (FCFA)':'amount','Tx Marge %':'pct100'}, GREEN_H)
-
-    d4 = art_res['D_croissance_ca'].copy()
-    if not d4.empty:
-        d4['Évol CA %'] = (d4['CA']/d4['CA N-1']-1)*100
-    cm_croi = {'Rayon_aff':'Rayon','Famille_aff':'Famille','SousFamille_aff':'Sous Famille','Article_aff':'Article','CA':'CA','CA N-1':'CA N-1','Évol CA %':'Évol %','Tx Marge %':'Taux Marge'}
-    art_section(f"D.  TOP {n_top} — PLUS FORTE CROISSANCE DE CA", d4, cm_croi,
-                {'CA':'amount','CA N-1':'amount','Évol CA %':'pct100','Tx Marge %':'pct100'}, GREEN_H)
-
-    cm_baisse = {'Rayon_aff':'Rayon','Famille_aff':'Famille','SousFamille_aff':'Sous Famille','Article_aff':'Article','CA':'CA','CA N-1':'CA N-1','Perte CA (FCFA)':'Perte (FCFA)'}
-    art_section(f"E.  FLOP {n_top} — PLUS FORTE BAISSE DE CA", art_res['E_baisse_ca'], cm_baisse,
-                {'CA':'amount','CA N-1':'amount','Perte CA (FCFA)':'amount'}, RED_H)
-
-    cm_qte = {'Rayon_aff':'Rayon','Famille_aff':'Famille','SousFamille_aff':'Sous Famille','Article_aff':'Article','Qté Vente':'Qté Vente','Qté Vente N-1':'Qté N-1','Variation Qté':'Variation','CA':'CA'}
-    kinds_qte = {'Qté Vente':'qty','Qté Vente N-1':'qty','Variation Qté':'amount_signed','CA':'amount'}
-    art_section(f"F.  TOP {n_top} — PLUS FORTE HAUSSE DE QUANTITÉ VENDUE", art_res['F_hausse_qte'], cm_qte, kinds_qte, GREEN_H)
-    art_section(f"G.  FLOP {n_top} — PLUS FORTE BAISSE DE QUANTITÉ VENDUE", art_res['G_baisse_qte'], cm_qte, kinds_qte, RED_H)
-
-    autosize(ws2, {'A':7,'B':20,'C':24,'D':22,'E':38,'F':13,'G':13,'H':13,'I':13})
+        used_names = {"Dashboard COPIL", "Destructeurs Performeurs", "Marges Négatives par Site"}
+        rayons = sorted(rr for rr in art_full['Rayon_aff'].dropna().unique() if str(rr).strip())
+        for rayon in rayons:
+            art_r = art_full[art_full['Rayon_aff'] == rayon]
+            if art_r.empty:
+                continue
+            res_r = destructeurs_performeurs(art_r, n=n_top, seuil_ca=seuil_ca)
+            sheet_name = _safe_sheet_name(f"DP - {rayon}", used_names)
+            ws_r = wb.create_sheet(sheet_name)
+            fill_destructeurs_sheet(ws_r, f"DESTRUCTEURS & PERFORMEURS — {rayon.upper()}", res_r, n_top)
 
     # ============== 🆕 FEUILLE 3 : MARGES NÉGATIVES PAR SITE ==============
     # Format aligné sur le récap de référence : bandeau KPI + tableau plat
@@ -896,6 +931,50 @@ def top_familles_for_excel(fam, n, by):
     return out.reset_index(drop=True)
 
 # ============================================================
+# 🆕 RENDU DESTRUCTEURS & PERFORMEURS — réutilisable par périmètre
+# (Réseau entier OU un seul Rayon, chacun dans son onglet)
+# ============================================================
+def render_destructeurs_performeurs(art_scope, n_top, seuil_ca, show_rayon=True):
+    if art_scope.empty:
+        st.caption("Aucun article sur ce périmètre.")
+        return
+    st.caption(f"{len(art_scope):,} articles (agrégés réseau, sans doublon multi-site) · "
+               f"seuil de matérialité : {fmt(seuil_ca)} FCFA (modifiable dans la barre latérale)".replace(",", " "))
+    res = destructeurs_performeurs(art_scope, n=n_top, seuil_ca=seuil_ca)
+
+    st.markdown(f"<span class='badge' style='background:rgba(255,59,48,0.12);color:#C62A22'>A · Marge négative</span>", unsafe_allow_html=True)
+    show_table(res['A_marge_neg'], ['CA','Marge','Tx Marge %','Qté Vente'],
+               {'CA': fmt, 'Marge': fmt, 'Tx Marge %': lambda v: fmt_pct(v), 'Qté Vente': fmt}, show_rayon=show_rayon)
+
+    st.markdown(f"<span class='badge' style='background:rgba(255,59,48,0.12);color:#C62A22'>B · Dégradation du taux de marge (marge encore positive)</span>", unsafe_allow_html=True)
+    show_table(res['B_degrad_marge'], ['CA','Tx Marge %','Écart Tx Marge (pts)'],
+               {'CA': fmt, 'Tx Marge %': lambda v: fmt_pct(v), 'Écart Tx Marge (pts)': fmt_delta}, show_rayon=show_rayon)
+
+    st.markdown(f"<span class='badge' style='background:rgba(52,199,89,0.13);color:#1A7A3A'>C · Performeurs — gain de marge en valeur</span>", unsafe_allow_html=True)
+    show_table(res['C_perf_gain_marge'], ['CA','Gain Marge (FCFA)','Tx Marge %'],
+               {'CA': fmt, 'Gain Marge (FCFA)': fmt, 'Tx Marge %': lambda v: fmt_pct(v)}, show_rayon=show_rayon)
+
+    st.markdown(f"<span class='badge' style='background:rgba(52,199,89,0.13);color:#1A7A3A'>D · Plus forte croissance de CA</span>", unsafe_allow_html=True)
+    d4 = res['D_croissance_ca'].copy()
+    if not d4.empty:
+        d4['Évol CA %'] = (d4['CA']/d4['CA N-1']-1)*100
+    show_table(d4, ['CA','CA N-1','Évol CA %','Tx Marge %'],
+               {'CA': fmt, 'CA N-1': fmt, 'Évol CA %': lambda v: fmt_pct(v), 'Tx Marge %': lambda v: fmt_pct(v)}, show_rayon=show_rayon)
+    st.caption("⚠️ Une forte évolution % peut refléter un effet de base (article quasi absent en N-1) plutôt qu'une vraie dynamique.")
+
+    st.markdown(f"<span class='badge' style='background:rgba(255,59,48,0.12);color:#C62A22'>E · Plus forte baisse de CA</span>", unsafe_allow_html=True)
+    show_table(res['E_baisse_ca'], ['CA','CA N-1','Perte CA (FCFA)'],
+               {'CA': fmt, 'CA N-1': fmt, 'Perte CA (FCFA)': fmt}, show_rayon=show_rayon)
+
+    st.markdown(f"<span class='badge' style='background:rgba(52,199,89,0.13);color:#1A7A3A'>F · Plus forte hausse de quantité vendue</span>", unsafe_allow_html=True)
+    show_table(res['F_hausse_qte'], ['Qté Vente','Qté Vente N-1','Variation Qté','CA'],
+               {'Qté Vente': fmt, 'Qté Vente N-1': fmt, 'Variation Qté': lambda v: f"{v:+,.0f}".replace(",", " "), 'CA': fmt}, show_rayon=show_rayon)
+
+    st.markdown(f"<span class='badge' style='background:rgba(255,59,48,0.12);color:#C62A22'>G · Plus forte baisse de quantité vendue</span>", unsafe_allow_html=True)
+    show_table(res['G_baisse_qte'], ['Qté Vente','Qté Vente N-1','Variation Qté','CA'],
+               {'Qté Vente': fmt, 'Qté Vente N-1': fmt, 'Variation Qté': lambda v: f"{v:+,.0f}".replace(",", " "), 'CA': fmt}, show_rayon=show_rayon)
+
+# ============================================================
 # INTERFACE
 # ============================================================
 st.markdown("<div class='page-title'>COPIL Hebdo</div>"
@@ -925,7 +1004,8 @@ if up is None:
         f"<b>Dashboard COPIL</b> — CA, marge, quantités vs N-1 · performance par rayon vs objectifs Méti · "
         f"marge négative par site · top familles en baisse de CA / casse / poids promo<br>"
         f"<b>Destructeurs &amp; Performeurs</b> — articles agrégés réseau (sans doublon multi-site) : marge négative, "
-        f"dégradation de taux, gain de marge, croissance/baisse de CA et de quantité</div>"
+        f"dégradation de taux, gain de marge, croissance/baisse de CA et de quantité, disponible pour le réseau entier "
+        f"et pour chaque rayon dans son propre onglet</div>"
         f"</div>", unsafe_allow_html=True)
     st.stop()
 
@@ -1077,49 +1157,30 @@ with tab1:
 
         st.markdown("<div class='section-label'>Export</div>", unsafe_allow_html=True)
         art_res_export = destructeurs_performeurs(art, n=n_top, seuil_ca=seuil_ca)
-        xls = build_excel_full(k, perf, fam, n_top, art_res_export, perimetre, mns, mns_detail)
+        xls = build_excel_full(k, perf, fam, n_top, art_res_export, perimetre, mns, mns_detail,
+                                art_full=art, seuil_ca=seuil_ca)
         st.download_button("📥 Télécharger le récap complet COPIL (.xlsx)", xls,
                             file_name="COPIL_Hebdo.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        nb_feuilles = "3 feuilles : Dashboard COPIL, Destructeurs & Performeurs, Marges Négatives par Site" \
-            if (mns_detail is not None and not mns_detail.empty) \
-            else "2 feuilles : Dashboard COPIL et Destructeurs & Performeurs"
-        st.caption(f"Le fichier contient {nb_feuilles}.")
+        n_rayons_export = int(art['Rayon_aff'].dropna().nunique())
+        base_txt = "Dashboard COPIL, Destructeurs & Performeurs (réseau)"
+        if mns_detail is not None and not mns_detail.empty:
+            base_txt += ", Marges Négatives par Site"
+        total_feuilles = 2 + (1 if (mns_detail is not None and not mns_detail.empty) else 0) + n_rayons_export
+        st.caption(f"Le fichier contient {total_feuilles} feuilles : {base_txt}, "
+                   f"et {n_rayons_export} feuille(s) Destructeurs & Performeurs par rayon.")
 
 # ---------------- TAB 2 : DESTRUCTEURS & PERFORMEURS (ARTICLE, AGRÉGÉ RÉSEAU) ----------------
+# 🆕 Sous-onglets : Réseau entier + un onglet par Rayon
 with tab2:
-    st.caption(f"{len(art):,} articles (agrégés réseau, sans doublon multi-site) · "
-               f"seuil de matérialité : {fmt(seuil_ca)} FCFA (modifiable dans la barre latérale)".replace(",", " "))
-    res = destructeurs_performeurs(art, n=n_top, seuil_ca=seuil_ca)
+    rayons_disponibles = sorted(r for r in art['Rayon_aff'].dropna().unique() if str(r).strip())
+    sous_tab_labels = ["🌐 Réseau (tous rayons)"] + [f"🗂️ {r}" for r in rayons_disponibles]
+    sous_tabs = st.tabs(sous_tab_labels)
 
-    st.markdown(f"<span class='badge' style='background:rgba(255,59,48,0.12);color:#C62A22'>A · Marge négative</span>", unsafe_allow_html=True)
-    show_table(res['A_marge_neg'], ['CA','Marge','Tx Marge %','Qté Vente'],
-               {'CA': fmt, 'Marge': fmt, 'Tx Marge %': lambda v: fmt_pct(v), 'Qté Vente': fmt})
+    with sous_tabs[0]:
+        render_destructeurs_performeurs(art, n_top, seuil_ca, show_rayon=True)
 
-    st.markdown(f"<span class='badge' style='background:rgba(255,59,48,0.12);color:#C62A22'>B · Dégradation du taux de marge (marge encore positive)</span>", unsafe_allow_html=True)
-    show_table(res['B_degrad_marge'], ['CA','Tx Marge %','Écart Tx Marge (pts)'],
-               {'CA': fmt, 'Tx Marge %': lambda v: fmt_pct(v), 'Écart Tx Marge (pts)': fmt_delta})
-
-    st.markdown(f"<span class='badge' style='background:rgba(52,199,89,0.13);color:#1A7A3A'>C · Performeurs — gain de marge en valeur</span>", unsafe_allow_html=True)
-    show_table(res['C_perf_gain_marge'], ['CA','Gain Marge (FCFA)','Tx Marge %'],
-               {'CA': fmt, 'Gain Marge (FCFA)': fmt, 'Tx Marge %': lambda v: fmt_pct(v)})
-
-    st.markdown(f"<span class='badge' style='background:rgba(52,199,89,0.13);color:#1A7A3A'>D · Plus forte croissance de CA</span>", unsafe_allow_html=True)
-    d4 = res['D_croissance_ca'].copy()
-    if not d4.empty:
-        d4['Évol CA %'] = (d4['CA']/d4['CA N-1']-1)*100
-    show_table(d4, ['CA','CA N-1','Évol CA %','Tx Marge %'],
-               {'CA': fmt, 'CA N-1': fmt, 'Évol CA %': lambda v: fmt_pct(v), 'Tx Marge %': lambda v: fmt_pct(v)})
-    st.caption("⚠️ Une forte évolution % peut refléter un effet de base (article quasi absent en N-1) plutôt qu'une vraie dynamique.")
-
-    st.markdown(f"<span class='badge' style='background:rgba(255,59,48,0.12);color:#C62A22'>E · Plus forte baisse de CA</span>", unsafe_allow_html=True)
-    show_table(res['E_baisse_ca'], ['CA','CA N-1','Perte CA (FCFA)'],
-               {'CA': fmt, 'CA N-1': fmt, 'Perte CA (FCFA)': fmt})
-
-    st.markdown(f"<span class='badge' style='background:rgba(52,199,89,0.13);color:#1A7A3A'>F · Plus forte hausse de quantité vendue</span>", unsafe_allow_html=True)
-    show_table(res['F_hausse_qte'], ['Qté Vente','Qté Vente N-1','Variation Qté','CA'],
-               {'Qté Vente': fmt, 'Qté Vente N-1': fmt, 'Variation Qté': lambda v: f"{v:+,.0f}".replace(",", " "), 'CA': fmt})
-
-    st.markdown(f"<span class='badge' style='background:rgba(255,59,48,0.12);color:#C62A22'>G · Plus forte baisse de quantité vendue</span>", unsafe_allow_html=True)
-    show_table(res['G_baisse_qte'], ['Qté Vente','Qté Vente N-1','Variation Qté','CA'],
-               {'Qté Vente': fmt, 'Qté Vente N-1': fmt, 'Variation Qté': lambda v: f"{v:+,.0f}".replace(",", " "), 'CA': fmt})
+    for i, rayon in enumerate(rayons_disponibles, start=1):
+        with sous_tabs[i]:
+            art_rayon = art[art['Rayon_aff'] == rayon]
+            render_destructeurs_performeurs(art_rayon, n_top, seuil_ca, show_rayon=False)
