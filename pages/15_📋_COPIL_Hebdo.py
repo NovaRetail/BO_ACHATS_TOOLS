@@ -76,15 +76,15 @@ hr {{ border: none !important; border-top: 1px solid rgba(0,0,0,0.07) !important
     background: {BLUE}; display: inline-block;
 }}
 
-/* ---------- Cartes ---------- */
+/* ---------- Cartes (coins plus arrondis, style Apple) ---------- */
 .card, .kpi-card, .recap-card {{
-    background: #FFFFFF; border-radius: 18px;
+    background: #FFFFFF; border-radius: 20px;
     border: 1px solid rgba(0,0,0,0.06);
     box-shadow: 0 2px 12px rgba(0,0,0,0.045);
 }}
 .card {{ padding: 16px 20px; margin-bottom: 12px; }}
 
-.kpi-card {{ padding: 18px 20px; transition: transform .15s ease, box-shadow .15s ease; }}
+.kpi-card {{ padding: 18px 20px; border-radius: 18px; transition: transform .15s ease, box-shadow .15s ease; }}
 .kpi-card:hover {{ transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,0.08); }}
 .kpi-label {{
     font-size: 10.5px; font-weight: 600; color: {GREY};
@@ -103,7 +103,7 @@ hr {{ border: none !important; border-top: 1px solid rgba(0,0,0,0.07) !important
 /* ---------- Hero récap ---------- */
 .recap-card {{
     background: linear-gradient(135deg, #FFFFFF 0%, #F2F8FF 100%);
-    border: 1px solid #E1EEFF;
+    border: 1px solid #E1EEFF; border-radius: 18px;
     box-shadow: 0 6px 24px rgba(0,64,221,0.07);
     padding: 18px 24px; margin-bottom: 20px;
 }}
@@ -114,15 +114,38 @@ hr {{ border: none !important; border-top: 1px solid rgba(0,0,0,0.07) !important
 }}
 .recap-line2 b {{ color: {BLUE}; }}
 
-/* ---------- Info box (état vide) ---------- */
+/* ---------- Écran d'accueil (état vide) — icône ronde + grille + bandeau ---------- */
 .info-box {{
     background: #FFFFFF; border: 1px solid rgba(0,0,0,0.06);
-    border-radius: 20px; padding: 24px 28px; margin-bottom: 24px;
-    box-shadow: 0 2px 12px rgba(0,0,0,0.045);
+    border-radius: 22px; padding: 24px 28px; margin-bottom: 24px;
+    box-shadow: 0 2px 14px rgba(0,0,0,0.05);
 }}
-.info-box .it {{ font-size: 17px; font-weight: 700; color: {DARK}; letter-spacing: -0.02em; margin-bottom: 10px; }}
-.info-box .ip {{ font-size: 13.5px; color: #3A3A3C; line-height: 1.65; }}
+.info-head {{ display: flex; align-items: flex-start; gap: 14px; }}
+.info-icon {{
+    width: 44px; height: 44px; min-width: 44px; border-radius: 14px;
+    background: rgba(0,122,255,0.1); display: flex; align-items: center;
+    justify-content: center; font-size: 20px;
+}}
+.info-box .it {{ font-size: 17px; font-weight: 700; color: {DARK}; letter-spacing: -0.02em; margin-bottom: 4px; }}
+.info-box .ip {{ font-size: 13.5px; color: #3A3A3C; line-height: 1.6; }}
 .info-box .iq {{ margin-top: 14px; font-size: 13px; color: #3A3A3C; line-height: 1.95; }}
+.col-grid {{
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 8px; margin: 18px 0;
+}}
+.col-chip {{ background: {BG}; border-radius: 14px; padding: 10px 12px; }}
+.col-chip.opt {{ background: rgba(52,199,89,0.1); }}
+.col-chip-label {{
+    font-size: 10px; font-weight: 700; color: {GREY};
+    text-transform: uppercase; letter-spacing: 0.05em;
+}}
+.col-chip.opt .col-chip-label {{ color: #1A7A3A; }}
+.col-chip-tag {{ font-size: 12px; color: {DARK}; font-weight: 600; margin-top: 2px; }}
+.col-chip.opt .col-chip-tag {{ color: #1A7A3A; }}
+.invite-banner {{
+    background: rgba(0,122,255,0.06); border-radius: 16px;
+    padding: 12px 16px; font-size: 12.5px; color: #0A66D0; font-weight: 600;
+}}
 
 /* ---------- Badges de section (Tab 2) ---------- */
 .badge {{
@@ -132,11 +155,11 @@ hr {{ border: none !important; border-top: 1px solid rgba(0,0,0,0.07) !important
 
 /* ---------- Tabs façon segmented control ---------- */
 .stTabs [data-baseweb="tab-list"] {{
-    background: #E9E9EB; padding: 3px; border-radius: 12px;
+    background: #E9E9EB; padding: 3px; border-radius: 14px;
     gap: 2px; width: fit-content;
 }}
 .stTabs [data-baseweb="tab"] {{
-    border-radius: 9px; padding: 6px 18px; background: transparent;
+    border-radius: 11px; padding: 6px 18px; background: transparent;
     font-weight: 600; font-size: 13.5px; color: {DARK};
 }}
 .stTabs [aria-selected="true"] {{
@@ -147,12 +170,12 @@ hr {{ border: none !important; border-top: 1px solid rgba(0,0,0,0.07) !important
 
 /* ---------- Dataframes & widgets ---------- */
 [data-testid="stDataFrame"] {{
-    border: 1px solid rgba(0,0,0,0.06); border-radius: 14px;
+    border: 1px solid rgba(0,0,0,0.06); border-radius: 16px;
     overflow: hidden; box-shadow: 0 1px 6px rgba(0,0,0,0.035);
 }}
 .stDownloadButton button, .stButton button {{
     background: {BLUE}; color: #FFFFFF; border: none;
-    border-radius: 12px; padding: 0.62rem 1.5rem;
+    border-radius: 14px; padding: 0.62rem 1.5rem;
     font-weight: 600; font-size: 14px; letter-spacing: -0.01em;
     box-shadow: 0 2px 10px rgba(0,122,255,0.28);
     transition: background .15s ease, transform .1s ease;
@@ -162,11 +185,11 @@ hr {{ border: none !important; border-top: 1px solid rgba(0,0,0,0.07) !important
 }}
 [data-testid="stExpander"] {{
     background: #FFFFFF; border: 1px solid rgba(0,0,0,0.06) !important;
-    border-radius: 14px !important; box-shadow: 0 1px 6px rgba(0,0,0,0.035);
+    border-radius: 16px !important; box-shadow: 0 1px 6px rgba(0,0,0,0.035);
 }}
 [data-testid="stFileUploader"] section {{
     background: #FFFFFF; border: 1.5px dashed rgba(0,122,255,0.35);
-    border-radius: 14px;
+    border-radius: 16px;
 }}
 @media (prefers-reduced-motion: reduce) {{
     .kpi-card, .stDownloadButton button, .stButton button {{ transition: none; }}
@@ -996,16 +1019,29 @@ with st.sidebar:
 if up is None:
     st.markdown(
         f"<div class='info-box'>"
-        f"<div class='it'>ℹ️ À quoi sert ce module ?</div>"
-        f"<div class='ip'>Ce module prépare le point hebdo réseau pour le COPIL à partir de l'export PBI "
-        f"<b>Rayon → Famille → Sous-Famille → Article</b> (avec ou sans colonne Site). "
-        f"Un seul fichier à charger chaque semaine, dans la barre latérale.</div>"
+        f"<div class='info-head'>"
+        f"<div class='info-icon'>📋</div>"
+        f"<div style='flex:1;'>"
+        f"<div class='it'>COPIL Hebdo</div>"
+        f"<div class='ip'>Prépare le point hebdo réseau pour le COPIL à partir d'un seul export PBI "
+        f"<b>Rayon → Famille → Sous-Famille → Article</b>. Un fichier à charger chaque semaine, "
+        f"dans la barre latérale.</div>"
+        f"</div></div>"
+        f"<div class='col-grid'>"
+        f"<div class='col-chip'><div class='col-chip-label'>Rayon</div><div class='col-chip-tag'>Requis</div></div>"
+        f"<div class='col-chip'><div class='col-chip-label'>Famille</div><div class='col-chip-tag'>Requis</div></div>"
+        f"<div class='col-chip'><div class='col-chip-label'>Article</div><div class='col-chip-tag'>Requis</div></div>"
+        f"<div class='col-chip opt'><div class='col-chip-label'>Site</div><div class='col-chip-tag'>Optionnel</div></div>"
+        f"</div>"
         f"<div class='iq'>"
         f"<b>Dashboard COPIL</b> — CA, marge, quantités vs N-1 · performance par rayon vs objectifs Méti · "
         f"marge négative par site · top familles en baisse de CA / casse / poids promo<br>"
         f"<b>Destructeurs &amp; Performeurs</b> — articles agrégés réseau (sans doublon multi-site) : marge négative, "
         f"dégradation de taux, gain de marge, croissance/baisse de CA et de quantité, disponible pour le réseau entier "
         f"et pour chaque rayon dans son propre onglet</div>"
+        f"<div style='margin-top:16px;'>"
+        f"<div class='invite-banner'>⬆ Chargez votre extraction dans la barre latérale pour démarrer</div>"
+        f"</div>"
         f"</div>", unsafe_allow_html=True)
     st.stop()
 
