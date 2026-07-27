@@ -1,34 +1,47 @@
 """
-15_📋_COPIL_Hebdo.py — Module COPIL Hebdo · SmartBuyer Hub
-Vue réseau (Rayon) + Destructeurs/Performeurs (Article) + Marge Négative par Site.
-V2 : design Apple clair modernisé · dédoublonnage réseau (export à la maille Article × Site)
-     · nouvelle vue Marge Négative par Site (cockpit + export Excel, 3e feuille).
+generate_reporting_ventes.py — SmartBuyer Hub
+Génère "Reporting Ventes - AAAAMMJJ.xlsx" à partir d'un export PBI
+(Rayon → Famille → Sous Famille → Article [× Site]).
+
+Reprend telle quelle la logique métier et les onglets du module
+15_📋_COPIL_Hebdo.py :
+  - Dashboard COPIL (vue réseau, perf par rayon, top/flop familles,
+    marge négative par site si la colonne Site est présente)
+  - Destructeurs Performeurs (réseau entier)
+  - DP - <Rayon> (un onglet par rayon détecté dans l'export)
+  - Marges Négatives par Site (uniquement si une colonne Site/Magasin
+    est détectée dans l'export)
+
+La période affichée dans le fichier est extraite automatiquement de
+la dernière cellule de la première colonne de l'export PBI
+(ligne "Filtres appliqués : Date est le ou après le JJ/MM/AAAA
+et est avant le JJ/MM/AAAA...").
+
+Usage :
+    python generate_reporting_ventes.py chemin/vers/export_pbi.xlsx [dossier_sortie]
+
+Si aucun argument n'est fourni, le script cherche un .xlsx dans le
+dossier courant.
 """
 
-import streamlit as st
-import pandas as pd
-import numpy as np
 import io
+import re
+import sys
+from datetime import date
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.utils import get_column_letter
 from openpyxl.formatting.rule import CellIsRule
 
-# ============================================================
-# CONFIG & CHARTE (Apple clair — V2)
-# ============================================================
-st.set_page_config(page_title="COPIL Hebdo", page_icon="📋", layout="wide")
-
-BLUE = "#007AFF"
-GREEN = "#34C759"
-RED = "#FF3B30"
-AMBER = "#FF9500"
-DARK = "#1D1D1F"
-GREY = "#86868B"
-BG = "#F5F5F7"
+# Colonnes candidates pour la dimension Site dans l'export PBI (auto-détection)
+SITE_CANDIDATES = ["Site", "Magasin", "Code Site", "Libellé Site", "Nom Site",
+                   "Site de vente", "Etablissement", "Établissement", "Store"]
 
 # ============================================================
-# 🎯 CIBLES DE MARGE PAR RAYON — identiques au module 14_💰_Marge.py
+# 🎯 CIBLES DE MARGE PAR RAYON
 # ============================================================
 CIBLES_DEFAUT = {
     "BOISSONS": 19.5,
@@ -41,165 +54,6 @@ CIBLE_FALLBACK = 23.5
 # Colonnes candidates pour la dimension Site dans l'export PBI (auto-détection)
 SITE_CANDIDATES = ["Site", "Magasin", "Code Site", "Libellé Site", "Nom Site",
                    "Site de vente", "Etablissement", "Établissement", "Store"]
-
-st.markdown(f"""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-
-html, body, [class*="css"] {{
-    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Inter', sans-serif;
-    -webkit-font-smoothing: antialiased;
-}}
-.stApp {{ background: {BG}; }}
-.block-container {{ padding-top: 1.6rem; padding-bottom: 3rem; max-width: 1300px; }}
-[data-testid="stSidebar"] {{
-    background: rgba(255,255,255,0.85);
-    backdrop-filter: blur(20px);
-    border-right: 1px solid rgba(0,0,0,0.06);
-}}
-[data-testid="stSidebar"] .block-container {{ padding-top: 2rem; }}
-hr {{ border: none !important; border-top: 1px solid rgba(0,0,0,0.07) !important; margin: 1.1rem 0 !important; }}
-
-/* ---------- Titres ---------- */
-.page-title {{
-    font-size: 32px; font-weight: 800; color: {DARK};
-    letter-spacing: -0.035em; margin: 0; line-height: 1.15;
-}}
-.page-caption {{ font-size: 14px; color: {GREY}; margin-top: 5px; margin-bottom: 1.4rem; letter-spacing: -0.01em; }}
-.section-label {{
-    display: flex; align-items: center; gap: 8px;
-    font-size: 11px; font-weight: 700; color: {GREY};
-    text-transform: uppercase; letter-spacing: 0.09em; margin: 26px 0 12px;
-}}
-.section-label::before {{
-    content: ""; width: 8px; height: 8px; border-radius: 3px;
-    background: {BLUE}; display: inline-block;
-}}
-
-/* ---------- Cartes (coins plus arrondis, style Apple) ---------- */
-.card, .kpi-card, .recap-card {{
-    background: #FFFFFF; border-radius: 20px;
-    border: 1px solid rgba(0,0,0,0.06);
-    box-shadow: 0 2px 12px rgba(0,0,0,0.045);
-}}
-.card {{ padding: 16px 20px; margin-bottom: 12px; }}
-
-.kpi-card {{ padding: 18px 20px; border-radius: 18px; transition: transform .15s ease, box-shadow .15s ease; }}
-.kpi-card:hover {{ transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,0.08); }}
-.kpi-label {{
-    font-size: 10.5px; font-weight: 600; color: {GREY};
-    text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 6px;
-}}
-.kpi-value {{ font-size: 26px; font-weight: 700; color: {DARK}; letter-spacing: -0.03em; line-height: 1.05; }}
-.kpi-sub {{ margin-top: 8px; font-size: 12px; color: {GREY}; }}
-.pill {{
-    display: inline-block; padding: 3px 10px; border-radius: 999px;
-    font-size: 11.5px; font-weight: 600; letter-spacing: -0.01em;
-}}
-.pill.pos {{ background: rgba(52,199,89,0.13); color: #1A7A3A; }}
-.pill.neg {{ background: rgba(255,59,48,0.12); color: #C62A22; }}
-.pill.neutral {{ background: rgba(0,0,0,0.05); color: {GREY}; }}
-
-/* ---------- Hero récap ---------- */
-.recap-card {{
-    background: linear-gradient(135deg, #FFFFFF 0%, #F2F8FF 100%);
-    border: 1px solid #E1EEFF; border-radius: 18px;
-    box-shadow: 0 6px 24px rgba(0,64,221,0.07);
-    padding: 18px 24px; margin-bottom: 20px;
-}}
-.recap-line1 {{ font-size: 15.5px; font-weight: 700; color: {DARK}; letter-spacing: -0.015em; line-height: 1.65; }}
-.recap-line2 {{
-    font-size: 13px; color: {DARK}; margin-top: 10px; padding-top: 10px;
-    border-top: 1px solid rgba(0,64,221,0.09); line-height: 1.6;
-}}
-.recap-line2 b {{ color: {BLUE}; }}
-
-/* ---------- Écran d'accueil (état vide) — icône ronde + grille + bandeau ---------- */
-.info-box {{
-    background: #FFFFFF; border: 1px solid rgba(0,0,0,0.06);
-    border-radius: 22px; padding: 24px 28px; margin-bottom: 24px;
-    box-shadow: 0 2px 14px rgba(0,0,0,0.05);
-}}
-.info-head {{ display: flex; align-items: flex-start; gap: 14px; }}
-.info-icon {{
-    width: 44px; height: 44px; min-width: 44px; border-radius: 14px;
-    background: rgba(0,122,255,0.1); display: flex; align-items: center;
-    justify-content: center; font-size: 20px;
-}}
-.info-box .it {{ font-size: 17px; font-weight: 700; color: {DARK}; letter-spacing: -0.02em; margin-bottom: 4px; }}
-.info-box .ip {{ font-size: 13.5px; color: #3A3A3C; line-height: 1.6; }}
-.info-box .iq {{ margin-top: 14px; font-size: 13px; color: #3A3A3C; line-height: 1.95; }}
-.col-grid {{
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-    gap: 8px; margin: 18px 0;
-}}
-.col-chip {{ background: {BG}; border-radius: 14px; padding: 10px 12px; }}
-.col-chip.opt {{ background: rgba(52,199,89,0.1); }}
-.col-chip-label {{
-    font-size: 10px; font-weight: 700; color: {GREY};
-    text-transform: uppercase; letter-spacing: 0.05em;
-}}
-.col-chip.opt .col-chip-label {{ color: #1A7A3A; }}
-.col-chip-tag {{ font-size: 12px; color: {DARK}; font-weight: 600; margin-top: 2px; }}
-.col-chip.opt .col-chip-tag {{ color: #1A7A3A; }}
-.invite-banner {{
-    background: rgba(0,122,255,0.06); border-radius: 16px;
-    padding: 12px 16px; font-size: 12.5px; color: #0A66D0; font-weight: 600;
-}}
-
-/* ---------- Badges de section (Tab 2) ---------- */
-.badge {{
-    display: inline-block; padding: 5px 14px; border-radius: 999px;
-    font-size: 12px; font-weight: 600; letter-spacing: -0.01em; margin: 14px 0 6px;
-}}
-
-/* ---------- Tabs façon segmented control ---------- */
-.stTabs [data-baseweb="tab-list"] {{
-    background: #E9E9EB; padding: 3px; border-radius: 14px;
-    gap: 2px; width: fit-content;
-}}
-.stTabs [data-baseweb="tab"] {{
-    border-radius: 11px; padding: 6px 18px; background: transparent;
-    font-weight: 600; font-size: 13.5px; color: {DARK};
-}}
-.stTabs [aria-selected="true"] {{
-    background: #FFFFFF !important;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.12);
-}}
-.stTabs [data-baseweb="tab-highlight"], .stTabs [data-baseweb="tab-border"] {{ display: none; }}
-
-/* ---------- Dataframes & widgets ---------- */
-[data-testid="stDataFrame"] {{
-    border: 1px solid rgba(0,0,0,0.06); border-radius: 16px;
-    overflow: hidden; box-shadow: 0 1px 6px rgba(0,0,0,0.035);
-}}
-.stDownloadButton button, .stButton button {{
-    background: {BLUE}; color: #FFFFFF; border: none;
-    border-radius: 14px; padding: 0.62rem 1.5rem;
-    font-weight: 600; font-size: 14px; letter-spacing: -0.01em;
-    box-shadow: 0 2px 10px rgba(0,122,255,0.28);
-    transition: background .15s ease, transform .1s ease;
-}}
-.stDownloadButton button:hover, .stButton button:hover {{
-    background: #0A66D0; color: #FFFFFF; transform: translateY(-1px);
-}}
-[data-testid="stExpander"] {{
-    background: #FFFFFF; border: 1px solid rgba(0,0,0,0.06) !important;
-    border-radius: 16px !important; box-shadow: 0 1px 6px rgba(0,0,0,0.035);
-}}
-[data-testid="stFileUploader"] section {{
-    background: #FFFFFF; border: 1.5px dashed rgba(0,122,255,0.35);
-    border-radius: 16px;
-}}
-@media (prefers-reduced-motion: reduce) {{
-    .kpi-card, .stDownloadButton button, .stButton button {{ transition: none; }}
-}}
-</style>
-""", unsafe_allow_html=True)
-
-# ============================================================
-# HELPERS DE FORMAT (convention SmartBuyer)
-# ============================================================
 def fmt(n):
     if n is None or (isinstance(n, float) and (pd.isna(n) or not np.isfinite(n))):
         return "—"
@@ -223,11 +77,6 @@ def rayon_key(libelle):
             return k
     return None
 
-def kpi_card(label, value, sub=None, sub_class="neutral"):
-    sub_html = f"<div class='kpi-sub'><span class='pill {sub_class}'>{sub}</span></div>" if sub else ""
-    return (f"<div class='kpi-card'><div class='kpi-label'>{label}</div>"
-            f"<div class='kpi-value'>{value}</div>{sub_html}</div>")
-
 def _wavg(values, weights):
     """Moyenne pondérée robuste (NaN-safe). Renvoie NaN si aucun poids valide."""
     v = pd.Series(values, dtype=float)
@@ -240,7 +89,6 @@ def _wavg(values, weights):
 # ============================================================
 # CHARGEMENT — EXPORT ARTICLE UNIQUE (Rayon → Famille → Sous Famille → Article [× Site])
 # ============================================================
-@st.cache_data(show_spinner=False)
 def load_export(file_bytes):
     raw = pd.read_excel(io.BytesIO(file_bytes))
     raw.columns = [str(c).lstrip('\ufeff').strip() for c in raw.columns]
@@ -362,46 +210,6 @@ def family_metrics(df):
         agg['%Marge Hors Promo'] = np.where(agg['_ca_hp'] > 0, agg['_mhp_w']/agg['_ca_hp'], np.nan)
         agg['%Casse (Valeur)'] = np.where(agg['CA'] > 0, agg['Casse (Valeur)']/agg['CA'], np.nan)
     return agg.drop(columns=['_marge_n1', '_ca_promo', '_ca_hp', '_mp_w', '_mhp_w'])
-
-def build_headline(k, perf, fam):
-    evol_ca = k['evol_ca'] * 100 if pd.notna(k['evol_ca']) else np.nan
-    evo_tx = k['tx_marge'] - k['tx_marge_n1'] if pd.notna(k['tx_marge_n1']) else np.nan
-    evol_qte = (k['qte']/k['qte_n1'] - 1) * 100 if k['qte_n1'] else np.nan
-    pct_casse = k['casse']/k['ca']*100 if k['ca'] else np.nan
-
-    line1 = (
-        f"CA {fmt(k['ca'])} FCFA ({evol_ca:+.1f}%) &nbsp;·&nbsp; "
-        f"Marge {fmt(k['marge'])} FCFA, taux {k['tx_marge']:.1f}% ({fmt_delta(evo_tx)}) &nbsp;·&nbsp; "
-        f"Qté {fmt(k['qte'])} ({evol_qte:+.1f}%) &nbsp;·&nbsp; "
-        f"Casse {pct_casse:.2f}% du CA &nbsp;·&nbsp; "
-        f"Promo {k['poids_promo']:.1f}% du CA"
-    )
-    bits = []
-    if perf is not None and perf['Écart (pts)'].notna().any():
-        wr = perf.loc[perf['Écart (pts)'].idxmin()]
-        bits.append(f"rayon à surveiller : <b>{wr['Rayon']}</b> ({fmt_delta(wr['Écart (pts)'])} vs objectif)")
-    if fam is not None and len(fam) and fam['Perte CA'].notna().any():
-        wf = fam.loc[fam['Perte CA'].idxmin()]
-        fam_qte = wf.get('Évol Qté %', np.nan)
-        fam_txt = (f"famille à risque : <b>{wf['Famille_aff']}</b> — "
-                   f"CA {fmt(wf['CA'])} FCFA ({wf['Évol CA %']:+.1f}%), "
-                   f"marge {wf['Tx Marge %']:.1f}%")
-        if pd.notna(fam_qte):
-            fam_txt += f", qté {fam_qte:+.1f}%"
-        bits.append(fam_txt)
-    line2 = "📌 " + " &nbsp;·&nbsp; ".join(bits) if bits else ""
-    return line1, line2
-
-def top_familles(df, n=5, by='perte_ca'):
-    sub = family_metrics(df)
-    if by == 'perte_ca':
-        out = sub.nsmallest(n, 'Perte CA')[['Rayon_aff','Famille_aff','CA','CA N-1','Perte CA','Tx Marge %']]
-    elif by == 'casse':
-        out = sub.nsmallest(n, 'Casse (Valeur)')[['Rayon_aff','Famille_aff','CA','Casse (Valeur)','%Casse (Valeur)']]
-    elif by == 'promo':
-        mat = sub[sub['CA'] > 1_000_000]
-        out = mat.nlargest(n, '%CA Poids Promo')[['Rayon_aff','Famille_aff','CA','%CA Poids Promo','%Marge Promo','%Marge Hors Promo']]
-    return out.reset_index(drop=True)
 
 def top_flop_table(sub, metric, n, mode, cols, ca_floor=0, directional=True):
     base = sub[sub['CA'] > ca_floor] if ca_floor else sub
@@ -538,24 +346,6 @@ def detail_marge_neg_site(df, site_col):
 DISPLAY_COLS = ['Rayon_aff','Famille_aff','SousFamille_aff','Article_aff']
 DISPLAY_RENAME = {'Rayon_aff':'Rayon','Famille_aff':'Famille','SousFamille_aff':'Sous Famille','Article_aff':'Article'}
 
-def show_table(d, extra_cols, fmt_map=None, show_rayon=True):
-    if d.empty:
-        st.caption("Aucune ligne ne correspond à ce critère sur la période.")
-        return
-    base_cols = DISPLAY_COLS if show_rayon else [c for c in DISPLAY_COLS if c != 'Rayon_aff']
-    cols = base_cols + extra_cols
-    disp = d[cols].rename(columns=DISPLAY_RENAME).reset_index(drop=True)
-    disp.index = disp.index + 1
-    if fmt_map:
-        for c, f in fmt_map.items():
-            if c in disp.columns:
-                disp[c] = disp[c].map(f)
-    st.dataframe(disp, use_container_width=True)
-
-# ============================================================
-# EXPORT EXCEL — 3 feuilles : Dashboard COPIL · Destructeurs & Performeurs ·
-# Marge Nég par Site
-# ============================================================
 def build_excel_full(k, perf, fam, n_top, art_res, perimetre, mns=None, mns_detail=None,
                       art_full=None, seuil_ca=100_000):
     BLUE_H = "FF007AFF"; DARK_H = "FF1D1D1F"; RED_H = "FFFF3B30"; GREEN_H = "FF34C759"
@@ -957,266 +747,82 @@ def top_familles_for_excel(fam, n, by):
 # 🆕 RENDU DESTRUCTEURS & PERFORMEURS — réutilisable par périmètre
 # (Réseau entier OU un seul Rayon, chacun dans son onglet)
 # ============================================================
-def render_destructeurs_performeurs(art_scope, n_top, seuil_ca, show_rayon=True):
-    if art_scope.empty:
-        st.caption("Aucun article sur ce périmètre.")
-        return
-    st.caption(f"{len(art_scope):,} articles (agrégés réseau, sans doublon multi-site) · "
-               f"seuil de matérialité : {fmt(seuil_ca)} FCFA (modifiable dans la barre latérale)".replace(",", " "))
-    res = destructeurs_performeurs(art_scope, n=n_top, seuil_ca=seuil_ca)
-
-    st.markdown(f"<span class='badge' style='background:rgba(255,59,48,0.12);color:#C62A22'>A · Marge négative</span>", unsafe_allow_html=True)
-    show_table(res['A_marge_neg'], ['CA','Marge','Tx Marge %','Qté Vente'],
-               {'CA': fmt, 'Marge': fmt, 'Tx Marge %': lambda v: fmt_pct(v), 'Qté Vente': fmt}, show_rayon=show_rayon)
-
-    st.markdown(f"<span class='badge' style='background:rgba(255,59,48,0.12);color:#C62A22'>B · Dégradation du taux de marge (marge encore positive)</span>", unsafe_allow_html=True)
-    show_table(res['B_degrad_marge'], ['CA','Tx Marge %','Écart Tx Marge (pts)'],
-               {'CA': fmt, 'Tx Marge %': lambda v: fmt_pct(v), 'Écart Tx Marge (pts)': fmt_delta}, show_rayon=show_rayon)
-
-    st.markdown(f"<span class='badge' style='background:rgba(52,199,89,0.13);color:#1A7A3A'>C · Performeurs — gain de marge en valeur</span>", unsafe_allow_html=True)
-    show_table(res['C_perf_gain_marge'], ['CA','Gain Marge (FCFA)','Tx Marge %'],
-               {'CA': fmt, 'Gain Marge (FCFA)': fmt, 'Tx Marge %': lambda v: fmt_pct(v)}, show_rayon=show_rayon)
-
-    st.markdown(f"<span class='badge' style='background:rgba(52,199,89,0.13);color:#1A7A3A'>D · Plus forte croissance de CA</span>", unsafe_allow_html=True)
-    d4 = res['D_croissance_ca'].copy()
-    if not d4.empty:
-        d4['Évol CA %'] = (d4['CA']/d4['CA N-1']-1)*100
-    show_table(d4, ['CA','CA N-1','Évol CA %','Tx Marge %'],
-               {'CA': fmt, 'CA N-1': fmt, 'Évol CA %': lambda v: fmt_pct(v), 'Tx Marge %': lambda v: fmt_pct(v)}, show_rayon=show_rayon)
-    st.caption("⚠️ Une forte évolution % peut refléter un effet de base (article quasi absent en N-1) plutôt qu'une vraie dynamique.")
-
-    st.markdown(f"<span class='badge' style='background:rgba(255,59,48,0.12);color:#C62A22'>E · Plus forte baisse de CA</span>", unsafe_allow_html=True)
-    show_table(res['E_baisse_ca'], ['CA','CA N-1','Perte CA (FCFA)'],
-               {'CA': fmt, 'CA N-1': fmt, 'Perte CA (FCFA)': fmt}, show_rayon=show_rayon)
-
-    st.markdown(f"<span class='badge' style='background:rgba(52,199,89,0.13);color:#1A7A3A'>F · Plus forte hausse de quantité vendue</span>", unsafe_allow_html=True)
-    show_table(res['F_hausse_qte'], ['Qté Vente','Qté Vente N-1','Variation Qté','CA'],
-               {'Qté Vente': fmt, 'Qté Vente N-1': fmt, 'Variation Qté': lambda v: f"{v:+,.0f}".replace(",", " "), 'CA': fmt}, show_rayon=show_rayon)
-
-    st.markdown(f"<span class='badge' style='background:rgba(255,59,48,0.12);color:#C62A22'>G · Plus forte baisse de quantité vendue</span>", unsafe_allow_html=True)
-    show_table(res['G_baisse_qte'], ['Qté Vente','Qté Vente N-1','Variation Qté','CA'],
-               {'Qté Vente': fmt, 'Qté Vente N-1': fmt, 'Variation Qté': lambda v: f"{v:+,.0f}".replace(",", " "), 'CA': fmt}, show_rayon=show_rayon)
 
 # ============================================================
-# INTERFACE
+# 📅 EXTRACTION DE LA PÉRIODE — dernière cellule de la 1ère colonne
 # ============================================================
-st.markdown("<div class='page-title'>COPIL Hebdo</div>"
-            "<div class='page-caption'>📋 Vue réseau PGC · Marge négative par site · Destructeurs & Performeurs · "
-            "objectifs marge alignés Méti · une seule extraction à charger</div>", unsafe_allow_html=True)
+def extract_periode(perimetre_text):
+    """Extrait 'JJ/MM/AAAA → JJ/MM/AAAA' depuis le texte de filtre PBI.
+    Retourne le texte brut tronqué si le pattern n'est pas trouvé."""
+    if not perimetre_text:
+        return None
+    m = re.search(r"après le (\d{2}/\d{2}/\d{4}) et est avant le (\d{2}/\d{2}/\d{4})",
+                  str(perimetre_text))
+    if m:
+        return f"{m.group(1)} → {m.group(2)}"
+    return str(perimetre_text).replace("\n", " ")[:120]
 
-with st.sidebar:
-    st.markdown("### 📥 Import")
-    up = st.file_uploader("Export Article hebdo (.xlsx)", type=['xlsx'], key="up_export")
-    st.caption("L'extraction Article contient déjà les sous-totaux Rayon et Famille — "
-               "tout le module en est dérivé, rien d'autre à charger.")
-    st.markdown("---")
-    st.markdown("##### ⚙️ Paramètres")
-    n_top = st.slider("Nombre de lignes par classement", 5, 30, 15)
-    seuil_ca = st.number_input("Seuil CA mini — performeurs/croissance (FCFA)", 0, 5_000_000, 100_000, step=10_000)
-    st.markdown("---")
-    st.caption("SmartBuyer Hub · Module COPIL Hebdo · V2")
 
-if up is None:
-    st.markdown(
-        f"<div class='info-box'>"
-        f"<div class='info-head'>"
-        f"<div class='info-icon'>📋</div>"
-        f"<div style='flex:1;'>"
-        f"<div class='it'>COPIL Hebdo</div>"
-        f"<div class='ip'>Prépare le point hebdo réseau pour le COPIL à partir d'un seul export PBI "
-        f"<b>Rayon → Famille → Sous-Famille → Article</b>. Un fichier à charger chaque semaine, "
-        f"dans la barre latérale.</div>"
-        f"</div></div>"
-        f"<div class='col-grid'>"
-        f"<div class='col-chip'><div class='col-chip-label'>Rayon</div><div class='col-chip-tag'>Requis</div></div>"
-        f"<div class='col-chip'><div class='col-chip-label'>Famille</div><div class='col-chip-tag'>Requis</div></div>"
-        f"<div class='col-chip'><div class='col-chip-label'>Article</div><div class='col-chip-tag'>Requis</div></div>"
-        f"<div class='col-chip opt'><div class='col-chip-label'>Site</div><div class='col-chip-tag'>Optionnel</div></div>"
-        f"</div>"
-        f"<div class='iq'>"
-        f"<b>Dashboard COPIL</b> — CA, marge, quantités vs N-1 · performance par rayon vs objectifs Méti · "
-        f"marge négative par site · top familles en baisse de CA / casse / poids promo<br>"
-        f"<b>Destructeurs &amp; Performeurs</b> — articles agrégés réseau (sans doublon multi-site) : marge négative, "
-        f"dégradation de taux, gain de marge, croissance/baisse de CA et de quantité, disponible pour le réseau entier "
-        f"et pour chaque rayon dans son propre onglet</div>"
-        f"<div style='margin-top:16px;'>"
-        f"<div class='invite-banner'>⬆ Chargez votre extraction dans la barre latérale pour démarrer</div>"
-        f"</div>"
-        f"</div>", unsafe_allow_html=True)
-    st.stop()
+# ============================================================
+# 🚀 GÉNÉRATION DU RAPPORT
+# ============================================================
+def generate_reporting_ventes(input_path, output_dir=".", n_top=15, seuil_ca=100_000):
+    input_path = Path(input_path)
+    with open(input_path, "rb") as f:
+        file_bytes = f.read()
 
-df, perimetre, site_col = load_export(up.getvalue())
-art = prep_articles(df)
-mns = marge_negative_par_site(df, site_col)
-mns_detail = detail_marge_neg_site(df, site_col)
+    df, perimetre, site_col = load_export(file_bytes)
+    periode = extract_periode(perimetre)
 
-if perimetre:
-    with st.expander("🔎 Périmètre détecté dans le fichier"):
-        st.code(perimetre, language=None)
+    art = prep_articles(df)
+    mns = marge_negative_par_site(df, site_col)
+    mns_detail = detail_marge_neg_site(df, site_col)
 
-tab1, tab2 = st.tabs(["📋 Dashboard COPIL", "💥 Destructeurs & Performeurs"])
-
-# ---------------- TAB 1 : DASHBOARD COPIL (RAYON + SITE) ----------------
-with tab1:
     k = kpis_globaux_rayon(df)
     if k is None:
-        st.error("Ligne de total réseau ('Total') introuvable dans l'export — vérifiez le fichier.")
+        raise ValueError("Ligne de total réseau ('Total') introuvable dans l'export — vérifiez le fichier.")
+
+    perf = perf_par_rayon(df, CIBLES_DEFAUT)
+    fam = family_metrics(df)
+    art_res = destructeurs_performeurs(art, n=n_top, seuil_ca=seuil_ca)
+
+    xls_bytes = build_excel_full(k, perf, fam, n_top, art_res, perimetre, mns, mns_detail,
+                                  art_full=art, seuil_ca=seuil_ca)
+
+    # Injecte la période lisible en A2/B2 de l'onglet Dashboard COPIL
+    # (à la place du placeholder "Voir export source")
+    from openpyxl import load_workbook
+    wb = load_workbook(io.BytesIO(xls_bytes))
+    ws = wb["Dashboard COPIL"]
+    ws["B2"] = periode or "Voir périmètre ci-dessous"
+    buf = io.BytesIO()
+    wb.save(buf)
+    xls_bytes = buf.getvalue()
+
+    today_str = date.today().strftime("%Y%m%d")
+    out_name = f"Reporting Ventes - {today_str}.xlsx"
+    out_path = Path(output_dir) / out_name
+    with open(out_path, "wb") as f:
+        f.write(xls_bytes)
+
+    rayons = sorted(art["Rayon_aff"].dropna().unique().tolist())
+    print(f"✅ Fichier généré : {out_path}")
+    print(f"   Période détectée : {periode}")
+    print(f"   Rayons (onglets DP) : {', '.join(rayons)}")
+    print(f"   Marges Négatives par Site : {'incluse' if (mns_detail is not None and not mns_detail.empty) else 'absente (pas de colonne Site dans l\'export)'}")
+    return out_path
+
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        candidates = list(Path(".").glob("*.xlsx"))
+        if not candidates:
+            print("Usage : python generate_reporting_ventes.py chemin/vers/export_pbi.xlsx [dossier_sortie]")
+            sys.exit(1)
+        input_file = candidates[0]
+        print(f"Aucun fichier fourni — utilisation de {input_file}")
     else:
-        perf = perf_par_rayon(df, CIBLES_DEFAUT)
-        fam = family_metrics(df)
-        line1, line2 = build_headline(k, perf, fam)
-        st.markdown(
-            f"<div class='recap-card'><div class='recap-line1'>{line1}</div>"
-            + (f"<div class='recap-line2'>{line2}</div>" if line2 else "")
-            + "</div>", unsafe_allow_html=True)
+        input_file = sys.argv[1]
 
-        st.markdown("<div class='section-label'>Vue d'ensemble réseau</div>", unsafe_allow_html=True)
-        c1, c2, c3, c4, c5 = st.columns(5)
-        c1.markdown(kpi_card("CA", f"{fmt(k['ca'])} FCFA",
-                    f"{k['evol_ca']*100:+.1f}% vs N-1", "pos" if k['evol_ca'] >= 0 else "neg"), unsafe_allow_html=True)
-        c2.markdown(kpi_card("Marge", f"{fmt(k['marge'])} FCFA"), unsafe_allow_html=True)
-        evo_tx = k['tx_marge'] - k['tx_marge_n1'] if pd.notna(k['tx_marge_n1']) else np.nan
-        c3.markdown(kpi_card("Taux de marge", fmt_pct(k['tx_marge'], 2),
-                    fmt_delta(evo_tx), "pos" if (pd.notna(evo_tx) and evo_tx >= 0) else "neg"), unsafe_allow_html=True)
-        evo_qte = (k['qte']/k['qte_n1']-1)*100 if k['qte_n1'] else np.nan
-        c4.markdown(kpi_card("Qté vendue", fmt(k['qte']),
-                    f"{evo_qte:+.1f}% vs N-1" if pd.notna(evo_qte) else None,
-                    "pos" if (pd.notna(evo_qte) and evo_qte >= 0) else "neg"), unsafe_allow_html=True)
-        pct_casse = k['casse']/k['ca']*100 if k['ca'] else np.nan
-        c5.markdown(kpi_card("Casse", f"{fmt(k['casse'])} FCFA", fmt_pct(pct_casse, 2) + " du CA", "neutral"), unsafe_allow_html=True)
-
-        st.markdown("<div class='section-label'>Performance par rayon vs objectifs marge (Méti)</div>", unsafe_allow_html=True)
-        disp = perf.copy()
-        for c in ['Évol CA %', 'Évol Qté %', 'Taux Marge %', 'Objectif %']:
-            disp[c] = disp[c].map(lambda v: fmt_pct(v))
-        disp['Écart (pts)'] = perf['Écart (pts)'].map(fmt_delta)
-        disp['CA'] = perf['CA'].map(lambda v: fmt(v))
-        st.dataframe(disp, use_container_width=True, hide_index=True)
-
-        # ---- 🆕 MARGE NÉGATIVE PAR SITE ----
-        st.markdown("<div class='section-label'>Marge négative par site</div>", unsafe_allow_html=True)
-        if mns is not None:
-            total_neg = mns['Marge Négative (FCFA)'].sum()
-            nb_art = int(mns['Nb Articles Nég.'].sum())
-            pire = mns.iloc[0] if len(mns) else None
-            m1, m2, m3 = st.columns(3)
-            m1.markdown(kpi_card("Marge négative réseau", f"{fmt(total_neg)} FCFA",
-                                 f"{nb_art} lignes article × site", "neg"), unsafe_allow_html=True)
-            if pire is not None:
-                m2.markdown(kpi_card("Site le plus touché", str(pire['Site']),
-                                     f"{fmt(pire['Marge Négative (FCFA)'])} FCFA", "neg"), unsafe_allow_html=True)
-                m3.markdown(kpi_card("Poids max vs CA site", fmt_pct(abs(pire['% Marge Nég / CA Site']), 2),
-                                     str(pire['Site']), "neutral"), unsafe_allow_html=True)
-            disp_mns = mns.copy()
-            disp_mns['CA Site'] = disp_mns['CA Site'].map(fmt)
-            disp_mns['Marge Négative (FCFA)'] = disp_mns['Marge Négative (FCFA)'].map(fmt)
-            disp_mns['% Marge Nég / CA Site'] = disp_mns['% Marge Nég / CA Site'].map(lambda v: fmt_pct(v, 2))
-            st.dataframe(disp_mns, use_container_width=True, hide_index=True)
-
-            if mns_detail is not None and not mns_detail.empty:
-                with st.expander(f"🔍 Détail exhaustif — {len(mns_detail)} lignes article × site en marge négative"):
-                    site_opts = ["Tous les sites"] + sorted(mns_detail['Site'].unique())
-                    site_sel = st.selectbox("Site", site_opts, key="site_neg_sel")
-                    d = mns_detail if site_sel == "Tous les sites" else mns_detail[mns_detail['Site'] == site_sel]
-                    d = d.rename(columns={'Rayon_aff': 'Rayon', 'Famille_aff': 'Famille', 'Article_aff': 'Article'})
-                    d = d.copy()
-                    d['CA'] = d['CA'].map(fmt); d['Marge'] = d['Marge'].map(fmt)
-                    d['Tx Marge %'] = d['Tx Marge %'].map(lambda v: fmt_pct(v))
-                    d['Qté'] = d['Qté'].map(lambda v: f"{v:,.0f}".replace(",", " "))
-                    st.dataframe(d[['Code Art.', 'Article', 'Rayon', 'Famille', 'Site', 'Format',
-                                    'CA', 'Marge', 'Tx Marge %', 'Qté']],
-                                 use_container_width=True, hide_index=True, height=420)
-        else:
-            st.caption("⚠️ Aucune colonne Site/Magasin détectée dans l'export — vue par site indisponible. "
-                       "Ajoutez la dimension Site à l'export PBI pour l'activer.")
-
-        st.markdown("<div class='section-label'>Détail par famille — toutes familles (sans objectif)</div>", unsafe_allow_html=True)
-        fam_disp = fam[['Rayon_aff','Famille_aff','CA','Évol CA %','Marge','Tx Marge %','Qté Vente','Évol Qté %']].copy()
-        fam_disp = fam_disp.rename(columns={'Rayon_aff':'Rayon','Famille_aff':'Famille','Tx Marge %':'Taux Marge %'})
-        fam_disp = fam_disp.sort_values(['Rayon','CA'], ascending=[True, False])
-        for c in ['CA','Marge','Qté Vente']:
-            fam_disp[c] = fam_disp[c].map(fmt)
-        for c in ['Évol CA %','Taux Marge %','Évol Qté %']:
-            fam_disp[c] = fam_disp[c].map(lambda v: fmt_pct(v))
-        st.dataframe(fam_disp, use_container_width=True, hide_index=True, height=420)
-        st.caption("Pas d'objectif au niveau Famille (le cadrage marge est piloté au niveau Rayon) — vue CA / marge / quantité uniquement.")
-
-        st.markdown("<div class='section-label'>Top & Flop par famille</div>", unsafe_allow_html=True)
-
-        def pair(title_top, title_flop, metric, cols, fmt_map, ca_floor=0, directional=True):
-            cA, cB = st.columns(2)
-            for cc, mode, title, emoji in [(cA, 'top', title_top, '🟢'), (cB, 'flop', title_flop, '🔴')]:
-                with cc:
-                    st.markdown(f"**{emoji} {title}**")
-                    t = top_flop_table(fam, metric, n_top, mode, cols, ca_floor, directional)
-                    t = t.rename(columns={'Rayon_aff':'Rayon','Famille_aff':'Famille'})
-                    if t.empty:
-                        st.caption("Aucune famille ne respecte ce sens sur la période.")
-                    else:
-                        for c, f in fmt_map.items():
-                            if c in t.columns: t[c] = t[c].map(f)
-                        st.dataframe(t, hide_index=True, use_container_width=True)
-
-        st.markdown("##### 📈 Évolution du CA (classement en valeur FCFA)")
-        pair(f"Top {n_top} — Meilleur gain de CA", f"Flop {n_top} — Plus forte perte de CA",
-             'Perte CA', ['CA','CA N-1','Évol CA %','Tx Marge %'],
-             {'CA': fmt, 'CA N-1': fmt, 'Évol CA %': lambda v: fmt_pct(v), 'Tx Marge %': lambda v: fmt_pct(v)})
-
-        st.markdown("##### 💰 Taux de marge")
-        pair(f"Top {n_top} — Meilleur taux de marge", f"Flop {n_top} — Taux de marge le plus faible",
-             'Tx Marge %', ['CA','Marge','Tx Marge %'],
-             {'CA': fmt, 'Marge': fmt, 'Tx Marge %': lambda v: fmt_pct(v)}, ca_floor=1_000_000, directional=False)
-
-        st.markdown("##### 📊 Évolution du taux de marge (pts vs N-1)")
-        pair(f"Top {n_top} — Meilleure progression", f"Flop {n_top} — Plus forte dégradation",
-             'Écart Tx Marge (pts)', ['CA','Tx Marge %','Écart Tx Marge (pts)'],
-             {'CA': fmt, 'Tx Marge %': lambda v: fmt_pct(v), 'Écart Tx Marge (pts)': fmt_delta}, ca_floor=1_000_000)
-
-        st.markdown("##### 💔 Casse & 🎯 Poids promo")
-        cC, cD = st.columns(2)
-        with cC:
-            st.markdown(f"**🔴 Flop {n_top} — Casse en valeur**")
-            t = top_familles(df, n_top, 'casse').rename(
-                columns={'Rayon_aff':'Rayon','Famille_aff':'Famille','Casse (Valeur)':'Casse','%Casse (Valeur)':'% Casse'})
-            t['CA'] = t['CA'].map(fmt); t['Casse'] = t['Casse'].map(fmt)
-            t['% Casse'] = t['% Casse'].map(lambda v: fmt_pct(v*100, 2) if pd.notna(v) else "—")
-            st.dataframe(t, hide_index=True, use_container_width=True)
-        with cD:
-            st.markdown(f"**🟠 Top {n_top} — Poids promo (CA&gt;1M)**")
-            t = top_familles(df, n_top, 'promo').rename(
-                columns={'Rayon_aff':'Rayon','Famille_aff':'Famille','%CA Poids Promo':'Poids Promo',
-                         '%Marge Promo':'Tx M. Promo','%Marge Hors Promo':'Tx M. HP'})
-            t['CA'] = t['CA'].map(fmt)
-            for c in ['Poids Promo','Tx M. Promo','Tx M. HP']:
-                t[c] = t[c].map(lambda v: fmt_pct(v*100) if pd.notna(v) else "—")
-            st.dataframe(t, hide_index=True, use_container_width=True)
-
-        st.markdown("<div class='section-label'>Export</div>", unsafe_allow_html=True)
-        art_res_export = destructeurs_performeurs(art, n=n_top, seuil_ca=seuil_ca)
-        xls = build_excel_full(k, perf, fam, n_top, art_res_export, perimetre, mns, mns_detail,
-                                art_full=art, seuil_ca=seuil_ca)
-        st.download_button("📥 Télécharger le récap complet COPIL (.xlsx)", xls,
-                            file_name="COPIL_Hebdo.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        n_rayons_export = int(art['Rayon_aff'].dropna().nunique())
-        base_txt = "Dashboard COPIL, Destructeurs & Performeurs (réseau)"
-        if mns_detail is not None and not mns_detail.empty:
-            base_txt += ", Marges Négatives par Site"
-        total_feuilles = 2 + (1 if (mns_detail is not None and not mns_detail.empty) else 0) + n_rayons_export
-        st.caption(f"Le fichier contient {total_feuilles} feuilles : {base_txt}, "
-                   f"et {n_rayons_export} feuille(s) Destructeurs & Performeurs par rayon.")
-
-# ---------------- TAB 2 : DESTRUCTEURS & PERFORMEURS (ARTICLE, AGRÉGÉ RÉSEAU) ----------------
-# 🆕 Sous-onglets : Réseau entier + un onglet par Rayon
-with tab2:
-    rayons_disponibles = sorted(r for r in art['Rayon_aff'].dropna().unique() if str(r).strip())
-    sous_tab_labels = ["🌐 Réseau (tous rayons)"] + [f"🗂️ {r}" for r in rayons_disponibles]
-    sous_tabs = st.tabs(sous_tab_labels)
-
-    with sous_tabs[0]:
-        render_destructeurs_performeurs(art, n_top, seuil_ca, show_rayon=True)
-
-    for i, rayon in enumerate(rayons_disponibles, start=1):
-        with sous_tabs[i]:
-            art_rayon = art[art['Rayon_aff'] == rayon]
-            render_destructeurs_performeurs(art_rayon, n_top, seuil_ca, show_rayon=False)
+    out_dir = sys.argv[2] if len(sys.argv) > 2 else "."
+    generate_reporting_ventes(input_file, out_dir)
