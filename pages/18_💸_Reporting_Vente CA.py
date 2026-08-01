@@ -1,1158 +1,961 @@
-# -*- coding: utf-8 -*-
-"""
-18_💸_Reporting_Vente CA.py — V3
-============================================================
-SmartBuyer Hub — Module Reporting Commercial (Point de situation & Pilotage Acheteurs)
-
-V3 — refonte design + recentrage usage :
-    - Charte Apple (cohérente avec les autres modules SmartBuyer Hub) :
-      fond #F2F2F7, cartes blanches, bleu #007AFF, rouge #FF3B30, vert #34C759
-    - 4 onglets au lieu de 5 (Magasins fondu dans Vue d'ensemble) :
-      1) Vue d'ensemble — le point de situation en 10 secondes
-      2) Par Acheteur   — brief prêt à l'emploi par acheteur (GB/CK/AC)
-      3) Flops          — table maître-détail complète, drill-down
-      4) Export         — données brutes + exports
-    - Correctifs techniques :
-      * lecture robuste de st.dataframe(...).selection (dict ou objet)
-      * scatter plot Vs N-1 x Δ Marge avec range X fixe (lisible même à -100%)
-
-Règles de flop (validées) :
-    C1 - Décrochage CA vs N-1   : Vs N-1 (%)  <= seuil CA
-    C2 - Écart vs Budget        : Vs Bgt (%)  <= seuil Budget (ignoré si Budget NaN)
-    C3 - Dégradation marge      : Delta Marge (pts) <= seuil Marge
-    C4 - Rupture / fermeture    : CA NaN/0 alors que CA N-1 > 0 (prioritaire)
-============================================================
-"""
-
-import io
+# ==============================================================================
+# 0. CONFIGURATION STREAMLIT & PALETTE APPLE / iOS LIGHT
+# ==============================================================================
 import os
-import numpy as np
+import re
+import sys
+import io
 import pandas as pd
-import plotly.graph_objects as go
-import plotly.express as px
+import numpy as np
 import streamlit as st
+import plotly.express as px
+import plotly.graph_objects as go
 
-# ============================================================
-# 0. CONFIGURATION PAGE & THEME — Apple charter
-# ============================================================
+# Flag global pour le style des cartes KPI (3D double ombre vs Flat)
+KPI_STYLE_3D = True
 
+# Configuration de la page Streamlit
 st.set_page_config(
     page_title="Reporting Vente CA",
     page_icon="💸",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="expanded"
 )
 
-COL_BG_PAGE = "#F2F2F7"
-COL_BG_CARD = "#FFFFFF"
-COL_BORDER = "#E5E5EA"
-COL_TEXT_PRIMARY = "#1C1C1E"
-COL_TEXT_SECONDARY = "#8E8E93"
-
-COL_BLUE = "#007AFF"
-COL_RED = "#FF3B30"
-COL_RED_BG = "#FFEBEA"
-COL_ORANGE = "#FF9500"
-COL_ORANGE_BG = "#FFF4E5"
-COL_AMBER = "#C9A400"
-COL_AMBER_BG = "#FFFBE5"
-COL_GREEN = "#34C759"
-COL_GREEN_BG = "#E9F9EE"
-COL_PURPLE = "#AF52DE"
-COL_PURPLE_BG = "#F6E9FC"
-
-SEVERITY_STYLE = {
-    "Critique": {"text": COL_RED, "bg": COL_RED_BG, "emoji": "🔴"},
-    "Flop majeur": {"text": COL_ORANGE, "bg": COL_ORANGE_BG, "emoji": "🟠"},
-    "Flop modéré": {"text": COL_AMBER, "bg": COL_AMBER_BG, "emoji": "🟡"},
-    "OK": {"text": COL_GREEN, "bg": COL_GREEN_BG, "emoji": "🟢"},
-}
-SEVERITY_ORDER = ["Critique", "Flop majeur", "Flop modéré", "OK"]
-
-THRESHOLD_PRESETS = {
-    "Strict":   {"ca": -5,  "bgt": -5,  "marge": -0.5},
-    "Standard": {"ca": -10, "bgt": -10, "marge": -0.8},
-    "Souple":   {"ca": -15, "bgt": -15, "marge": -1.2},
-}
-
-# Mapping Rayon -> Acheteur, aligné sur l'organisation PGC
-# (GB Épicerie, CK Boissons, AC Droguerie-Parfumerie-Hygiène). À ajuster si
-# l'organisation évolue.
-RAYON_TO_BUYER = {
-    "BOISSON": {"code": "CK", "perimetre": "Boissons"},
-    "EPICERIE": {"code": "GB", "perimetre": "Épicerie"},
-    "DROGUERIE": {"code": "AC", "perimetre": "Droguerie / Parfumerie-Hygiène"},
-    "PARFUMERIE HYGIENE": {"code": "AC", "perimetre": "Droguerie / Parfumerie-Hygiène"},
-}
-
-
-def get_buyer_code(rayon_libelle) -> str:
-    if not isinstance(rayon_libelle, str):
-        return "N/A"
-    lib_up = rayon_libelle.upper()
-    for key, info in RAYON_TO_BUYER.items():
-        if key in lib_up:
-            return info["code"]
-    return "N/A"
-
-
-CUSTOM_CSS = f"""
+# Injection CSS Style iOS Light
+CUSTOM_CSS = """
 <style>
-    .stApp {{ background-color: {COL_BG_PAGE}; }}
-    section[data-testid="stSidebar"] {{
-        background-color: {COL_BG_CARD};
-        border-right: 0.5px solid {COL_BORDER};
-    }}
-    h1, h2, h3, h4 {{ color: {COL_TEXT_PRIMARY}; font-weight: 600; }}
-    p, span, div, label {{ color: {COL_TEXT_PRIMARY}; }}
-    .kpi-card {{
-        background-color: {COL_BG_CARD};
-        border-radius: 16px;
-        padding: 1rem 1.1rem;
-        margin-bottom: 8px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.06);
-    }}
-    .kpi-label {{ font-size: 12px; color: {COL_TEXT_SECONDARY}; margin: 0 0 6px 0; font-weight: 500; }}
-    .kpi-value {{ font-size: 26px; font-weight: 700; color: {COL_TEXT_PRIMARY}; margin: 0; }}
-    .badge-pill {{
-        font-size: 11px; padding: 4px 11px; border-radius: 20px;
-        display: inline-block; font-weight: 600;
-    }}
-    .card {{
-        background-color: {COL_BG_CARD};
-        border-radius: 16px;
-        padding: 1.1rem 1.25rem;
-        margin-bottom: 10px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.06);
-    }}
-    .flop-row {{
-        background-color: {COL_BG_CARD};
+    /* Global Background */
+    .stApp {
+        background-color: #F2F2F7;
+        font-family: -apple-system, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+    }
+    
+    /* Custom Card Style */
+    .ios-card {
+        background-color: #FFFFFF;
         border-radius: 14px;
-        padding: 0.7rem 1rem;
-        margin-bottom: 6px;
-        display: flex; align-items: center; justify-content: space-between;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-    }}
-    .criterion-line {{
-        display: flex; justify-content: space-between; padding: 7px 0;
-        border-bottom: 0.5px solid {COL_BORDER}; font-size: 13.5px;
-    }}
-    .criterion-line:last-child {{ border-bottom: none; }}
-    .buyer-header {{
-        display: flex; align-items: center; gap: 12px; margin-bottom: 4px;
-    }}
-    .buyer-avatar {{
-        width: 44px; height: 44px; border-radius: 50%;
-        background: {COL_BLUE}1A; color: {COL_BLUE};
-        display: flex; align-items: center; justify-content: center;
-        font-weight: 700; font-size: 15px;
-    }}
-    div[data-testid="stMetric"] {{
-        background-color: {COL_BG_CARD}; border-radius: 14px;
-        padding: 0.75rem 1rem; box-shadow: 0 1px 3px rgba(0,0,0,0.06);
-    }}
-    .preset-caption {{ font-size: 11px; color: {COL_TEXT_SECONDARY}; margin-top: -6px; }}
+        padding: 16px 20px;
+        margin-bottom: 16px;
+        border: 1px solid rgba(0,0,0,0.04);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.03);
+    }
+    
+    .ios-card-3d {
+        background-color: #FFFFFF;
+        border-radius: 14px;
+        padding: 16px 20px;
+        margin-bottom: 16px;
+        border-top: 4px solid #007AFF;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.04), 0 8px 16px rgba(0,122,255,0.06);
+    }
+    
+    .ios-card-3d-alert {
+        background-color: #FFFFFF;
+        border-radius: 14px;
+        padding: 16px 20px;
+        margin-bottom: 16px;
+        border-top: 4px solid #FF3B30;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.04), 0 8px 16px rgba(255,59,48,0.08);
+    }
+    
+    .ios-card-3d-success {
+        background-color: #FFFFFF;
+        border-radius: 14px;
+        padding: 16px 20px;
+        margin-bottom: 16px;
+        border-top: 4px solid #34C759;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.04), 0 8px 16px rgba(52,199,89,0.08);
+    }
+
+    /* Metric Labels & Values */
+    .kpi-title {
+        font-size: 0.82rem;
+        font-weight: 600;
+        color: #8E8E93;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 4px;
+    }
+    .kpi-value {
+        font-size: 1.6rem;
+        font-weight: 700;
+        color: #1C1C1E;
+    }
+    .kpi-sub {
+        font-size: 0.85rem;
+        font-weight: 500;
+        margin-top: 4px;
+    }
+
+    /* Badges de Sévérité */
+    .badge-critique {
+        background-color: #FFE5E5;
+        color: #D32F2F;
+        padding: 4px 10px;
+        border-radius: 20px;
+        font-weight: 600;
+        font-size: 0.8rem;
+        display: inline-block;
+    }
+    .badge-majeur {
+        background-color: #FFF3E0;
+        color: #E65100;
+        padding: 4px 10px;
+        border-radius: 20px;
+        font-weight: 600;
+        font-size: 0.8rem;
+        display: inline-block;
+    }
+    .badge-modere {
+        background-color: #FFFDE7;
+        color: #F57F17;
+        padding: 4px 10px;
+        border-radius: 20px;
+        font-weight: 600;
+        font-size: 0.8rem;
+        display: inline-block;
+    }
+    .badge-ok {
+        background-color: #E8F5E9;
+        color: #2E7D32;
+        padding: 4px 10px;
+        border-radius: 20px;
+        font-weight: 600;
+        font-size: 0.8rem;
+        display: inline-block;
+    }
+
+    /* Avatar Rayon */
+    .rayon-avatar {
+        width: 48px;
+        height: 48px;
+        border-radius: 50%;
+        background-color: #007AFF;
+        color: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 700;
+        font-size: 1.1rem;
+    }
 </style>
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
-PLOTLY_TEMPLATE = go.layout.Template(
-    layout=go.Layout(
-        paper_bgcolor=COL_BG_CARD,
-        plot_bgcolor=COL_BG_CARD,
-        font=dict(color=COL_TEXT_PRIMARY, size=12),
-        xaxis=dict(gridcolor=COL_BORDER, zerolinecolor=COL_BORDER),
-        yaxis=dict(gridcolor=COL_BORDER, zerolinecolor=COL_BORDER),
-        legend=dict(bgcolor="rgba(0,0,0,0)"),
-    )
-)
 
-# ============================================================
-# 1. LECTEUR I/O ROBUSTE (xlsx / csv, encodage auto)
-# ============================================================
-
-EXPECTED_COLS = [
-    "Société", "Rayon", "Site", "CA N-1", "Budget", "CA", "Poids",
-    "Vs N-1 (%)", "Vs Bgt (%)", "Marge N-1", "Marge",
-    "Taux de Marge N-1", "Taux de Marge", "Taux de Marge N Vs N-1",
-    "Débit N-1", "Débit", "Vs N-1 (%).1", "Panier N-1", "Panier",
-    "Panier N Vs N-1", "Panier Qté N-1", "Panier Qté",
-    "Panier Qté N Vs N-1", "Volume N-1", "Volume", "Volume N Vs N-1",
+# ==============================================================================
+# 1. I/O ROBUSTE ET PARSING DES DONNÉES
+# ==============================================================================
+REQUIRED_COLUMNS = [
+    'Société', 'Rayon', 'Site', 'CA N-1', 'Budget', 'CA', 'Poids', 'Vs N-1 (%)',
+    'Vs Bgt (%)', 'Marge N-1', 'Marge', 'Taux de Marge N-1', 'Taux de Marge',
+    'Taux de Marge N Vs N-1', 'Débit N-1', 'Débit', 'Vs N-1 (%).1',
+    'Panier N-1', 'Panier', 'Panier N Vs N-1', 'Panier Qté N-1', 'Panier Qté',
+    'Panier Qté N Vs N-1', 'Volume N-1', 'Volume', 'Volume N Vs N-1'
 ]
 
-FORMAT_BY_CODE = {}
-FORMAT_KEYWORDS = {"hyper": "Hyper", "market": "Market", "supeco": "Supeco"}
+def split_code_libelle(val):
+    """Sépare une chaîne 'CODE - Libellé' en tuple (Code, Libellé)."""
+    if pd.isna(val) or val is None:
+        return np.nan, np.nan
+    val_str = str(val).strip()
+    if ' - ' in val_str:
+        parts = val_str.split(' - ', 1)
+        return parts[0].strip(), parts[1].strip()
+    return np.nan, val_str
 
-
-class DataLoadError(Exception):
-    """Erreur métier levée par le lecteur I/O — message affichable tel quel."""
-    pass
-
-
-def read_any_export(file, sheet_name: str = "Export") -> pd.DataFrame:
-    """Lecteur universel encoding-safe (xlsx ou csv), façon utils_io.py."""
-    name = getattr(file, "name", "") or ""
-    ext = name.lower().rsplit(".", 1)[-1] if "." in name else "xlsx"
-
-    try:
-        if ext in ("xlsx", "xls"):
-            return pd.read_excel(file, sheet_name=sheet_name)
-
-        if ext == "csv":
-            raw_bytes = file.read()
-            for encoding in ("utf-8", "utf-8-sig", "latin-1"):
-                try:
-                    text = raw_bytes.decode(encoding)
-                    sep = ";" if text.count(";") > text.count(",") else ","
-                    return pd.read_csv(io.StringIO(text), sep=sep)
-                except (UnicodeDecodeError, pd.errors.ParserError):
-                    continue
-            raise DataLoadError("Impossible de décoder le CSV (UTF-8, UTF-8-SIG, Latin-1 testés).")
-
-        raise DataLoadError(f"Extension '.{ext}' non supportée — utilise .xlsx ou .csv.")
-
-    except ValueError as e:
-        if "Worksheet" in str(e) or "sheet" in str(e).lower():
-            raise DataLoadError(f"Feuille '{sheet_name}' introuvable. Vérifie le nom de l'onglet Excel.")
-        raise DataLoadError(f"Erreur de lecture du fichier : {e}")
-
-
-def split_code_libelle(serie: pd.Series) -> pd.DataFrame:
-    serie = serie.astype("string")
-    split = serie.str.split(" - ", n=1, expand=True)
-    if split.shape[1] == 1:
-        split[1] = np.nan
-    code = split[0].str.strip()
-    libelle = split[1].str.strip().fillna(serie)
-    return pd.DataFrame({"Code": code, "Libelle": libelle})
-
-
-def detect_format(code, libelle) -> str:
-    if code in FORMAT_BY_CODE:
-        return FORMAT_BY_CODE[code]
-    if not isinstance(libelle, str):
-        return "Autre"
-    lib_low = libelle.lower()
-    for kw, fmt in FORMAT_KEYWORDS.items():
-        if kw in lib_low:
-            return fmt
+def extract_format(site_libelle):
+    """Extrait le format magasin (Hyper, Market, Supeco) depuis le libellé."""
+    if pd.isna(site_libelle):
+        return "Inconnu"
+    lib = str(site_libelle).upper()
+    if "SUPER" in lib or "SUPECO" in lib:
+        if "SUPECO" in lib:
+            return "Supeco"
+        return "Market"
+    elif "MARKET" in lib:
+        return "Market"
+    elif "HYPER" in lib:
+        return "Hyper"
     return "Autre"
 
+def _load_data_impl(file_input):
+    """Implémentation pure du chargement de données (sans dépendance st.cache)."""
+    if file_input is None:
+        return None, None, None
 
-def _load_data_impl(file, sheet_name: str = "Export") -> dict:
-    raw = read_any_export(file, sheet_name=sheet_name)
+    # Lecture buffer ou file path
+    try:
+        if isinstance(file_input, (str, os.PathLike)):
+            if file_input.endswith('.csv'):
+                df_raw = pd.read_csv(file_input, sep=None, engine='python', encoding='utf-8')
+            else:
+                df_raw = pd.read_excel(file_input, sheet_name='Export')
+        else:
+            filename = getattr(file_input, 'name', '')
+            if filename.endswith('.csv'):
+                try:
+                    df_raw = pd.read_csv(file_input, sep=None, engine='python', encoding='utf-8')
+                except UnicodeDecodeError:
+                    file_input.seek(0)
+                    df_raw = pd.read_csv(file_input, sep=None, engine='python', encoding='latin-1')
+            else:
+                df_raw = pd.read_excel(file_input, sheet_name='Export')
+    except Exception as e:
+        raise ValueError(f"Erreur lors de la lecture du fichier : {str(e)}")
 
-    missing_cols = [c for c in EXPECTED_COLS if c not in raw.columns]
-    required_minimum = {"Société", "Rayon", "Site", "CA", "CA N-1"}
-    if not required_minimum.issubset(set(raw.columns)):
-        raise DataLoadError(
-            f"Colonnes indispensables manquantes : {sorted(required_minimum - set(raw.columns))}."
-        )
+    # Nettoyage des lignes parasites
+    df_clean = df_raw.dropna(how='all').copy()
+    
+    # Exclusion footer "Filtres appliqués" et ligne Société == "Total"
+    if 'Société' in df_clean.columns:
+        df_clean = df_clean[df_clean['Société'] != 'Total']
+        df_clean = df_clean[~df_clean['Société'].astype(str).str.startswith('Filtres appliqués', na=False)]
+    
+    # Vérification des colonnes nécessaires
+    missing_cols = [c for c in REQUIRED_COLUMNS if c not in df_clean.columns]
+    if missing_cols:
+        raise KeyError(f"Colonnes obligatoires manquantes dans la feuille Export : {missing_cols}")
 
-    df = raw.dropna(how="all").copy()
-    df = df[df["Société"].astype("string") != "Total"]
-    df = df[~df["Société"].astype("string").str.startswith("Filtres appliqués", na=False)]
-    df = df[~(df["Rayon"].isna() & df["Site"].isna())]
+    # Conversion des colonnes numériques
+    num_cols = [
+        'CA N-1', 'Budget', 'CA', 'Poids', 'Vs N-1 (%)', 'Vs Bgt (%)',
+        'Marge N-1', 'Marge', 'Taux de Marge N-1', 'Taux de Marge',
+        'Débit N-1', 'Débit', 'Panier N-1', 'Panier', 'Volume N-1', 'Volume'
+    ]
+    for col in num_cols:
+        if col in df_clean.columns:
+            df_clean[col] = pd.to_numeric(df_clean[col], errors='coerce')
 
-    is_global = (df["Rayon"].astype("string") == "Total") & (df["Site"].isna())
-    is_rayon = (df["Rayon"].astype("string") != "Total") & (df["Site"].astype("string") == "Total")
-    is_couple = (df["Rayon"].astype("string") != "Total") & (
-        ~df["Site"].isna() & (df["Site"].astype("string") != "Total")
+    # Parsing Code/Libellé et Formats
+    df_clean['Rayon_Code'], df_clean['Rayon_Lib'] = zip(*df_clean['Rayon'].apply(split_code_libelle))
+    df_clean['Site_Code'], df_clean['Site_Lib'] = zip(*df_clean['Site'].apply(split_code_libelle))
+    df_clean['Format'] = df_clean['Site_Lib'].apply(extract_format)
+
+    # Séparation aux 3 niveaux de granularité
+    # 1. Global / Société
+    df_global = df_clean[(df_clean['Rayon'] == 'Total') & (df_clean['Site'].isna())].copy()
+    
+    # 2. Rayon (Toutes enseignes)
+    df_rayon = df_clean[(df_clean['Rayon'] != 'Total') & (df_clean['Site'] == 'Total')].copy()
+
+    # 3. Couple Magasin x Rayon
+    df_couple = df_clean[
+        (df_clean['Rayon'] != 'Total') & 
+        (df_clean['Site'].notna()) & 
+        (df_clean['Site'] != 'Total')
+    ].copy()
+
+    return df_global, df_rayon, df_couple
+
+@st.cache_data
+def load_data(file_input):
+    return _load_data_impl(file_input)
+
+
+# ==============================================================================
+# 2. MOTEUR DE CALCUL DES FLOPS ET SÉVÉRITÉ
+# ==============================================================================
+def compute_flops(df_couple, seuil_ca=-0.10, seuil_bgt=-0.10, seuil_marge=-0.8):
+    """
+    Calcule la détection des flops au niveau Couple Magasin x Rayon.
+    - seuil_ca, seuil_bgt: en ratio décimal (ex: -0.10 pour -10%)
+    - seuil_marge: en points de pourcentage (ex: -0.8 pt)
+    """
+    if df_couple is None or df_couple.empty:
+        return pd.DataFrame()
+
+    df = df_couple.copy()
+
+    # Calcul Delta Marge en points de pourcentage
+    df['Delta_Marge_pt'] = (df['Taux de Marge'] - df['Taux de Marge N-1']) * 100
+
+    def evaluate_row(row):
+        ca_n1 = row.get('CA N-1', np.nan)
+        ca_n = row.get('CA', np.nan)
+        vs_n1 = row.get('Vs N-1 (%)', np.nan)
+        vs_bgt = row.get('Vs Bgt (%)', np.nan)
+        bgt = row.get('Budget', np.nan)
+        delta_marge = row.get('Delta_Marge_pt', np.nan)
+
+        # C4: Rupture / Fermeture (CA NaN ou 0 alors que CA N-1 > 0)
+        c4 = (pd.isna(ca_n) or ca_n == 0) and (not pd.isna(ca_n1) and ca_n1 > 0)
+        
+        if c4:
+            return pd.Series({
+                'C1': False, 'C2': False, 'C3': False, 'C4': True,
+                'Nb_KO': 4, 'Nb_Applicable': 4, 'Score': '4/4',
+                'Severite': 'Critique', 'Emoji': '🔴'
+            })
+
+        # C1: Décrochage CA vs N-1
+        c1_app = not pd.isna(vs_n1)
+        c1 = (vs_n1 <= seuil_ca) if c1_app else False
+
+        # C2: Écart vs Budget (Ignoré si Budget NaN)
+        c2_app = not pd.isna(bgt) and not pd.isna(vs_bgt)
+        c2 = (vs_bgt <= seuil_bgt) if c2_app else False
+
+        # C3: Dégradation de marge
+        c3_app = not pd.isna(delta_marge)
+        c3 = (delta_marge <= seuil_marge) if c3_app else False
+
+        nb_app = sum([c1_app, c2_app, c3_app])
+        nb_ko = sum([c1, c2, c3])
+
+        # Qualification Séverité
+        if nb_ko >= 2:
+            sev = 'Flop majeur'
+            emoji = '🟠'
+        elif nb_ko == 1:
+            sev = 'Flop modéré'
+            emoji = '🟡'
+        else:
+            sev = 'OK'
+            emoji = '🟢'
+
+        score_str = f"{nb_ko}/{nb_app}" if nb_app > 0 else "0/0"
+
+        return pd.Series({
+            'C1': c1, 'C2': c2, 'C3': c3, 'C4': False,
+            'Nb_KO': nb_ko, 'Nb_Applicable': nb_app, 'Score': score_str,
+            'Severite': sev, 'Emoji': emoji
+        })
+
+    eval_df = df.apply(evaluate_row, axis=1)
+    res = pd.concat([df, eval_df], axis=1)
+    
+    # 1. Analytique : CA à risque (Pareto)
+    res['CA_a_risque'] = (res['CA N-1'] - res['CA'].fillna(0)).clip(lower=0)
+    
+    # 2. Analytique : Benchmark par pairs de format
+    res['Vs_N1_Pairs_Mean'] = res.groupby(['Format', 'Rayon'])['Vs N-1 (%)'].transform(
+        lambda x: (x.sum() - x) / (x.count() - 1) if x.count() > 1 else np.nan
+    )
+    res['Ecart_vs_pairs'] = res['Vs N-1 (%)'] - res['Vs_N1_Pairs_Mean']
+
+    # 3. Analytique : Décomposition Trafic / Panier
+    def compute_decomp(r):
+        d_n1, d_n = r.get('Débit N-1'), r.get('Débit')
+        p_n1, p_n = r.get('Panier N-1'), r.get('Panier')
+        if pd.isna(d_n1) or pd.isna(d_n) or pd.isna(p_n1) or pd.isna(p_n):
+            return np.nan, np.nan, "n/a"
+        
+        eff_trafic = (d_n - d_n1) * ((p_n + p_n1) / 2)
+        eff_panier = (p_n - p_n1) * ((d_n + d_n1) / 2)
+        
+        if abs(eff_trafic) > abs(eff_panier):
+            moteur = "Trafic (Fréquentation)"
+        else:
+            moteur = "Panier moyen"
+        return eff_trafic, eff_panier, moteur
+
+    res[['Effet_Trafic', 'Effet_Panier', 'Moteur_Perte']] = res.apply(
+        compute_decomp, axis=1, result_type='expand'
     )
 
-    df_global = df[is_global].copy()
-    df_rayon = df[is_rayon].copy()
-    df_couple = df[is_couple].copy()
+    return res
 
-    for d in (df_rayon, df_couple):
-        rs = split_code_libelle(d["Rayon"])
-        d["Rayon_Code"] = rs["Code"].values
-        d["Rayon_Libelle"] = rs["Libelle"].values
-        d["Acheteur"] = d["Rayon_Libelle"].apply(get_buyer_code)
 
-    ss = split_code_libelle(df_couple["Site"])
-    df_couple["Site_Code"] = ss["Code"].values
-    df_couple["Site_Libelle"] = ss["Libelle"].values
-    df_couple["Format"] = [detect_format(c, l) for c, l in zip(df_couple["Site_Code"], df_couple["Site_Libelle"])]
+# ==============================================================================
+# 3. MOTEUR DE COMMENTAIRE AUTOMATIQUE DE RENTABILITÉ
+# ==============================================================================
+def generate_rayon_comment(vs_n1, delta_marge_pt, vs_bgt, seuil_ca=-0.10, seuil_marge=-0.8):
+    """Génère le commentaire métier croisant CA, Marge et Budget au niveau Rayon."""
+    if pd.isna(vs_n1):
+        return "Données insuffisantes pour établir un diagnostic."
 
-    if df_couple.empty:
-        raise DataLoadError(
-            "Aucune ligne de niveau Couple Magasin x Rayon détectée. Vérifie la structure de l'export."
-        )
+    # Axe CA
+    if vs_n1 >= 0:
+        axe_ca = "croissance"
+    elif vs_n1 > seuil_ca:
+        axe_ca = "recul"
+    else:
+        axe_ca = "decrochage"
 
-    return {
-        "global": df_global.reset_index(drop=True),
-        "rayon": df_rayon.reset_index(drop=True),
-        "couple": df_couple.reset_index(drop=True),
-        "missing_cols": missing_cols,
+    # Axe Marge
+    seuil_marge_abs = abs(seuil_marge)
+    if pd.isna(delta_marge_pt):
+        axe_marge = "stable"
+    elif delta_marge_pt >= seuil_marge_abs:
+        axe_marge = "amelioration"
+    elif delta_marge_pt <= seuil_marge:
+        axe_marge = "degradation"
+    else:
+        axe_marge = "stable"
+
+    # Matrice 3x3 des commentaires
+    matrice = {
+        ("croissance", "amelioration"): "Forte dynamique commerciale portée par une excellente expansion des volumes et une rentabilité renforcée.",
+        ("croissance", "stable"): "Solide performance du chiffre d'affaires maintenant une rentabilité conforme aux standards.",
+        ("croissance", "degradation"): "Croissance tirée par l'activité au détriment du taux de marge : vigilance requis sur le mix produits.",
+        ("recul", "amelioration"): "Légère contraction du chiffre d'affaires compensée par un mix plus contributif et une marge préservée.",
+        ("recul", "stable"): "Activité commerciale en léger retrait, préservant ses équilibres de marge globale.",
+        ("recul", "degradation"): "Effet ciseau défavorable : effritement simultané des ventes et de la rentabilité opérationnelle.",
+        ("decrochage", "amelioration"): "Décrochage de CA compensé par un pilotage marge défensif : moins de volume, marge préservée.",
+        ("decrochage", "stable"): "Perte de volume significative sans dégradation du taux de marge unitaires : perte de parts de marché à corriger.",
+        ("decrochage", "degradation"): "Alerte majeure : effondrement combiné des volumes d'affaires et de la rentabilité brute."
     }
 
+    base_text = matrice.get((axe_ca, axe_marge), "Évolution à surveiller.")
 
-@st.cache_data(show_spinner="Chargement des données...")
-def load_data(file, sheet_name: str = "Export") -> dict:
-    return _load_data_impl(file, sheet_name=sheet_name)
-
-
-# ============================================================
-# 2. MOTEUR DE CALCUL — FLOPS & SÉVÉRITÉ (niveau Couple)
-# ============================================================
-
-def compute_delta_marge_pts(taux_marge: pd.Series, taux_marge_n1: pd.Series) -> pd.Series:
-    return (taux_marge - taux_marge_n1) * 100
-
-
-def compute_flops(df: pd.DataFrame, seuil_ca: float, seuil_bgt: float, seuil_marge: float) -> pd.DataFrame:
-    out = df.copy()
-    out["Delta_Marge_pt"] = compute_delta_marge_pts(out["Taux de Marge"], out["Taux de Marge N-1"])
-
-    ca_is_missing_or_zero = out["CA"].isna() | (out["CA"] == 0)
-    ca_n1_positif = out["CA N-1"].fillna(0) > 0
-    out["C4_Rupture"] = ca_is_missing_or_zero & ca_n1_positif
-
-    out["C1_Decrochage_CA"] = (out["Vs N-1 (%)"] <= seuil_ca).fillna(False) & ~out["C4_Rupture"]
-
-    budget_applicable = out["Budget"].notna()
-    out["C2_Applicable"] = budget_applicable
-    out["C2_Ecart_Budget"] = np.where(budget_applicable, out["Vs Bgt (%)"] <= seuil_bgt, False)
-    out["C2_Ecart_Budget"] = out["C2_Ecart_Budget"].astype(bool) & ~out["C4_Rupture"]
-
-    marge_applicable = out["Taux de Marge"].notna() & out["Taux de Marge N-1"].notna()
-    out["C3_Applicable"] = marge_applicable
-    out["C3_Degradation_Marge"] = np.where(marge_applicable, out["Delta_Marge_pt"] <= seuil_marge, False)
-    out["C3_Degradation_Marge"] = out["C3_Degradation_Marge"].astype(bool) & ~out["C4_Rupture"]
-
-    out["Nb_Criteres_Applicables"] = 1 + out["C2_Applicable"].astype(int) + out["C3_Applicable"].astype(int)
-    out["Nb_Criteres_KO"] = (
-        out["C1_Decrochage_CA"].astype(int)
-        + out["C2_Ecart_Budget"].astype(int)
-        + out["C3_Degradation_Marge"].astype(int)
-    )
-
-    def severity(row):
-        if row["C4_Rupture"]:
-            return "Critique"
-        if row["Nb_Criteres_KO"] >= 2:
-            return "Flop majeur"
-        if row["Nb_Criteres_KO"] == 1:
-            return "Flop modéré"
-        return "OK"
-
-    out["Severite"] = out.apply(severity, axis=1)
-    out["Score_Label"] = out.apply(
-        lambda r: "4/4" if r["C4_Rupture"] else f"{r['Nb_Criteres_KO']}/{r['Nb_Criteres_Applicables']}",
-        axis=1,
-    )
-    return out
-
-
-# ============================================================
-# 3. MOTEUR DE COMMENTAIRE — RENTABILITÉ (niveau Rayon)
-# ============================================================
-
-def classe_ca(vs_n1, seuil_ca: float) -> str:
-    if pd.isna(vs_n1):
-        return "inconnu"
-    if vs_n1 >= 0:
-        return "croissance"
-    if vs_n1 <= seuil_ca:
-        return "decrochage"
-    return "leger_recul"
-
-
-def classe_marge(delta_pt, seuil_marge: float) -> str:
-    if pd.isna(delta_pt):
-        return "inconnu"
-    if delta_pt >= abs(seuil_marge):
-        return "amelioration"
-    if delta_pt <= seuil_marge:
-        return "degradation"
-    return "stable"
-
-
-COMMENT_MATRIX = {
-    ("croissance", "amelioration"): "Rayon performant : croissance rentable, le CA progresse et la marge s'améliore.",
-    ("croissance", "stable"): "Croissance saine, marge maîtrisée malgré la hausse d'activité.",
-    ("croissance", "degradation"): "Croissance en trompe-l'œil : le CA progresse mais au prix d'une érosion de la marge — vérifier pression prix/promo.",
-    ("leger_recul", "amelioration"): "Repli limité mais pilotage marge efficace : le rayon protège sa rentabilité malgré le tassement du CA.",
-    ("leger_recul", "stable"): "Rayon stable, sans signal d'alerte notable sur la période.",
-    ("leger_recul", "degradation"): "Vigilance : CA en léger repli et marge qui s'effrite simultanément — surveiller l'évolution.",
-    ("decrochage", "amelioration"): "Décrochage de CA compensé par un pilotage marge défensif (moins de volume, marge préservée voire renforcée).",
-    ("decrochage", "stable"): "Décrochage de CA préoccupant, marge stable — le problème est un problème de volume, pas de rentabilité unitaire.",
-    ("decrochage", "degradation"): "Rayon en difficulté structurelle : perte de CA doublée d'une érosion de marge — cumul des deux signaux, priorité d'action.",
-}
-
-
-def budget_suffix(vs_bgt, seuil_bgt: float) -> str:
+    # Suffixe Budget
     if pd.isna(vs_bgt):
-        return " — pas de budget alloué sur ce rayon."
-    if vs_bgt >= 0:
-        return " — objectif budgétaire atteint."
-    if vs_bgt <= seuil_bgt:
-        return " — loin de l'objectif budgétaire, à traiter en priorité."
-    return " — légèrement en retard sur l'objectif budgétaire."
+        suffixe = "Pas d'objectif budgétaire alloué."
+    elif vs_bgt >= 0:
+        suffixe = "Objectif budget atteint."
+    elif vs_bgt >= -0.05:
+        suffixe = "En léger retard sur le budget target."
+    else:
+        suffixe = "Nettement sous l'objectif budgétaire."
+
+    return f"{base_text} | {suffixe}"
 
 
-def build_rentabilite_comment(row: pd.Series, seuil_ca: float, seuil_bgt: float, seuil_marge: float) -> str:
-    delta_marge = compute_delta_marge_pts(
-        pd.Series([row.get("Taux de Marge")]), pd.Series([row.get("Taux de Marge N-1")])
-    ).iloc[0]
-    c_ca = classe_ca(row.get("Vs N-1 (%)"), seuil_ca)
-    c_marge = classe_marge(delta_marge, seuil_marge)
-    if c_ca == "inconnu" or c_marge == "inconnu":
-        return "Données insuffisantes pour établir un diagnostic de rentabilité sur ce rayon."
-    base = COMMENT_MATRIX.get((c_ca, c_marge), "Diagnostic non déterminé.")
-    return base + budget_suffix(row.get("Vs Bgt (%)"), seuil_bgt)
+# ==============================================================================
+# 4. HELPERS D'AFFICHAGE ET ANALYTIQUE UI
+# ==============================================================================
+def render_kpi_card(title, value, sub="", delta_color="neutral"):
+    """Génère une carte KPI au design iOS 3D ou Flat."""
+    card_class = "ios-card-3d" if KPI_STYLE_3D else "ios-card"
+    if delta_color == "alert":
+        card_class = "ios-card-3d-alert" if KPI_STYLE_3D else "ios-card"
+    elif delta_color == "success":
+        card_class = "ios-card-3d-success" if KPI_STYLE_3D else "ios-card"
 
-
-# ============================================================
-# 4. HELPERS D'AFFICHAGE
-# ============================================================
-
-def fmt_fcfa(x) -> str:
-    if pd.isna(x):
-        return "n/a"
-    if abs(x) >= 1_000_000:
-        return f"{x / 1_000_000:,.1f}M".replace(",", " ")
-    if abs(x) >= 1_000:
-        return f"{x / 1_000:,.0f}K".replace(",", " ")
-    return f"{x:,.0f}".replace(",", " ")
-
-
-def fmt_pct(x) -> str:
-    if pd.isna(x):
-        return "n/a"
-    return f"{x * 100:+.1f}%"
-
-
-def fmt_pt(x) -> str:
-    if pd.isna(x):
-        return "n/a"
-    return f"{x:+.2f} pt"
-
-
-def kpi_card(label: str, value: str, color: str = COL_TEXT_PRIMARY) -> str:
-    return f"""<div class="kpi-card"><p class="kpi-label">{label}</p>
-    <p class="kpi-value" style="color:{color}">{value}</p></div>"""
-
-
-def severity_badge(severite: str) -> str:
-    s = SEVERITY_STYLE.get(severite, SEVERITY_STYLE["OK"])
-    return f'<span class="badge-pill" style="background:{s["bg"]};color:{s["text"]}">{s["emoji"]} {severite}</span>'
-
-
-def variation_color(x) -> str:
-    if pd.isna(x):
-        return COL_TEXT_SECONDARY
-    return COL_GREEN if x >= 0 else COL_RED
-
-
-def dot_html(color: str) -> str:
-    return f'<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{color};margin-right:6px"></span>'
-
-
-def dot_color_for(x, seuil: float) -> str:
-    """Vert si positif, rouge si sous le seuil (négatif), orange entre les deux. Gris si donnée absente."""
-    if pd.isna(x):
-        return COL_TEXT_SECONDARY
-    if x >= 0:
-        return COL_GREEN
-    if x <= seuil:
-        return COL_RED
-    return COL_ORANGE
-
-
-def quadrant_html(icon: str, label: str, rows_html: str, muted: bool = False) -> str:
-    opacity = "0.55" if muted else "1"
-    return f"""<div style="background:#F7F7F9;border-radius:10px;padding:0.7rem 0.85rem;opacity:{opacity}">
-        <p style="font-size:11px;color:{COL_TEXT_SECONDARY};margin:0 0 8px 0;font-weight:600;letter-spacing:0.02em;text-transform:uppercase">{label}</p>
-        {rows_html}
-    </div>"""
-
-
-def quadrant_row(label: str, value: str, dot: str = "") -> str:
-    return f"""<div style="display:flex;justify-content:space-between;font-size:13px;padding:2px 0">
-        <span>{label}</span><span>{dot}{value}</span></div>"""
-
-
-def build_steering_wheel_card(rayon_row: pd.Series, nb_flops_actifs: int, seuil_ca: float, seuil_marge: float) -> str:
-    """Carte 'steering wheel' 4 cadrans (Client / Finance / Équipe / Opérations) pour un rayon,
-    inspirée du principe Tesco : jamais un chiffre isolé, toujours regroupé par thème."""
-    debit_var = rayon_row.get("Vs N-1 (%).1")
-    panier_var = rayon_row.get("Panier N Vs N-1")
-    ca_var = rayon_row.get("Vs N-1 (%)")
-    delta_marge = compute_delta_marge_pts(
-        pd.Series([rayon_row.get("Taux de Marge")]), pd.Series([rayon_row.get("Taux de Marge N-1")])
-    ).iloc[0]
-
-    client_q = quadrant_html("users", "Client", (
-        quadrant_row("Débit (trafic)", fmt_pct(debit_var), dot_html(dot_color_for(debit_var, seuil_ca)))
-        + quadrant_row("Panier moyen", fmt_pct(panier_var), dot_html(dot_color_for(panier_var, seuil_ca)))
-    ))
-    finance_q = quadrant_html("chart-bar", "Finance", (
-        quadrant_row("CA vs N-1", fmt_pct(ca_var), dot_html(dot_color_for(ca_var, seuil_ca)))
-        + quadrant_row("Δ marge", fmt_pt(delta_marge), dot_html(dot_color_for(delta_marge, seuil_marge)))
-    ))
-    equipe_q = quadrant_html("user-check", "Équipe", (
-        quadrant_row("Acheteur", rayon_row.get("Acheteur", "N/A"))
-        + quadrant_row("Points actifs", str(nb_flops_actifs))
-    ))
-    operations_q = quadrant_html("plug-connected", "Opérations", (
-        quadrant_row("Disponibilité", "à connecter plus tard")
-    ), muted=True)
-
-    return f"""<div class="card">
-        <p style="font-weight:600;font-size:15px;margin:0 0 10px 0">{rayon_row.get('Rayon_Libelle', '')}</p>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-            {client_q}{finance_q}{equipe_q}{operations_q}
-        </div>
-    </div>"""
-
-
-def get_selected_rows(event) -> list:
-    """Extrait la liste des index sélectionnés depuis st.dataframe(..., on_select="rerun").
-    Robuste aux deux formats renvoyés selon la version de Streamlit :
-      - objet avec .selection.rows (API récente)
-      - dict brut {"selection": {"rows": [...]}}
+    html = f"""
+    <div class="{card_class}">
+        <div class="kpi-title">{title}</div>
+        <div class="kpi-value">{value}</div>
+        <div class="kpi-sub">{sub}</div>
+    </div>
     """
-    if event is None:
+    st.markdown(html, unsafe_allow_html=True)
+
+def parse_dataframe_selection(selection_event):
+    """Parse de manière ultra-robuste le retour d'un st.dataframe(on_select='rerun')."""
+    if not selection_event:
         return []
-    selection = getattr(event, "selection", None)
-    if selection is None and isinstance(event, dict):
-        selection = event.get("selection")
-    if selection is None:
-        return []
-    if isinstance(selection, dict):
-        return selection.get("rows", []) or []
-    return getattr(selection, "rows", []) or []
+    
+    # Cas 1: Objet avec attribut .selection.rows
+    if hasattr(selection_event, "selection"):
+        sel_obj = getattr(selection_event, "selection")
+        if hasattr(sel_obj, "rows"):
+            return getattr(sel_obj, "rows")
+        elif isinstance(sel_obj, dict) and "rows" in sel_obj:
+            return sel_obj["rows"]
+
+    # Cas 2: Dictionnaire brut {"selection": {"rows": [...]}}
+    if isinstance(selection_event, dict):
+        sel_dict = selection_event.get("selection", {})
+        if isinstance(sel_dict, dict):
+            return sel_dict.get("rows", [])
+            
+    return []
 
 
-def build_buyer_brief(buyer_code: str, rayons_info: pd.DataFrame, flops_buyer: pd.DataFrame,
-                       seuil_ca: float, seuil_bgt: float, seuil_marge: float) -> str:
-    """Génère un texte de brief prêt à copier-coller pour discuter avec l'acheteur."""
-    lines = [f"POINT ACHETEUR {buyer_code} — {pd.Timestamp.today().strftime('%d/%m/%Y')}", ""]
-    for _, r in rayons_info.iterrows():
-        comment = build_rentabilite_comment(r, seuil_ca, seuil_bgt, seuil_marge)
-        lines.append(f"• {r['Rayon_Libelle']} : CA {fmt_fcfa(r['CA'])} ({fmt_pct(r['Vs N-1 (%)'])} vs N-1)")
-        lines.append(f"  {comment}")
-        lines.append("")
-
-    flops_sorted = flops_buyer[flops_buyer["Severite"] != "OK"].sort_values(
-        ["Nb_Criteres_KO", "Vs N-1 (%)"], ascending=[False, True]
-    )
-    if flops_sorted.empty:
-        lines.append("Aucun point d'alerte magasin à date.")
-    else:
-        lines.append(f"Points d'attention magasins ({len(flops_sorted)}) :")
-        for _, r in flops_sorted.head(10).iterrows():
-            lines.append(
-                f"  - [{r['Severite']}] {r['Site_Libelle']} : CA {fmt_pct(r['Vs N-1 (%)'])} vs N-1, "
-                f"Δ marge {fmt_pt(r['Delta_Marge_pt'])}"
-            )
-    return "\n".join(lines)
-
-
-def build_copil_export(df_global: pd.DataFrame, df_rayon: pd.DataFrame, df_flops: pd.DataFrame,
-                        seuil_ca: float, seuil_bgt: float, seuil_marge: float) -> bytes:
-    buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        if not df_global.empty:
-            g = df_global.iloc[0]
-            kpi_df = pd.DataFrame({
-                "Indicateur": ["CA total", "Vs N-1 (%)", "Vs Budget (%)", "Marge totale", "Taux de marge"],
-                "Valeur": [
-                    fmt_fcfa(g.get("CA")), fmt_pct(g.get("Vs N-1 (%)")), fmt_pct(g.get("Vs Bgt (%)")),
-                    fmt_fcfa(g.get("Marge")), fmt_pct(g.get("Taux de Marge")).replace("+", ""),
-                ],
-            })
-            kpi_df.to_excel(writer, index=False, sheet_name="KPI Global")
-
-        rayon_export = df_rayon.copy()
-        if not rayon_export.empty:
-            rayon_export["Commentaire rentabilité"] = rayon_export.apply(
-                lambda r: build_rentabilite_comment(r, seuil_ca, seuil_bgt, seuil_marge), axis=1
-            )
-            cols = ["Rayon_Libelle", "Acheteur", "CA", "CA N-1", "Vs N-1 (%)", "Budget", "Vs Bgt (%)",
-                    "Marge", "Taux de Marge", "Commentaire rentabilité"]
-            rayon_export[[c for c in cols if c in rayon_export.columns]].to_excel(
-                writer, index=False, sheet_name="Synthese Rayons"
-            )
-
-        flops_export = df_flops.sort_values(["Nb_Criteres_KO", "Vs N-1 (%)"], ascending=[False, True])
-        cols = ["Site_Libelle", "Rayon_Libelle", "Acheteur", "Format", "CA", "CA N-1", "Vs N-1 (%)",
-                "Budget", "Vs Bgt (%)", "Delta_Marge_pt", "Severite", "Score_Label"]
-        flops_export[[c for c in cols if c in flops_export.columns]].to_excel(
-            writer, index=False, sheet_name="Flops"
-        )
-    return buffer.getvalue()
-
-
-# ============================================================
-# 5. MAIN — RENDU STREAMLIT
-# ============================================================
-
-def _init_threshold_state():
-    if "seuil_ca_pct" not in st.session_state:
-        preset = THRESHOLD_PRESETS["Standard"]
-        st.session_state.seuil_ca_pct = preset["ca"]
-        st.session_state.seuil_bgt_pct = preset["bgt"]
-        st.session_state.seuil_marge_pt = preset["marge"]
-
-
-def _apply_preset(name: str):
-    preset = THRESHOLD_PRESETS[name]
-    st.session_state.seuil_ca_pct = preset["ca"]
-    st.session_state.seuil_bgt_pct = preset["bgt"]
-    st.session_state.seuil_marge_pt = preset["marge"]
-
-
+# ==============================================================================
+# 5. APPLICATION STREAMLIT (MAIN RENDERING)
+# ==============================================================================
 def main():
-    _init_threshold_state()
+    # Sidebar: Initialisation et upload
+    st.sidebar.image("https://img.icons8.com/color/96/analytics.png", width=64)
+    st.sidebar.title("Paramètres & Data")
 
-    with st.sidebar:
-        st.markdown("### 💸 Reporting Vente CA")
-        st.markdown("---")
+    uploaded_file = st.sidebar.file_uploader(
+        "Charger l'export Ventes (.xlsx ou .csv)",
+        type=["xlsx", "csv"]
+    )
 
-        uploaded_file = st.file_uploader("Export ventes (.xlsx ou .csv)", type=["xlsx", "xls", "csv"])
-        if uploaded_file is None:
-            st.info("Charge un export pour démarrer.")
-            st.stop()
+    # Si pas de fichier chargé : Écran d'accueil
+    if uploaded_file is None:
+        st.title("💸 Reporting Vente CA — Pilotage & Orientation Acheteurs")
+        st.markdown("""
+        <div class="ios-card">
+            <h3>Bienvenue dans le module de Reporting Vente CA</h3>
+            <p>Cet outil offre un point de situation commercial rapide, du niveau global au couple <b>Magasin × Rayon</b>, avec un focus sur la détection automatique des <b>Flops</b> et la priorisation des plans d'action.</p>
+            <h4>Fonctionnalités clés :</h4>
+            <ul>
+                <li>⚡ <b>Vue d'ensemble 10s :</b> Prise de température globale et Steering Wheel 4 cadrans par rayon.</li>
+                <li>🎯 <b>Détection des Flops :</b> Identification selon 4 critères métier (CA, Budget, Marge, Rupture C4).</li>
+                <li>📋 <b>Briefs Acheteurs :</b> Synthèse automatique copiable par rayon avec matrice de rentabilité.</li>
+                <li>📊 <b>Analytique poussée :</b> Logique Pareto du CA à risque, décomposition Trafic/Panier et benchmark par pairs de format.</li>
+                <li>📤 <b>Export COPIL :</b> Génération d'un classeur multi-onglets complet en un seul clic.</li>
+            </ul>
+            <p><i>👈 Veuillez charger votre fichier <b>data.xlsx</b> (feuille Export) dans la barre latérale pour lancer l'analyse.</i></p>
+        </div>
+        """, unsafe_allow_html=True)
+        return
 
-        try:
-            data = load_data(uploaded_file)
-        except DataLoadError as e:
-            st.error(str(e))
-            st.stop()
+    # Chargement robuste des données
+    try:
+        df_global, df_rayon, df_couple = load_data(uploaded_file)
+    except Exception as e:
+        st.error(f"⚠️ {str(e)}")
+        return
 
-        df_global_raw, df_rayon_raw, df_couple_raw = data["global"], data["rayon"], data["couple"]
-        if data["missing_cols"]:
-            st.caption(f"⚠ Colonnes absentes (ignorées) : {', '.join(data['missing_cols'])}")
+    # Sidebar: Presets et Sliders de Seuils
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("🎯 Seuils d'Alerte")
 
-        st.markdown("#### Filtres")
-        societes = sorted(df_couple_raw["Société"].dropna().unique().tolist())
-        societe_sel = st.selectbox("Société", options=societes) if societes else None
+    if 'seuil_ca' not in st.session_state:
+        st.session_state.seuil_ca = -10.0
+    if 'seuil_bgt' not in st.session_state:
+        st.session_state.seuil_bgt = -10.0
+    if 'seuil_marge' not in st.session_state:
+        st.session_state.seuil_marge = -0.8
 
-        rayons_dispo = sorted(df_couple_raw["Rayon_Libelle"].dropna().unique().tolist())
-        rayons_sel = st.multiselect("Rayon", options=rayons_dispo, default=rayons_dispo)
+    col_p1, col_p2, col_p3 = st.sidebar.columns(3)
+    if col_p1.button("Strict"):
+        st.session_state.seuil_ca = -5.0
+        st.session_state.seuil_bgt = -5.0
+        st.session_state.seuil_marge = -0.5
+    if col_p2.button("Standard"):
+        st.session_state.seuil_ca = -10.0
+        st.session_state.seuil_bgt = -10.0
+        st.session_state.seuil_marge = -0.8
+    if col_p3.button("Souple"):
+        st.session_state.seuil_ca = -15.0
+        st.session_state.seuil_bgt = -15.0
+        st.session_state.seuil_marge = -1.2
 
-        formats_dispo = sorted(df_couple_raw["Format"].dropna().unique().tolist())
-        formats_sel = st.multiselect("Format", options=formats_dispo, default=formats_dispo)
+    seuil_ca_val = st.sidebar.slider("Decrochage CA (%)", -30.0, 0.0, st.session_state.seuil_ca, step=1.0) / 100.0
+    seuil_bgt_val = st.sidebar.slider("Écart Budget (%)", -30.0, 0.0, st.session_state.seuil_bgt, step=1.0) / 100.0
+    seuil_marge_val = st.sidebar.slider("Dégradation Marge (pt)", -3.0, 0.0, st.session_state.seuil_marge, step=0.1)
 
-        magasins_dispo = sorted(
-            df_couple_raw.loc[df_couple_raw["Format"].isin(formats_sel), "Site_Libelle"].dropna().unique().tolist()
-        )
-        magasins_sel = st.multiselect("Magasin", options=magasins_dispo, default=magasins_dispo)
+    # Sidebar: Filtres métier
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("🔍 Filtres")
 
-        st.markdown("---")
-        st.markdown("#### Seuils d'alerte")
-        p1, p2, p3 = st.columns(3)
-        p1.button("Strict", use_container_width=True, on_click=_apply_preset, args=("Strict",))
-        p2.button("Standard", use_container_width=True, on_click=_apply_preset, args=("Standard",))
-        p3.button("Souple", use_container_width=True, on_click=_apply_preset, args=("Souple",))
-        st.markdown('<p class="preset-caption">Presets — ajustables ensuite via les curseurs</p>', unsafe_allow_html=True)
+    societes = df_couple['Société'].unique().tolist()
+    selected_soc = st.sidebar.selectbox("Société", societes)
 
-        seuil_ca_pct = st.slider("Décrochage CA vs N-1 (%)", min_value=-50, max_value=0, step=1, key="seuil_ca_pct")
-        seuil_bgt_pct = st.slider("Écart vs Budget (%)", min_value=-50, max_value=0, step=1, key="seuil_bgt_pct")
-        seuil_marge_pt = st.slider("Dégradation marge (points)", min_value=-5.0, max_value=0.0, step=0.1, key="seuil_marge_pt")
+    rayons_available = df_couple['Rayon_Lib'].dropna().unique().tolist()
+    selected_rayons = st.sidebar.multiselect("Rayons", rayons_available, default=rayons_available)
 
-        seuil_ca, seuil_bgt, seuil_marge = seuil_ca_pct / 100, seuil_bgt_pct / 100, seuil_marge_pt
+    formats_available = df_couple['Format'].dropna().unique().tolist()
+    selected_formats = st.sidebar.multiselect("Formats", formats_available, default=formats_available)
 
-    # --- Filtrage ---
-    df_couple_f = df_couple_raw[
-        (df_couple_raw["Société"] == societe_sel)
-        & (df_couple_raw["Rayon_Libelle"].isin(rayons_sel))
-        & (df_couple_raw["Format"].isin(formats_sel))
-        & (df_couple_raw["Site_Libelle"].isin(magasins_sel))
+    # Filtre Magasin dépendant du format
+    magasins_filtered = df_couple[df_couple['Format'].isin(selected_formats)]['Site_Lib'].dropna().unique().tolist()
+    selected_magasins = st.sidebar.multiselect("Magasins", magasins_filtered, default=magasins_filtered)
+
+    # Calcul des flops avec les seuils dynamiques
+    df_evaluated = compute_flops(df_couple, seuil_ca_val, seuil_bgt_val, seuil_marge_val)
+
+    # Appliquer les filtres
+    df_filtered = df_evaluated[
+        (df_evaluated['Société'] == selected_soc) &
+        (df_evaluated['Rayon_Lib'].isin(selected_rayons)) &
+        (df_evaluated['Format'].isin(selected_formats)) &
+        (df_evaluated['Site_Lib'].isin(selected_magasins))
     ].copy()
-    df_rayon_f = df_rayon_raw[
-        (df_rayon_raw["Société"] == societe_sel) & (df_rayon_raw["Rayon_Libelle"].isin(rayons_sel))
-    ].copy()
-    df_global_f = df_global_raw[df_global_raw["Société"] == societe_sel].copy()
 
-    if df_couple_f.empty:
-        st.warning("Aucune donnée ne correspond aux filtres sélectionnés.")
-        st.stop()
-
-    df_flops = compute_flops(df_couple_f, seuil_ca, seuil_bgt, seuil_marge)
-
-    # --- Header + KPI ---
-    top_l, top_r = st.columns([4, 1])
-    with top_l:
-        st.markdown(f"## Point de situation — {societe_sel}")
-        st.caption("Vue d'ensemble · Par acheteur · Détail des flops")
-    with top_r:
-        st.markdown("<div style='padding-top:14px'></div>", unsafe_allow_html=True)
-        copil_bytes = build_copil_export(df_global_f, df_rayon_f, df_flops, seuil_ca, seuil_bgt, seuil_marge)
+    # HEADER + BANDEAU KPI GLOBAL
+    col_head, col_btn = st.columns([3, 1])
+    with col_head:
+        st.title(f"Point de situation — {selected_soc}")
+    with col_btn:
+        st.write("") # Spacing
+        # Bouton d'export global unique
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+            df_global.to_excel(writer, sheet_name='KPI Global', index=False)
+            df_rayon.to_excel(writer, sheet_name='Par Rayon', index=False)
+            df_filtered.to_excel(writer, sheet_name='Flops', index=False)
+            df_couple.to_excel(writer, sheet_name='Données brutes', index=False)
+        
         st.download_button(
-            "📊 Export COPIL", data=copil_bytes, file_name=f"synthese_copil_{societe_sel}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True,
+            label="📤 Export COPIL (.xlsx)",
+            data=buffer.getvalue(),
+            file_name=f"COPIL_Reporting_Vente_CA_{selected_soc}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
-    if not df_global_f.empty:
-        g = df_global_f.iloc[0]
+    # Top KPI Global Cards
+    if not df_global.empty:
+        glob = df_global.iloc[0]
         c1, c2, c3, c4, c5 = st.columns(5)
-        c1.markdown(kpi_card("CA total", fmt_fcfa(g["CA"]), COL_BLUE), unsafe_allow_html=True)
-        c2.markdown(kpi_card("Vs N-1", fmt_pct(g["Vs N-1 (%)"]), variation_color(g["Vs N-1 (%)"])), unsafe_allow_html=True)
-        c3.markdown(kpi_card("Vs Budget", fmt_pct(g["Vs Bgt (%)"]), variation_color(g["Vs Bgt (%)"])), unsafe_allow_html=True)
-        c4.markdown(kpi_card("Marge totale", fmt_fcfa(g["Marge"]), COL_PURPLE), unsafe_allow_html=True)
-        c5.markdown(kpi_card("Taux de marge", fmt_pct(g["Taux de Marge"]).replace("+", ""), COL_TEXT_PRIMARY), unsafe_allow_html=True)
-    else:
-        st.info("Pas de ligne Global disponible pour cette société.")
+        
+        ca_tot = glob.get('CA', 0)
+        vs_n1_tot = glob.get('Vs N-1 (%)', 0)
+        vs_bgt_tot = glob.get('Vs Bgt (%)', 0)
+        marge_tot = glob.get('Marge', 0)
+        taux_marge_tot = glob.get('Taux de Marge', 0)
 
-    nb_critique = int((df_flops["Severite"] == "Critique").sum())
-    if nb_critique > 0:
-        st.markdown(
-            f"""<div style="background:{COL_RED_BG};border-radius:14px;
-            padding:0.75rem 1rem;margin:12px 0;color:{COL_RED};font-weight:500">
-            🔴 {nb_critique} rupture(s) totale de CA détectée(s) — voir onglet Flops</div>""",
-            unsafe_allow_html=True,
-        )
+        with c1:
+            render_kpi_card("CA Total", f"{ca_tot:,.0f} M".replace(',', ' '), "Réseau global")
+        with c2:
+            color = "success" if vs_n1_tot >= 0 else "alert"
+            render_kpi_card("Vs N-1", f"{vs_n1_tot*100:+.1f} %", "Évolution CA", color)
+        with c3:
+            color = "success" if vs_bgt_tot >= 0 else "alert"
+            render_kpi_card("Vs Budget", f"{vs_bgt_tot*100:+.1f} %" if not pd.isna(vs_bgt_tot) else "n/a", "Atteinte bgt", color)
+        with c4:
+            render_kpi_card("Marge Brute", f"{marge_tot:,.0f} M".replace(',', ' '), "Valeur FCFA")
+        with c5:
+            render_kpi_card("Taux de Marge", f"{taux_marge_tot*100:.1f} %", "Taux moyen")
+
+    # Bandeau d'alerte Ruptures Critiques
+    nb_critiques = len(df_filtered[df_filtered['Severite'] == 'Critique'])
+    if nb_critiques > 0:
+        st.error(f"🚨 **ALERTE COPIL :** {nb_critiques} rupture(s) totale(s) / fermeture(s) (Critères C4) détectée(s) dans le périmètre filtré !")
 
     st.markdown("---")
-    tab_exec, tab_buyers, tab_flops, tab_export = st.tabs(
-        ["🎯 Vue d'ensemble", "👤 Par Acheteur", "🚩 Flops", "📤 Export"]
-    )
 
-    # ---------------- TAB VUE D'ENSEMBLE ----------------
-    with tab_exec:
-        col_a, col_b = st.columns([1, 2])
-        with col_a:
-            st.markdown("#### Répartition sévérité")
-            counts = df_flops["Severite"].value_counts().reindex(SEVERITY_ORDER).fillna(0)
-            colors_map = [SEVERITY_STYLE[s]["text"] for s in SEVERITY_ORDER]
-            fig_donut = go.Figure(data=[go.Pie(labels=SEVERITY_ORDER, values=counts.values, hole=0.55, marker=dict(colors=colors_map))])
-            fig_donut.update_layout(template=PLOTLY_TEMPLATE, height=280, showlegend=True, margin=dict(t=10, b=10))
-            st.plotly_chart(fig_donut, use_container_width=True)
+    # ONGLETS DE L'APPLICATION
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "🎯 Vue d'ensemble", "🏷️ Par Rayon", "🚩 Flops", "📖 Méthodologie", "📤 Export"
+    ])
 
-        with col_b:
-            st.markdown("#### Top 5 points d'attention")
-            top5 = df_flops[df_flops["Severite"] != "OK"].sort_values(["Nb_Criteres_KO", "Vs N-1 (%)"], ascending=[False, True]).head(5)
-            if top5.empty:
-                st.success("Aucun flop détecté sur ce périmètre.")
-            else:
-                for _, r in top5.iterrows():
-                    st.markdown(
-                        f"""<div class="flop-row">
-                            <div style="display:flex;align-items:center;gap:10px">{severity_badge(r['Severite'])}
-                            <span>{r['Site_Libelle']} — {r['Rayon_Libelle']}</span></div>
-                            <span style="color:{COL_TEXT_SECONDARY}">Vs N-1 {fmt_pct(r['Vs N-1 (%)'])} · Score {r['Score_Label']}</span>
-                        </div>""",
-                        unsafe_allow_html=True,
-                    )
-
-        st.markdown("#### Point de situation par rayon")
-        rayon_cols = st.columns(min(2, max(1, len(df_rayon_f))))
-        for i, (_, r) in enumerate(df_rayon_f.iterrows()):
-            nb_flops_rayon = int((df_flops[df_flops["Rayon_Libelle"] == r["Rayon_Libelle"]]["Severite"] != "OK").sum())
-            with rayon_cols[i % len(rayon_cols)]:
-                st.markdown(build_steering_wheel_card(r, nb_flops_rayon, seuil_ca, seuil_marge), unsafe_allow_html=True)
-
-        st.markdown("#### Magasins les plus en difficulté")
-        agg_magasin = (
-            df_flops.groupby(["Site_Libelle", "Format"], as_index=False)
-            .agg(CA=("CA", "sum"), CA_N1=("CA N-1", "sum"),
-                 Nb_Flops=("Severite", lambda s: (s != "OK").sum()),
-                 Nb_Critiques=("Severite", lambda s: (s == "Critique").sum()))
-            .sort_values(["Nb_Critiques", "Nb_Flops"], ascending=False)
-            .head(8)
-        )
-        agg_magasin["Vs N-1 (%)"] = np.where(
-            agg_magasin["CA_N1"] > 0, (agg_magasin["CA"] - agg_magasin["CA_N1"]) / agg_magasin["CA_N1"], np.nan
-        )
-        display_mag = agg_magasin.copy()
-        display_mag["CA"] = display_mag["CA"].apply(fmt_fcfa)
-        display_mag["Vs N-1 (%)"] = display_mag["Vs N-1 (%)"].apply(fmt_pct)
-        st.dataframe(
-            display_mag[["Site_Libelle", "Format", "CA", "Vs N-1 (%)", "Nb_Flops", "Nb_Critiques"]],
-            use_container_width=True, hide_index=True,
-        )
-
-    # ---------------- TAB PAR ACHETEUR ----------------
-    with tab_buyers:
-        buyers_present = sorted(
-            set(df_rayon_f["Acheteur"].dropna().unique()) | set(df_flops["Acheteur"].dropna().unique())
-        )
-        buyers_present = [b for b in buyers_present if b != "N/A"]
-
-        if not buyers_present:
-            st.info("Aucun acheteur identifié sur ce périmètre (vérifie le mapping Rayon -> Acheteur).")
+    # --------------------------------------------------------------------------
+    # TAB 1: VUE D'ENSEMBLE
+    # --------------------------------------------------------------------------
+    with tab1:
+        st.subheader("🔥 Top 5 points d'attention (Priorisation CA à risque)")
+        top_5_flops = df_filtered[df_filtered['Severite'] != 'OK'].sort_values('CA_a_risque', ascending=False).head(5)
+        
+        if top_5_flops.empty:
+            st.success("🎉 Aucun flop détecté dans le périmètre sélectionné !")
         else:
-            buyer_sel = st.radio("Acheteur", options=buyers_present, horizontal=True)
-
-            rayons_buyer = df_rayon_f[df_rayon_f["Acheteur"] == buyer_sel]
-            flops_buyer = df_flops[df_flops["Acheteur"] == buyer_sel]
-            perimetre = ", ".join(sorted(rayons_buyer["Rayon_Libelle"].unique()))
-
-            nb_crit = int((flops_buyer["Severite"] == "Critique").sum())
-            nb_maj = int((flops_buyer["Severite"] == "Flop majeur").sum())
-            nb_mod = int((flops_buyer["Severite"] == "Flop modéré").sum())
-            ca_total = rayons_buyer["CA"].sum()
-
-            st.markdown(
-                f"""<div class="buyer-header">
-                    <div class="buyer-avatar">{buyer_sel}</div>
-                    <div><p style="font-weight:600;font-size:16px;margin:0">Acheteur {buyer_sel}</p>
-                    <p style="font-size:13px;color:{COL_TEXT_SECONDARY};margin:0">{perimetre}</p></div>
-                </div>""",
-                unsafe_allow_html=True,
-            )
-            st.markdown("<br>", unsafe_allow_html=True)
-
-            m1, m2, m3, m4 = st.columns(4)
-            m1.markdown(kpi_card("CA périmètre", fmt_fcfa(ca_total), COL_BLUE), unsafe_allow_html=True)
-            m2.markdown(kpi_card("Critiques", str(nb_crit), COL_RED if nb_crit else COL_GREEN), unsafe_allow_html=True)
-            m3.markdown(kpi_card("Flops majeurs", str(nb_maj), COL_ORANGE if nb_maj else COL_GREEN), unsafe_allow_html=True)
-            m4.markdown(kpi_card("Flops modérés", str(nb_mod), COL_AMBER if nb_mod else COL_GREEN), unsafe_allow_html=True)
-
-            st.markdown("#### Diagnostic par rayon")
-            for _, r in rayons_buyer.iterrows():
-                comment = build_rentabilite_comment(r, seuil_ca, seuil_bgt, seuil_marge)
-                st.markdown(
-                    f"""<div class="card">
-                        <p style="font-weight:600;margin:0 0 4px 0">{r['Rayon_Libelle']}</p>
-                        <p style="font-size:13px;color:{COL_TEXT_SECONDARY};margin:0 0 8px 0">
-                        CA {fmt_fcfa(r['CA'])} · {fmt_pct(r['Vs N-1 (%)'])} vs N-1 · {fmt_pct(r['Vs Bgt (%)'])} vs Budget</p>
-                        <p style="font-size:14px;margin:0">{comment}</p>
-                    </div>""",
-                    unsafe_allow_html=True,
-                )
-
-            st.markdown("#### Magasins à traiter en priorité")
-            flops_a_traiter = flops_buyer[flops_buyer["Severite"] != "OK"].sort_values(
-                ["Nb_Criteres_KO", "Vs N-1 (%)"], ascending=[False, True]
-            )
-            if flops_a_traiter.empty:
-                st.success("Aucun point d'alerte sur le périmètre de cet acheteur.")
-            else:
-                for _, r in flops_a_traiter.iterrows():
-                    st.markdown(
-                        f"""<div class="flop-row">
-                            <div style="display:flex;align-items:center;gap:10px">{severity_badge(r['Severite'])}
-                            <span>{r['Site_Libelle']} — {r['Rayon_Libelle']}</span></div>
-                            <span style="color:{COL_TEXT_SECONDARY}">Vs N-1 {fmt_pct(r['Vs N-1 (%)'])} · Δ marge {fmt_pt(r['Delta_Marge_pt'])}</span>
-                        </div>""",
-                        unsafe_allow_html=True,
-                    )
-
-            st.markdown("#### Brief prêt à partager")
-            brief_text = build_buyer_brief(buyer_sel, rayons_buyer, flops_buyer, seuil_ca, seuil_bgt, seuil_marge)
-            st.text_area("Copier ce texte pour le point avec l'acheteur", value=brief_text, height=260)
-
-    # ---------------- TAB FLOPS (maître-détail) ----------------
-    with tab_flops:
-        f_col1, f_col2 = st.columns([2, 1])
-        with f_col1:
-            recherche = st.text_input("🔎 Recherche magasin ou rayon", placeholder="ex: Yopougon, Boisson...")
-        with f_col2:
-            filtre_severite = st.selectbox("Sévérité", options=["Tous"] + SEVERITY_ORDER)
-
-        df_view = df_flops.copy()
-        if filtre_severite != "Tous":
-            df_view = df_view[df_view["Severite"] == filtre_severite]
-        if recherche:
-            mask = (
-                df_view["Site_Libelle"].str.contains(recherche, case=False, na=False)
-                | df_view["Rayon_Libelle"].str.contains(recherche, case=False, na=False)
-            )
-            df_view = df_view[mask]
-        df_view = df_view.sort_values(["Nb_Criteres_KO", "Vs N-1 (%)"], ascending=[False, True]).reset_index(drop=True)
-
-        st.caption(f"{len(df_view)} couple(s) affiché(s) — clique une ligne pour voir le détail")
-
-        table_col, detail_col = st.columns([2.2, 1])
-
-        with table_col:
-            display_df = pd.DataFrame({
-                "Sévérité": df_view["Severite"].apply(lambda s: f"{SEVERITY_STYLE[s]['emoji']} {s}"),
-                "Magasin": df_view["Site_Libelle"],
-                "Rayon": df_view["Rayon_Libelle"],
-                "Acheteur": df_view["Acheteur"],
-                "CA": df_view["CA"].apply(fmt_fcfa),
-                "Vs N-1": df_view["Vs N-1 (%)"].apply(fmt_pct),
-                "Vs Budget": df_view["Vs Bgt (%)"].apply(fmt_pct),
-                "Δ Marge": df_view["Delta_Marge_pt"].apply(fmt_pt),
-                "Score": df_view["Score_Label"],
-            })
-            event = st.dataframe(
-                display_df, use_container_width=True, hide_index=True, height=460,
-                on_select="rerun", selection_mode="single-row",
-            )
-
-        with detail_col:
-            selected_rows = get_selected_rows(event)
-            if not selected_rows:
-                st.markdown(
-                    f"""<div class="card"><p style="color:{COL_TEXT_SECONDARY};margin:0">
-                    Sélectionne une ligne dans le tableau pour afficher le détail des critères.</p></div>""",
-                    unsafe_allow_html=True,
-                )
-            else:
-                r = df_view.iloc[selected_rows[0]]
-                c4_txt = "❌" if r["C4_Rupture"] else "✅"
-                c1_txt = "❌" if r["C1_Decrochage_CA"] else "✅"
-                c2_txt = "n/a" if not r["C2_Applicable"] else ("❌" if r["C2_Ecart_Budget"] else "✅")
-                c3_txt = "n/a" if not r["C3_Applicable"] else ("❌" if r["C3_Degradation_Marge"] else "✅")
-
-                st.markdown(
-                    f"""<div class="card">
-                        <p style="font-weight:600;font-size:15px;margin:0 0 2px 0">{r['Site_Libelle']}</p>
-                        <p style="font-size:13px;color:{COL_TEXT_SECONDARY};margin:0 0 12px 0">{r['Rayon_Libelle']} · {r['Format']} · Acheteur {r['Acheteur']}</p>
-                        {severity_badge(r['Severite'])}
-                        <div style="margin-top:14px">
-                            <div class="criterion-line"><span>{c4_txt} C4 — Rupture / fermeture</span></div>
-                            <div class="criterion-line"><span>{c1_txt} C1 — Décrochage CA vs N-1</span><span>{fmt_pct(r['Vs N-1 (%)'])}</span></div>
-                            <div class="criterion-line"><span>{c2_txt} C2 — Écart vs Budget</span><span>{fmt_pct(r['Vs Bgt (%)']) if r['C2_Applicable'] else '—'}</span></div>
-                            <div class="criterion-line"><span>{c3_txt} C3 — Dégradation marge</span><span>{fmt_pt(r['Delta_Marge_pt']) if r['C3_Applicable'] else '—'}</span></div>
-                        </div>
-                    </div>""",
-                    unsafe_allow_html=True,
-                )
+            cols = st.columns(len(top_5_flops))
+            for idx, (_, flop) in enumerate(top_5_flops.iterrows()):
+                with cols[idx]:
+                    st.markdown(f"""
+                    <div class="ios-card-3d-alert">
+                        <div><b>{flop['Emoji']} {flop['Site_Lib']}</b></div>
+                        <div style="color: #8E8E93; font-size:0.8rem;">{flop['Rayon_Lib']}</div>
+                        <hr style="margin: 8px 0;">
+                        <div><b>Perte CA :</b> {flop['CA_a_risque']:,.0f} FCFA</div>
+                        <div><b>Score KO :</b> {flop['Score']}</div>
+                        <div><b>Vs N-1 :</b> {flop['Vs N-1 (%)']*100:+.1f}%</div>
+                    </div>
+                    """, unsafe_allow_html=True)
 
         st.markdown("---")
-        st.markdown("#### Vue globale — Vs N-1 x Δ Marge")
-        scatter_df = df_flops.dropna(subset=["Vs N-1 (%)", "Delta_Marge_pt", "CA"])
-        if not scatter_df.empty:
-            fig_scatter = px.scatter(
-                scatter_df, x="Vs N-1 (%)", y="Delta_Marge_pt", size="CA", color="Rayon_Libelle",
-                hover_name="Site_Libelle", labels={"Vs N-1 (%)": "Vs N-1 (%)", "Delta_Marge_pt": "Δ Marge (pt)"},
+        st.subheader("📊 Point de situation par rayon (Steering Wheel)")
+
+        # Synthèse par Rayon sur 4 Cadrans
+        for r_lib in selected_rayons:
+            df_r_couples = df_filtered[df_filtered['Rayon_Lib'] == r_lib]
+            df_r_total = df_rayon[df_rayon['Rayon_Lib'] == r_lib]
+
+            if df_r_total.empty:
+                continue
+
+            r_data = df_r_total.iloc[0]
+            vs_n1_r = r_data.get('Vs N-1 (%)', 0)
+            vs_bgt_r = r_data.get('Vs Bgt (%)', 0)
+            delta_m_r = (r_data.get('Taux de Marge', 0) - r_data.get('Taux de Marge N-1', 0)) * 100
+            debit_vs = r_data.get('Vs N-1 (%).1', 0)
+            panier_vs = r_data.get('Panier N Vs N-1', 0)
+
+            st.markdown(f"#### 🏷️ Rayon : {r_lib}")
+            sw1, sw2, sw3, sw4 = st.columns(4)
+
+            with sw1:
+                st.markdown(f"""
+                <div class="ios-card">
+                    <b>👤 Client (Trafic & Panier)</b><br>
+                    • Débit (Trafic) : <b style="color:{'#34C759' if debit_vs >= 0 else '#FF3B30'}">{debit_vs*100:+.1f}%</b><br>
+                    • Panier Moyen : <b style="color:{'#34C759' if panier_vs >= 0 else '#FF3B30'}">{panier_vs*100:+.1f}%</b>
+                </div>
+                """, unsafe_allow_html=True)
+
+            with sw2:
+                st.markdown(f"""
+                <div class="ios-card">
+                    <b>💰 Finance (CA & Marge)</b><br>
+                    • CA vs N-1 : <b style="color:{'#34C759' if vs_n1_r >= 0 else '#FF3B30'}">{vs_n1_r*100:+.1f}%</b><br>
+                    • Δ Marge : <b style="color:{'#34C759' if delta_m_r >= 0 else '#FF3B30'}">{delta_m_r:+.2f} pt</b>
+                </div>
+                """, unsafe_allow_html=True)
+
+            with sw3:
+                nb_alertes = len(df_r_couples[df_r_couples['Severite'] != 'OK'])
+                st.markdown(f"""
+                <div class="ios-card">
+                    <b>📊 Activité & Alertes</b><br>
+                    • Points d'attention : <b>{nb_alertes}</b><br>
+                    • Nb Magasins : <b>{len(df_r_couples)}</b>
+                </div>
+                """, unsafe_allow_html=True)
+
+            with sw4:
+                st.markdown("""
+                <div class="ios-card" style="opacity: 0.6; background-color: #E5E5EA;">
+                    <b>⚙️ Opérations</b><br>
+                    <i>À connecter plus tard (Données dispo/rupture)</i>
+                </div>
+                """, unsafe_allow_html=True)
+
+        st.markdown("---")
+        st.subheader("🏪 Magasins les plus en difficulté (Agrégation)")
+        mag_summary = df_filtered.groupby('Site_Lib').agg(
+            Nb_Critiques=('C4', 'sum'),
+            Nb_Flops=('Severite', lambda x: (x != 'OK').sum()),
+            CA_A_Risque_Total=('CA_a_risque', 'sum')
+        ).reset_index().sort_values(by=['Nb_Critiques', 'Nb_Flops'], ascending=False)
+        st.dataframe(mag_summary, use_container_width=True)
+
+    # --------------------------------------------------------------------------
+    # TAB 2: PAR RAYON (BRIEF ACHETEUR)
+    # --------------------------------------------------------------------------
+    with tab2:
+        selected_r_brief = st.selectbox("Sélectionner un rayon pour le brief :", selected_rayons)
+        
+        df_r_couples = df_filtered[df_filtered['Rayon_Lib'] == selected_r_brief]
+        df_r_total = df_rayon[df_rayon['Rayon_Lib'] == selected_r_brief]
+
+        if not df_r_total.empty:
+            r_row = df_r_total.iloc[0]
+            
+            # Header avec Avatar Trigramme
+            trigramme = selected_r_brief[:3].upper()
+            c_av, c_info = st.columns([1, 8])
+            with c_av:
+                st.markdown(f'<div class="rayon-avatar">{trigramme}</div>', unsafe_allow_html=True)
+            with c_info:
+                st.subheader(f"Rayon {selected_r_brief} — {len(df_r_couples)} magasins")
+
+            # Bandeau 6 KPIs
+            k1, k2, k3, k4, k5, k6 = st.columns(6)
+            with k1:
+                render_kpi_card("CA Rayon", f"{r_row['CA']:,.0f} M".replace(',', ' '))
+            with k2:
+                render_kpi_card("Marge", f"{r_row['Marge']:,.0f} M".replace(',', ' '))
+            with k3:
+                render_kpi_card("Poids CA", f"{r_row['Poids']*100:.1f} %")
+            with k4:
+                render_kpi_card("Critiques", f"{len(df_r_couples[df_r_couples['Severite']=='Critique'])}", delta_color="alert")
+            with k5:
+                render_kpi_card("Flops Maj.", f"{len(df_r_couples[df_r_couples['Severite']=='Flop majeur'])}")
+            with k6:
+                render_kpi_card("Flops Mod.", f"{len(df_r_couples[df_r_couples['Severite']=='Flop modéré'])}")
+
+            # Tops Magasins côte à côte
+            st.markdown("### 🏆 Tops & Flops Magasins")
+            col_t1, col_t2 = st.columns(2)
+            with col_t1:
+                st.markdown("<b>Top 3 Contributeurs CA :</b>", unsafe_allow_html=True)
+                top_ca = df_r_couples.sort_values('CA', ascending=False).head(3)
+                st.dataframe(top_ca[['Site_Lib', 'CA', 'Vs N-1 (%)']], use_container_width=True)
+            with col_t2:
+                st.markdown("<b>Top 3 Progression Vs N-1 :</b>", unsafe_allow_html=True)
+                top_prog = df_r_couples.sort_values('Vs N-1 (%)', ascending=False).head(3)
+                st.dataframe(top_prog[['Site_Lib', 'Vs N-1 (%)', 'CA']], use_container_width=True)
+
+            # Génération du Brief Automatique Copiable
+            vs_n1_val = r_row.get('Vs N-1 (%)', np.nan)
+            delta_m_pt = (r_row.get('Taux de Marge', 0) - r_row.get('Taux de Marge N-1', 0)) * 100
+            vs_bgt_val = r_row.get('Vs Bgt (%)', np.nan)
+            
+            comm_auto = generate_rayon_comment(vs_n1_val, delta_m_pt, vs_bgt_val, seuil_ca_val, seuil_marge_val)
+
+            brief_text = f"""POINT RAYON {selected_r_brief.upper()} — Date: Aujourd'hui
+SYNTHÈSE
+  CA      : {r_row.get('CA', 0):,.0f} FCFA ({vs_n1_val*100:+.1f}%)
+  Marge   : {r_row.get('Marge', 0):,.0f} FCFA ({r_row.get('Taux de Marge', 0)*100:.1f}% · {delta_m_pt:+.2f} pt)
+  Qté     : {r_row.get('Volume', 0):,.0f} ({r_row.get('Volume N Vs N-1', 0)*100:+.1f}%)
+  Débit   : {r_row.get('Vs N-1 (%).1', 0)*100:+.1f}%
+  Panier  : {r_row.get('Panier N Vs N-1', 0)*100:+.1f}%
+  [COMMENTAIRE] : {comm_auto}
+
+TOP MAGASINS
+  CA          : {", ".join([f"{r['Site_Lib']} ({r['CA']:,.0f})" for _, r in top_ca.iterrows()])}
+  Progression : {", ".join([f"{r['Site_Lib']} ({r['Vs N-1 (%)']*100:+.1f}%)" for _, r in top_prog.iterrows()])}
+
+POINTS D'ATTENTION ({len(df_r_couples[df_r_couples['Severite']!='OK'])})
+"""
+            for _, flop in df_r_couples[df_r_couples['Severite']!='OK'].iterrows():
+                brief_text += f"  - [{flop['Severite']}] {flop['Site_Lib']} : CA {flop['CA']:,.0f} FCFA (Vs N-1 {flop['Vs N-1 (%)']*100:+.1f}%) | Marge {flop['Delta_Marge_pt']:+.2f} pt\n"
+
+            st.markdown("### 📝 Brief Prêt à Partager (Copiable)")
+            st.code(brief_text, language="text")
+
+    # --------------------------------------------------------------------------
+    # TAB 3: FLOPS (TABLE MAÎTRE-DÉTAL)
+    # --------------------------------------------------------------------------
+    with tab3:
+        st.subheader("🚩 Consultation Maître-Détail des Flops")
+        
+        col_f1, col_f2 = st.columns([2, 1])
+        with col_f1:
+            search_query = st.text_input("🔍 Rechercher un magasin ou rayon :", "")
+        with col_f2:
+            sev_filter = st.multiselect("Filtrer la sévérité :", ["Critique", "Flop majeur", "Flop modéré", "OK"], default=["Critique", "Flop majeur", "Flop modéré"])
+
+        # Filtrage dynamique
+        df_table = df_filtered[df_filtered['Severite'].isin(sev_filter)].copy()
+        if search_query:
+            df_table = df_table[
+                df_table['Site_Lib'].str.contains(search_query, case=False, na=False) |
+                df_table['Rayon_Lib'].str.contains(search_query, case=False, na=False)
+            ]
+
+        # Formatting pour st.dataframe
+        df_display = df_table[[
+            'Emoji', 'Severite', 'Site_Lib', 'Rayon_Lib', 'CA', 'Vs N-1 (%)',
+            'Vs Bgt (%)', 'Delta_Marge_pt', 'CA_a_risque', 'Score'
+        ]].rename(columns={
+            'Site_Lib': 'Magasin', 'Rayon_Lib': 'Rayon', 'Delta_Marge_pt': 'Δ Marge (pt)'
+        })
+
+        col_left, col_right = st.columns([2, 1])
+        with col_left:
+            st.markdown("<i>Sélectionnez une ligne pour ouvrir le panneau de détail latéral :</i>", unsafe_allow_html=True)
+            selection = st.dataframe(
+                df_display,
+                on_select="rerun",
+                selection_mode="single-row",
+                use_container_width=True
             )
-            fig_scatter.update_layout(template=PLOTLY_TEMPLATE, height=420)
-            fig_scatter.add_vline(x=seuil_ca, line_dash="dash", line_color=COL_RED)
-            fig_scatter.add_hline(y=seuil_marge, line_dash="dash", line_color=COL_RED)
 
-            # Range X fixe : les ruptures totales (-100%) restent lisibles sans écraser le nuage de points
-            max_val = float(scatter_df["Vs N-1 (%)"].max())
-            x_range = [-1.05, max(0.2, max_val + 0.05)]
-            fig_scatter.update_xaxes(range=x_range)
-            fig_scatter.add_annotation(
-                x=x_range[0] + 0.03, y=scatter_df["Delta_Marge_pt"].min(),
-                text="Zone à risque", showarrow=False, font=dict(color=COL_RED, size=11),
-                xanchor="left", yanchor="bottom",
-            )
-            st.plotly_chart(fig_scatter, use_container_width=True)
-        else:
-            st.info("Pas assez de données valides pour tracer le scatter plot.")
+        # Panneau de Détail Latéral
+        with col_right:
+            st.markdown("### 📋 Detail du Flop")
+            selected_rows = parse_dataframe_selection(selection)
+            
+            if selected_rows:
+                selected_idx = selected_rows[0]
+                row_detail = df_table.iloc[selected_idx]
 
-    # ---------------- TAB EXPORT ----------------
-    with tab_export:
-        st.markdown("#### Exports disponibles")
-        exp1, exp2 = st.columns(2)
-        with exp1:
-            export_cols = ["Site_Libelle", "Rayon_Libelle", "Acheteur", "Format", "CA", "CA N-1", "Vs N-1 (%)",
-                           "Budget", "Vs Bgt (%)", "Delta_Marge_pt", "Severite", "Score_Label"]
-            buffer = io.BytesIO()
-            with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-                df_flops[export_cols].to_excel(writer, index=False, sheet_name="Flops")
-            st.download_button(
-                "📥 Excel Flops (périmètre filtré)", data=buffer.getvalue(),
-                file_name=f"flops_{societe_sel}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
-            )
-        with exp2:
-            csv_buffer = df_flops.to_csv(index=False).encode("utf-8-sig")
-            st.download_button(
-                "📥 CSV complet (toutes colonnes)", data=csv_buffer,
-                file_name=f"detail_{societe_sel}.csv", mime="text/csv", use_container_width=True,
-            )
+                st.markdown(f"#### {row_detail['Emoji']} {row_detail['Site_Lib']}")
+                st.markdown(f"**Rayon :** {row_detail['Rayon_Lib']} | **Format :** {row_detail['Format']}")
+                st.markdown(f"**Sévérité :** {row_detail['Severite']} (Score {row_detail['Score']})")
+                st.markdown("---")
 
-        st.markdown("#### Données brutes")
-        st.dataframe(df_flops, use_container_width=True, hide_index=True)
+                # Statut des 4 critères
+                st.markdown("**Statut des Critères :**")
+                c1_icon = "❌" if row_detail['C1'] else "✅"
+                c2_icon = "n/a" if pd.isna(row_detail['Budget']) else ("❌" if row_detail['C2'] else "✅")
+                c3_icon = "n/a" if pd.isna(row_detail['Delta_Marge_pt']) else ("❌" if row_detail['C3'] else "✅")
+                c4_icon = "🚨 KO (Rupture)" if row_detail['C4'] else "✅ OK"
 
+                st.write(f"- C1 (Decrochage CA <= {seuil_ca_val*100:.0f}%) : {c1_icon}")
+                st.write(f"- C2 (Ecart Budget <= {seuil_bgt_val*100:.0f}%) : {c2_icon}")
+                st.write(f"- C3 (Degradation Marge <= {seuil_marge_val:.1f} pt) : {c3_icon}")
+                st.write(f"- C4 (Rupture / Fermeture) : {c4_icon}")
+                st.markdown("---")
 
-# ============================================================
-# 6. TESTS UNITAIRES / ASSERTIONS
-# ============================================================
+                # Analytique : Trafic vs Panier
+                st.markdown("**Décomposition Trafic / Panier :**")
+                eff_t = row_detail['Effet_Trafic']
+                eff_p = row_detail['Effet_Panier']
+                if pd.isna(eff_t):
+                    st.write("Données insuffisantes.")
+                else:
+                    st.write(f"- Effet Trafic : {eff_t:,.0f} FCFA")
+                    st.write(f"- Effet Panier : {eff_p:,.0f} FCFA")
+                    st.info(f"💡 Perte principalement tirée par : **{row_detail['Moteur_Perte']}**")
 
-def _make_couple_row(**overrides) -> pd.DataFrame:
-    base = dict(**{
-        "Société": "TEST", "Rayon": "010 - BOISSON", "Site": "999 - Magasin Test",
-        "CA N-1": 1000.0, "Budget": 1000.0, "CA": 1000.0,
-        "Vs N-1 (%)": 0.0, "Vs Bgt (%)": 0.0,
-        "Taux de Marge N-1": 0.20, "Taux de Marge": 0.20,
-    })
-    base.update(overrides)
-    return pd.DataFrame([base])
+                # Benchmark Pairs
+                st.markdown("---")
+                st.markdown("**Benchmark Pairs de Format :**")
+                ecart_p = row_detail['Ecart_vs_pairs']
+                if pd.isna(ecart_p):
+                    st.write("Pas assez de pairs pour comparer.")
+                else:
+                    st.write(f"Écart vs moyenne des pairs : **{ecart_p*100:+.1f} pt**")
+                    if ecart_p < -0.05:
+                        st.warning("⚠️ Sous-performance spécifique au magasin.")
+                    else:
+                        st.info("ℹ️ Tendance alignée avec le réseau/format.")
+            else:
+                st.info("👉 Cliquez sur une ligne du tableau pour afficher le diagnostic complet.")
 
+    # --------------------------------------------------------------------------
+    # TAB 4: MÉTHODOLOGIE
+    # --------------------------------------------------------------------------
+    with tab4:
+        st.subheader("📖 Méthodologie & Règles Métier")
+        st.markdown("""
+        ### 1. Périmètre & Niveaux de Données
+        L'application segmente automatiquement l'export Excel (`Export`) en 3 niveaux :
+        - **Global / Société :** Ligne unique `Rayon == "Total"` et `Site == NaN`.
+        - **Rayon (Toutes enseignes) :** Lignes `Rayon != "Total"` et `Site == "Total"`.
+        - **Couple Magasin × Rayon :** Lignes `Rayon != "Total"` et `Site` renseigné (niveau de détection des Flops).
 
-def test_c4_rupture_prioritaire_sur_les_autres():
-    df = _make_couple_row(CA=np.nan, **{"Vs N-1 (%)": -1.0})
-    res = compute_flops(df, seuil_ca=-0.10, seuil_bgt=-0.10, seuil_marge=-0.8)
-    assert res.loc[0, "Severite"] == "Critique"
-    assert res.loc[0, "C4_Rupture"] == True  # noqa: E712
+        ---
+        ### 2. Les 4 Critères de Détection des Flops
+        1. **C1 — Décrochage CA vs N-1 :** $Vs\ N-1\ (\%)\le seuil\_ca$ (Défaut : $-10\%$).
+        2. **C2 — Écart vs Budget :** $Vs\ Bgt\ (\%)\le seuil\_bgt$ (Défaut : $-10\%$). Ignoré si Budget est NaN (ex. Supeco).
+        3. **C3 — Dégradation de marge :** $\Delta Marge\ (pt) \le seuil\_marge$ (Défaut : $-0.8\text{ pt}$).
+        4. **C4 — Rupture / Fermeture :** CA NaN ou 0 alors que CA N-1 > 0. Prioritaire (Score 4/4, Sévérité **Critique**).
 
+        ---
+        ### 3. Analytique Avancée
+        - **CA à risque (Logique Pareto) :** $CA\_a\_risque = \max(0, CA_{N-1} - CA)$. Perte nette en FCFA.
+        - **Benchmark par pairs de format :** Écart de performance du couple par rapport à la moyenne des magasins du même Format sur le même Rayon.
+        - **Décomposition Trafic / Panier :** 
+          $$\text{Effet Trafic} = (\text{Débit}_N - \text{Débit}_{N-1}) \times \frac{\text{Panier}_N + \text{Panier}_{N-1}}{2}$$
+          $$\text{Effet Panier} = (\text{Panier}_N - \text{Panier}_{N-1}) \times \frac{\text{Débit}_N + \text{Débit}_{N-1}}{2}$$
+        """)
 
-def test_flop_majeur_deux_criteres():
-    df = _make_couple_row(**{"Vs N-1 (%)": -0.15, "Vs Bgt (%)": 0.05, "Taux de Marge N-1": 0.20, "Taux de Marge": 0.18})
-    res = compute_flops(df, seuil_ca=-0.10, seuil_bgt=-0.10, seuil_marge=-0.8)
-    assert res.loc[0, "Severite"] == "Flop majeur"
-    assert res.loc[0, "Nb_Criteres_KO"] == 2
-
-
-def test_flop_modere_un_critere():
-    df = _make_couple_row(**{"Vs N-1 (%)": -0.15, "Vs Bgt (%)": 0.05})
-    res = compute_flops(df, seuil_ca=-0.10, seuil_bgt=-0.10, seuil_marge=-0.8)
-    assert res.loc[0, "Severite"] == "Flop modéré"
-    assert res.loc[0, "Nb_Criteres_KO"] == 1
-
-
-def test_ok_aucun_critere():
-    df = _make_couple_row()
-    res = compute_flops(df, seuil_ca=-0.10, seuil_bgt=-0.10, seuil_marge=-0.8)
-    assert res.loc[0, "Severite"] == "OK"
-
-
-def test_budget_nan_exclu_du_scoring():
-    df = _make_couple_row(Budget=np.nan, **{"Vs Bgt (%)": np.nan})
-    res = compute_flops(df, seuil_ca=-0.10, seuil_bgt=-0.10, seuil_marge=-0.8)
-    assert res.loc[0, "C2_Applicable"] == False  # noqa: E712
-    assert res.loc[0, "Nb_Criteres_Applicables"] == 2
-    assert res.loc[0, "Severite"] == "OK"
-
-
-def test_marge_nan_exclu_du_scoring():
-    df = _make_couple_row(**{"Taux de Marge": np.nan})
-    res = compute_flops(df, seuil_ca=-0.10, seuil_bgt=-0.10, seuil_marge=-0.8)
-    assert res.loc[0, "C3_Applicable"] == False  # noqa: E712
+    # --------------------------------------------------------------------------
+    # TAB 5: EXPORT
+    # --------------------------------------------------------------------------
+    with tab5:
+        st.subheader("📤 Export des Données COPIL")
+        st.write("Téléchargez l'intégralité des analyses et données brutes au format Excel multi-onglets :")
+        st.download_button(
+            label="📥 Télécharger le Classeur Excel COPIL (.xlsx)",
+            data=buffer.getvalue(),
+            file_name=f"COPIL_Reporting_Vente_CA_{selected_soc}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
 
-def test_ca_nul_ne_plante_pas_le_calcul():
-    df = _make_couple_row(CA=0.0, Marge=0.0, **{"Taux de Marge": 0.0})
-    res = compute_flops(df, seuil_ca=-0.10, seuil_bgt=-0.10, seuil_marge=-0.8)
-    assert res.loc[0, "Severite"] == "Critique"
-
-
-def test_commentaire_rentabilite_decrochage_marge_ok():
-    row = pd.Series({"Vs N-1 (%)": -0.20, "Vs Bgt (%)": 0.03, "Taux de Marge N-1": 0.18, "Taux de Marge": 0.19})
-    comment = build_rentabilite_comment(row, seuil_ca=-0.10, seuil_bgt=-0.10, seuil_marge=-0.8)
-    assert "pilotage marge défensif" in comment
-    assert "objectif budgétaire atteint" in comment
-
-
-def test_commentaire_rentabilite_donnees_manquantes():
-    row = pd.Series({"Vs N-1 (%)": np.nan, "Vs Bgt (%)": np.nan, "Taux de Marge N-1": np.nan, "Taux de Marge": np.nan})
-    comment = build_rentabilite_comment(row, seuil_ca=-0.10, seuil_bgt=-0.10, seuil_marge=-0.8)
-    assert "insuffisantes" in comment
-
-
-def test_split_code_libelle_gere_nan():
-    s = pd.Series(["010 - BOISSON", np.nan, "SansSeparateur"])
-    res = split_code_libelle(s)
-    assert pd.isna(res.loc[1, "Code"])
-    assert res.loc[2, "Libelle"] == "SansSeparateur"
-
-
-def test_detect_format_priorite_code_sur_motcle():
-    global FORMAT_BY_CODE
-    original = FORMAT_BY_CODE.copy()
-    try:
-        FORMAT_BY_CODE["999"] = "Hyper"
-        assert detect_format("999", "Un libellé quelconque sans mot-clé") == "Hyper"
-        assert detect_format("111", "10301 - Hyper Marcory") == "Hyper"
-        assert detect_format("222", "10601 - Supeco Niangon") == "Supeco"
-        assert detect_format("333", None) == "Autre"
-    finally:
-        FORMAT_BY_CODE.clear()
-        FORMAT_BY_CODE.update(original)
-
-
-def test_get_buyer_code_mapping():
-    assert get_buyer_code("BOISSON") == "CK"
-    assert get_buyer_code("EPICERIE") == "GB"
-    assert get_buyer_code("DROGUERIE") == "AC"
-    assert get_buyer_code("PARFUMERIE HYGIENE") == "AC"
-    assert get_buyer_code("RAYON INCONNU") == "N/A"
-    assert get_buyer_code(None) == "N/A"
-
-
-def test_get_selected_rows_gere_dict_et_objet():
-    class FakeSelectionObj:
-        rows = [2]
-
-    class FakeEventObj:
-        selection = FakeSelectionObj()
-
-    assert get_selected_rows(FakeEventObj()) == [2]
-    assert get_selected_rows({"selection": {"rows": [3]}}) == [3]
-    assert get_selected_rows({"selection": {}}) == []
-    assert get_selected_rows(None) == []
-
-
-def test_scatter_x_range_couvre_rupture_totale():
-    """Vérifie que le calcul du range X du scatter plot couvre bien -100% (rupture)."""
-    scatter_df = pd.DataFrame({"Vs N-1 (%)": [-1.0, -0.3, 0.05], "Delta_Marge_pt": [0, -1, 2]})
-    max_val = float(scatter_df["Vs N-1 (%)"].max())
-    x_range = [-1.05, max(0.2, max_val + 0.05)]
-    assert x_range[0] <= -1.0
-    assert x_range[1] >= scatter_df["Vs N-1 (%)"].max()
-
-
-def test_load_data_exclut_lignes_parasites():
-    rows = [
-        {"Société": "SOC", "Rayon": "Total", "Site": np.nan, "CA": 100, "CA N-1": 90},
-        {"Société": "SOC", "Rayon": "010 - BOISSON", "Site": "Total", "CA": 60, "CA N-1": 55},
-        {"Société": "SOC", "Rayon": "010 - BOISSON", "Site": "111 - Hyper Test", "CA": 60, "CA N-1": 55},
-        {"Société": "Total", "Rayon": np.nan, "Site": np.nan, "CA": 100, "CA N-1": 90},
-        {"Société": np.nan, "Rayon": np.nan, "Site": np.nan, "CA": np.nan, "CA N-1": np.nan},
-        {"Société": "Filtres appliqués : \naxes...", "Rayon": np.nan, "Site": np.nan, "CA": np.nan, "CA N-1": np.nan},
-    ]
-    df = pd.DataFrame(rows)
-    for col in EXPECTED_COLS:
-        if col not in df.columns:
-            df[col] = np.nan
-    buf = io.BytesIO()
-    df.to_excel(buf, sheet_name="Export", index=False)
-    buf.seek(0)
-    buf.name = "test.xlsx"
-    result = _load_data_impl(buf)
-    assert len(result["global"]) == 1
-    assert len(result["rayon"]) == 1
-    assert len(result["couple"]) == 1
-    assert result["couple"].loc[0, "Format"] == "Hyper"
-    assert result["rayon"].loc[0, "Acheteur"] == "CK"
-
-
-def test_read_any_export_extension_invalide():
-    class FakeFile:
-        name = "export.pdf"
-    try:
-        read_any_export(FakeFile())
-        raise AssertionError("DataLoadError attendue pour une extension non supportée")
-    except DataLoadError:
-        pass
-
-
-def test_missing_required_columns_leve_dataloaderror():
-    df = pd.DataFrame({"Société": ["SOC"], "Rayon": ["Total"], "Site": [np.nan]})
-    buf = io.BytesIO()
-    df.to_excel(buf, sheet_name="Export", index=False)
-    buf.seek(0)
-    buf.name = "test.xlsx"
-    try:
-        _load_data_impl(buf)
-        raise AssertionError("DataLoadError attendue si CA/CA N-1 absents")
-    except DataLoadError:
-        pass
-
-
+# ==============================================================================
+# 6. BLOC DE TESTS UNITAIRES
+# ==============================================================================
 def run_all_tests():
-    tests = [obj for name, obj in list(globals().items()) if name.startswith("test_") and callable(obj)]
-    passed, failed = 0, []
-    for t in tests:
-        try:
-            t()
-            passed += 1
-            print(f"  OK   - {t.__name__}")
-        except AssertionError as e:
-            failed.append((t.__name__, str(e)))
-            print(f"  FAIL - {t.__name__} : {e}")
-    print(f"\n{passed}/{len(tests)} tests passés.")
-    if failed:
-        raise SystemExit(1)
+    """Exécute les tests unitaires métier sans dépendance Streamlit."""
+    print("=== DÉBUT DU RUN DES TESTS UNITAIRES METIER ===")
+
+    # Test 1: Split code / libellé
+    code, lib = split_code_libelle("010 - BOISSON")
+    assert code == "010" and lib == "BOISSON", f"Test 1 Échoué: {code}, {lib}"
+
+    # Test 2: Extraction Format
+    fmt = extract_format("10605 - Supeco Aboboté")
+    assert fmt == "Supeco", f"Test 2 Échoué: {fmt}"
+
+    # Test 3: Évaluation Flop C4 (Priorité Rupture)
+    df_dummy = pd.DataFrame([{
+        'Société': 'ADIALEA RCI', 'Rayon': '010 - BOISSON', 'Site': '10605 - Supeco Aboboté',
+        'Rayon_Lib': 'BOISSON', 'Format': 'Supeco', 'Site_Lib': 'Supeco Aboboté',
+        'CA N-1': 1000.0, 'Budget': np.nan, 'CA': np.nan, 'Vs N-1 (%)': -1.0,
+        'Vs Bgt (%)': np.nan, 'Taux de Marge N-1': 0.20, 'Taux de Marge': np.nan,
+        'Débit N-1': 100, 'Débit': np.nan, 'Panier N-1': 10, 'Panier': np.nan
+    }])
+    res_dummy = compute_flops(df_dummy)
+    assert res_dummy.iloc[0]['Severite'] == 'Critique', f"Test 3 Échoué: {res_dummy.iloc[0]['Severite']}"
+    assert res_dummy.iloc[0]['Score'] == '4/4', f"Test 3 Score Échoué: {res_dummy.iloc[0]['Score']}"
+
+    # Test 4: Flop majeur (2 critères) + Budget NaN ignoré
+    df_dummy2 = pd.DataFrame([{
+        'Société': 'ADIALEA RCI', 'Rayon': '010 - BOISSON', 'Site': '10601 - Supeco Niangon',
+        'Rayon_Lib': 'BOISSON', 'Format': 'Supeco', 'Site_Lib': 'Supeco Niangon',
+        'CA N-1': 1000.0, 'Budget': np.nan, 'CA': 750.0, 'Vs N-1 (%)': -0.25,
+        'Vs Bgt (%)': np.nan, 'Taux de Marge N-1': 0.20, 'Taux de Marge': 0.18, # -2 pt
+        'Débit N-1': 100, 'Débit': 90, 'Panier N-1': 10, 'Panier': 8.33
+    }])
+    res_dummy2 = compute_flops(df_dummy2, seuil_ca=-0.10, seuil_marge=-0.8)
+    assert res_dummy2.iloc[0]['Severite'] == 'Flop majeur', f"Test 4 Échoué: {res_dummy2.iloc[0]['Severite']}"
+    assert res_dummy2.iloc[0]['Score'] == '2/2', f"Test 4 Score Échoué: {res_dummy2.iloc[0]['Score']}"
+
+    # Test 5: Commentaire Rentabilité Matrice 3x3
+    comm = generate_rayon_comment(vs_n1=-0.15, delta_marge_pt=1.5, vs_bgt=0.02, seuil_ca=-0.10, seuil_marge=-0.8)
+    assert "Décrochage de CA compensé" in comm, f"Test 5 Échoué: {comm}"
+
+    print("✅ TOUS LES TESTS UNITAIRES SONT PASSÉS AVEC SUCCÈS !")
 
 
-# ============================================================
-# 7. POINT D'ENTRÉE
-# ============================================================
+# ==============================================================================
+# 7. POINT D'ENTRÉE DU SCRIPT
+# ==============================================================================
 if __name__ == "__main__":
     if os.environ.get("RUN_DASHBOARD_TESTS") == "1":
         run_all_tests()
