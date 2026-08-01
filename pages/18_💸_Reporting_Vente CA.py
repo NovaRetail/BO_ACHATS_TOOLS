@@ -446,6 +446,68 @@ def variation_color(x) -> str:
     return COL_GREEN if x >= 0 else COL_RED
 
 
+def dot_html(color: str) -> str:
+    return f'<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{color};margin-right:6px"></span>'
+
+
+def dot_color_for(x, seuil: float) -> str:
+    """Vert si positif, rouge si sous le seuil (négatif), orange entre les deux. Gris si donnée absente."""
+    if pd.isna(x):
+        return COL_TEXT_SECONDARY
+    if x >= 0:
+        return COL_GREEN
+    if x <= seuil:
+        return COL_RED
+    return COL_ORANGE
+
+
+def quadrant_html(icon: str, label: str, rows_html: str, muted: bool = False) -> str:
+    opacity = "0.55" if muted else "1"
+    return f"""<div style="background:#F7F7F9;border-radius:10px;padding:0.7rem 0.85rem;opacity:{opacity}">
+        <p style="font-size:11px;color:{COL_TEXT_SECONDARY};margin:0 0 8px 0;font-weight:600;letter-spacing:0.02em;text-transform:uppercase">{label}</p>
+        {rows_html}
+    </div>"""
+
+
+def quadrant_row(label: str, value: str, dot: str = "") -> str:
+    return f"""<div style="display:flex;justify-content:space-between;font-size:13px;padding:2px 0">
+        <span>{label}</span><span>{dot}{value}</span></div>"""
+
+
+def build_steering_wheel_card(rayon_row: pd.Series, nb_flops_actifs: int, seuil_ca: float, seuil_marge: float) -> str:
+    """Carte 'steering wheel' 4 cadrans (Client / Finance / Équipe / Opérations) pour un rayon,
+    inspirée du principe Tesco : jamais un chiffre isolé, toujours regroupé par thème."""
+    debit_var = rayon_row.get("Vs N-1 (%).1")
+    panier_var = rayon_row.get("Panier N Vs N-1")
+    ca_var = rayon_row.get("Vs N-1 (%)")
+    delta_marge = compute_delta_marge_pts(
+        pd.Series([rayon_row.get("Taux de Marge")]), pd.Series([rayon_row.get("Taux de Marge N-1")])
+    ).iloc[0]
+
+    client_q = quadrant_html("users", "Client", (
+        quadrant_row("Débit (trafic)", fmt_pct(debit_var), dot_html(dot_color_for(debit_var, seuil_ca)))
+        + quadrant_row("Panier moyen", fmt_pct(panier_var), dot_html(dot_color_for(panier_var, seuil_ca)))
+    ))
+    finance_q = quadrant_html("chart-bar", "Finance", (
+        quadrant_row("CA vs N-1", fmt_pct(ca_var), dot_html(dot_color_for(ca_var, seuil_ca)))
+        + quadrant_row("Δ marge", fmt_pt(delta_marge), dot_html(dot_color_for(delta_marge, seuil_marge)))
+    ))
+    equipe_q = quadrant_html("user-check", "Équipe", (
+        quadrant_row("Acheteur", rayon_row.get("Acheteur", "N/A"))
+        + quadrant_row("Points actifs", str(nb_flops_actifs))
+    ))
+    operations_q = quadrant_html("plug-connected", "Opérations", (
+        quadrant_row("Disponibilité", "à connecter plus tard")
+    ), muted=True)
+
+    return f"""<div class="card">
+        <p style="font-weight:600;font-size:15px;margin:0 0 10px 0">{rayon_row.get('Rayon_Libelle', '')}</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            {client_q}{finance_q}{equipe_q}{operations_q}
+        </div>
+    </div>"""
+
+
 def get_selected_rows(event) -> list:
     """Extrait la liste des index sélectionnés depuis st.dataframe(..., on_select="rerun").
     Robuste aux deux formats renvoyés selon la version de Streamlit :
@@ -677,16 +739,12 @@ def main():
                         unsafe_allow_html=True,
                     )
 
-        st.markdown("#### Rentabilité par rayon")
-        rayon_cols = st.columns(min(4, max(1, len(df_rayon_f))))
+        st.markdown("#### Point de situation par rayon")
+        rayon_cols = st.columns(min(2, max(1, len(df_rayon_f))))
         for i, (_, r) in enumerate(df_rayon_f.iterrows()):
-            comment = build_rentabilite_comment(r, seuil_ca, seuil_bgt, seuil_marge)
+            nb_flops_rayon = int((df_flops[df_flops["Rayon_Libelle"] == r["Rayon_Libelle"]]["Severite"] != "OK").sum())
             with rayon_cols[i % len(rayon_cols)]:
-                st.markdown(
-                    f"""<div class="card"><p style="font-weight:600;margin:0 0 6px 0">{r['Rayon_Libelle']}</p>
-                    <p style="font-size:13px;color:{COL_TEXT_SECONDARY};margin:0">{comment}</p></div>""",
-                    unsafe_allow_html=True,
-                )
+                st.markdown(build_steering_wheel_card(r, nb_flops_rayon, seuil_ca, seuil_marge), unsafe_allow_html=True)
 
         st.markdown("#### Magasins les plus en difficulté")
         agg_magasin = (
