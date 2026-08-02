@@ -76,6 +76,34 @@ def safe_sort(df: pd.DataFrame, by, ascending=True) -> pd.DataFrame:
     return df.sort_values(by=cols, ascending=ascending, kind="mergesort").reset_index(drop=True)
 
 
+def filter_scope(df: pd.DataFrame, departements=None, rayons=None) -> pd.DataFrame:
+    """
+    Filtre le périmètre article×réseau sur Département et/ou Rayon.
+    Aucune sélection (liste vide ou None) = tout inclus.
+    Colonnes réelles résolues via VENTES_MAP (departement / rayon).
+    """
+    out = df.copy()
+    col_dep = VENTES_MAP.get("departement")
+    col_ray = VENTES_MAP.get("rayon")
+    if departements and col_dep in out.columns:
+        out = out[out[col_dep].isin(departements)]
+    if rayons and col_ray in out.columns:
+        out = out[out[col_ray].isin(rayons)]
+    return out.reset_index(drop=True)
+
+
+def _detect_format(site_name: str) -> str:
+    """Déduit le format magasin (Hyper/Market/Supeco) depuis le libellé du site."""
+    s = _norm(site_name)
+    if "supeco" in s:
+        return "Supeco"
+    if "market" in s:
+        return "Market"
+    if "hyper" in s:
+        return "Hyper"
+    return "Autre"
+
+
 # --------------------------------------------------------------------------- #
 # Chargement
 # --------------------------------------------------------------------------- #
@@ -577,6 +605,8 @@ def store_ranking(df_raw: pd.DataFrame, codes_perimetre: list[str]) -> pd.DataFr
     """
     Classement magasin — sur tout le périmètre promo suivi (codes de la prévision).
     Valeurs réelles agrégées par site (pas de % réalisation : pas de prévision par magasin).
+    Ajoute une colonne 'Format' (Hyper/Market/Supeco) déduite du libellé de site,
+    exploitée par le filtre Format du module 19.
     """
     V = VENTES_MAP
     art_col, site_col = V["article"], V["site"]
@@ -588,8 +618,11 @@ def store_ranking(df_raw: pd.DataFrame, codes_perimetre: list[str]) -> pd.DataFr
     agg = d.groupby(site_col).agg(
         CA=(V["ca"], "sum"), Marge=(V["marge"], "sum"), Qté=(V["qte"], "sum")
     ).reset_index().rename(columns={site_col: "Magasin"})
+    agg["Format"] = agg["Magasin"].apply(_detect_format)
     total_ca = agg["CA"].sum()
     agg["Part réseau"] = (agg["CA"] / total_ca * 100) if total_ca else 0
     agg = agg.sort_values("CA", ascending=False).reset_index(drop=True)
     agg.insert(0, "Rang", range(1, len(agg) + 1))
-    return agg
+    # Ordre colonnes : Rang, Magasin, Format, CA, Marge, Qté, Part réseau
+    cols = ["Rang", "Magasin", "Format", "CA", "Marge", "Qté", "Part réseau"]
+    return agg[[c for c in cols if c in agg.columns]]
