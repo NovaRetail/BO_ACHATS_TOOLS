@@ -316,8 +316,14 @@ def compute_delta_marge_pts(taux_marge: pd.Series, taux_marge_n1: pd.Series) -> 
 
 
 def compute_ca_a_risque(ca: pd.Series, ca_n1: pd.Series) -> pd.Series:
-    """CA perdu en valeur absolue (FCFA). Positif = perte. Priorisation Pareto."""
+    """CA perdu en valeur absolue (FCFA). Positif = perte. Lecture top-line secondaire."""
     return ca_n1.fillna(0) - ca.fillna(0)
+
+
+def compute_marge_a_risque(marge: pd.Series, marge_n1: pd.Series) -> pd.Series:
+    """Marge perdue en valeur absolue (FCFA). Positif = valeur détruite.
+    Clé de priorisation retail : l'acheteur est jugé sur sa marge, pas sur le top-line."""
+    return marge_n1.fillna(0) - marge.fillna(0)
 
 
 def compute_benchmark_pairs(df: pd.DataFrame) -> pd.Series:
@@ -356,6 +362,10 @@ def compute_flops(df: pd.DataFrame, seuil_ca: float, seuil_bgt: float, seuil_mar
     out = df.copy()
     out["Delta_Marge_pt"] = compute_delta_marge_pts(out["Taux de Marge"], out["Taux de Marge N-1"])
     out["CA_a_risque"] = compute_ca_a_risque(out["CA"], out["CA N-1"])
+    if "Marge" in out.columns and "Marge N-1" in out.columns:
+        out["Marge_a_risque"] = compute_marge_a_risque(out["Marge"], out["Marge N-1"])
+    else:
+        out["Marge_a_risque"] = np.nan
     out["Ecart_vs_pairs"] = compute_benchmark_pairs(out)
 
     ca_is_missing_or_zero = out["CA"].isna() | (out["CA"] == 0)
@@ -640,7 +650,7 @@ def build_rayon_brief(rayon_row: pd.Series, flops_rayon: pd.DataFrame,
         lines.append(f"  Progression : {prog_str}")
     lines.append("")
 
-    a_traiter = flops_rayon[flops_rayon["Severite"] != "OK"].sort_values("CA_a_risque", ascending=False)
+    a_traiter = flops_rayon[flops_rayon["Severite"] != "OK"].sort_values("Marge_a_risque", ascending=False)
     lines.append(f"POINTS D'ATTENTION ({len(a_traiter)})")
     if a_traiter.empty:
         lines.append("  Aucun point d'alerte à date.")
@@ -650,7 +660,7 @@ def build_rayon_brief(rayon_row: pd.Series, flops_rayon: pd.DataFrame,
                 detail = "rupture totale de CA"
             else:
                 detail = f"CA {fmt_pct(r['Vs N-1 (%)'])}, Δ marge {fmt_pt(r['Delta_Marge_pt'])}"
-            lines.append(f"  - [{r['Severite']}] {r['Site_Libelle']} : {detail} (risque {fmt_fcfa(r['CA_a_risque'])})")
+            lines.append(f"  - [{r['Severite']}] {r['Site_Libelle']} : {detail} (marge à risque {fmt_fcfa(r['Marge_a_risque'])})")
 
     return "\n".join(lines)
 
@@ -681,9 +691,10 @@ def build_copil_export(df_global: pd.DataFrame, df_rayon: pd.DataFrame, df_flops
                 writer, index=False, sheet_name="Par Rayon"
             )
 
-        flops_export = df_flops.sort_values("CA_a_risque", ascending=False)
+        flops_export = df_flops.sort_values("Marge_a_risque", ascending=False)
         cols = ["Site_Libelle", "Rayon_Libelle", "Format", "CA", "CA N-1", "Vs N-1 (%)",
-                "Budget", "Vs Bgt (%)", "Delta_Marge_pt", "CA_a_risque", "Ecart_vs_pairs",
+                "Budget", "Vs Bgt (%)", "Marge", "Marge N-1", "Delta_Marge_pt",
+                "Marge_a_risque", "CA_a_risque", "Ecart_vs_pairs",
                 "Severite", "Score_Label"]
         flops_export[[c for c in cols if c in flops_export.columns]].to_excel(
             writer, index=False, sheet_name="Flops"
@@ -747,7 +758,7 @@ def render_welcome():
                 <p style="font-weight:600;font-size:15.5px;margin:0 0 8px 0">🎯 Vue d'ensemble & pilotage</p>
                 <p style="font-size:13.5px;line-height:1.6;color:{COL_TEXT_PRIMARY};margin:0">
                 Température du réseau en un coup d'œil : KPI clés, Top 5 des points d'attention priorisés par
-                <b>CA à risque</b>, point de situation par rayon et magasins les plus en difficulté.</p>
+                <b>marge à risque</b> (valeur détruite), point de situation par rayon et magasins les plus en difficulté.</p>
             </div>""",
             unsafe_allow_html=True,
         )
@@ -925,7 +936,7 @@ def main():
     # ---------------- TAB VUE D'ENSEMBLE ----------------
     with tab_exec:
         st.markdown("#### Top 5 points d'attention")
-        top5 = df_flops[df_flops["Severite"] != "OK"].sort_values("CA_a_risque", ascending=False).head(5)
+        top5 = df_flops[df_flops["Severite"] != "OK"].sort_values("Marge_a_risque", ascending=False).head(5)
         if top5.empty:
             st.success("Aucun flop détecté sur ce périmètre.")
         else:
@@ -934,14 +945,14 @@ def main():
                     f"""<div class="flop-row">
                         <div style="display:flex;align-items:center;gap:10px">{severity_badge(r['Severite'])}
                         <span>{r['Site_Libelle']} — {r['Rayon_Libelle']}</span></div>
-                        <span style="color:{COL_TEXT_SECONDARY}">Vs N-1 {fmt_pct(r['Vs N-1 (%)'])} · risque {fmt_fcfa(r['CA_a_risque'])}</span>
+                        <span style="color:{COL_TEXT_SECONDARY}">Vs N-1 {fmt_pct(r['Vs N-1 (%)'])} · marge à risque {fmt_fcfa(r['Marge_a_risque'])}</span>
                     </div>""",
                     unsafe_allow_html=True,
                 )
-            total_risque = df_flops[df_flops["Severite"] != "OK"]["CA_a_risque"].clip(lower=0).sum()
-            top5_risque = top5["CA_a_risque"].clip(lower=0).sum()
+            total_risque = df_flops[df_flops["Severite"] != "OK"]["Marge_a_risque"].clip(lower=0).sum()
+            top5_risque = top5["Marge_a_risque"].clip(lower=0).sum()
             part = (top5_risque / total_risque * 100) if total_risque > 0 else 0
-            st.caption(f"Top 5 = {fmt_fcfa(top5_risque)} FCFA de CA à risque, soit {part:.0f}% du CA perdu sur le périmètre.")
+            st.caption(f"Top 5 = {fmt_fcfa(top5_risque)} FCFA de marge à risque, soit {part:.0f}% de la valeur détruite sur le périmètre.")
 
         st.markdown("#### Point de situation par rayon")
         rayon_cols = st.columns(min(2, max(1, len(df_rayon_f))))
@@ -955,10 +966,11 @@ def main():
         st.markdown("#### Magasins les plus en difficulté")
         agg_magasin = (
             df_flops.groupby(["Site_Libelle", "Format"], as_index=False)
-            .agg(CA=("CA", "sum"), CA_N1=("CA N-1", "sum"), CA_a_risque=("CA_a_risque", "sum"),
+            .agg(CA=("CA", "sum"), CA_N1=("CA N-1", "sum"),
+                 CA_a_risque=("CA_a_risque", "sum"), Marge_a_risque=("Marge_a_risque", "sum"),
                  Nb_Flops=("Severite", lambda s: (s != "OK").sum()),
                  Nb_Critiques=("Severite", lambda s: (s == "Critique").sum()))
-            .sort_values(["Nb_Critiques", "CA_a_risque"], ascending=False)
+            .sort_values(["Nb_Critiques", "Marge_a_risque"], ascending=False)
             .head(8)
         )
         agg_magasin["Vs N-1 (%)"] = np.where(
@@ -966,10 +978,11 @@ def main():
         )
         display_mag = agg_magasin.copy()
         display_mag["CA"] = display_mag["CA"].apply(fmt_fcfa)
+        display_mag["Marge à risque"] = display_mag["Marge_a_risque"].apply(fmt_fcfa)
         display_mag["CA à risque"] = display_mag["CA_a_risque"].apply(fmt_fcfa)
         display_mag["Vs N-1 (%)"] = display_mag["Vs N-1 (%)"].apply(fmt_pct)
         st.dataframe(
-            display_mag[["Site_Libelle", "Format", "CA", "Vs N-1 (%)", "CA à risque", "Nb_Flops", "Nb_Critiques"]],
+            display_mag[["Site_Libelle", "Format", "CA", "Vs N-1 (%)", "Marge à risque", "CA à risque", "Nb_Flops", "Nb_Critiques"]],
             use_container_width=True, hide_index=True,
         )
 
@@ -1060,9 +1073,9 @@ def main():
                 | df_view["Rayon_Libelle"].str.contains(recherche, case=False, na=False)
             )
             df_view = df_view[mask]
-        df_view = df_view.sort_values("CA_a_risque", ascending=False).reset_index(drop=True)
+        df_view = df_view.sort_values("Marge_a_risque", ascending=False).reset_index(drop=True)
 
-        st.caption(f"{len(df_view)} couple(s) affiché(s) — trié par CA à risque décroissant. Clique une ligne pour le détail.")
+        st.caption(f"{len(df_view)} couple(s) affiché(s) — trié par marge à risque décroissante. Clique une ligne pour le détail.")
 
         table_col, detail_col = st.columns([2.2, 1])
         with table_col:
@@ -1074,6 +1087,7 @@ def main():
                 "Vs N-1": df_view["Vs N-1 (%)"].apply(fmt_pct),
                 "Vs Budget": df_view["Vs Bgt (%)"].apply(fmt_pct),
                 "Δ Marge": df_view["Delta_Marge_pt"].apply(fmt_pt),
+                "Marge à risque": df_view["Marge_a_risque"].apply(fmt_fcfa),
                 "CA à risque": df_view["CA_a_risque"].apply(fmt_fcfa),
                 "Score": df_view["Score_Label"],
             })
@@ -1126,7 +1140,8 @@ def main():
                             <div class="criterion-line"><span>{c2_txt} C2 — Écart vs Budget</span><span>{fmt_pct(r['Vs Bgt (%)']) if r['C2_Applicable'] else '—'}</span></div>
                             <div class="criterion-line"><span>{c3_txt} C3 — Dégradation marge</span><span>{fmt_pt(r['Delta_Marge_pt']) if r['C3_Applicable'] else '—'}</span></div>
                             {pairs_html}
-                            <div class="criterion-line"><span>CA à risque</span><span style="font-weight:600">{fmt_fcfa(r['CA_a_risque'])}</span></div>
+                            <div class="criterion-line"><span>Marge à risque</span><span style="font-weight:600;color:{COL_RED if pd.notna(r['Marge_a_risque']) and r['Marge_a_risque'] > 0 else COL_TEXT_PRIMARY}">{fmt_fcfa(r['Marge_a_risque'])}</span></div>
+                            <div class="criterion-line"><span>CA à risque</span><span>{fmt_fcfa(r['CA_a_risque'])}</span></div>
                         </div>
                         {decomp_html}
                     </div>""",
@@ -1159,11 +1174,15 @@ def render_methodology():
          "<b>Critique</b> : C4 déclenché (rupture). <b>Flop majeur</b> : au moins 2 critères KO. "
          "<b>Flop modéré</b> : exactement 1 critère KO. <b>OK</b> : aucun. Le score affiché (ex <code>2/3</code>) se lit "
          "« critères KO / critères applicables » : un couple sans budget n'a que 2 critères applicables au lieu de 3."),
-        ("4. CA à risque (priorisation Pareto)",
-         "<code>CA à risque = CA N-1 − CA</code>, en FCFA. C'est la perte de chiffre d'affaires en valeur absolue. "
-         "Deux flops de même sévérité n'ont pas le même enjeu : un Hyper à −8 % peut peser bien plus qu'un petit Supeco "
-         "à −40 %. On trie donc les priorités par ce montant, pas par le seul pourcentage — logique Pareto : quelques "
-         "couples concentrent l'essentiel de la perte."),
+        ("4. Marge à risque (clé de priorisation)",
+         "<code>Marge à risque = Marge N-1 − Marge</code>, en FCFA — la <b>valeur détruite</b>. C'est la métrique de "
+         "priorisation retenue : en retail FMCG, un acheteur est jugé sur sa marge (sa ligne P&L), pas sur le seul "
+         "top-line. Deux flops de même sévérité n'ont pas le même enjeu : un Hyper à −8 % peut détruire bien plus de "
+         "valeur qu'un petit Supeco à −40 %. On trie donc par ce montant (logique Pareto : quelques couples concentrent "
+         "l'essentiel de la valeur perdue). Avantage clé : le signe est toujours juste — un magasin qui gagne de la marge "
+         "affiche une marge à risque négative et sort naturellement du haut de liste, contrairement au CA à risque qui "
+         "pouvait afficher des valeurs négatives trompeuses sur des couples flaggés uniquement sur la marge. "
+         "Le <code>CA à risque = CA N-1 − CA</code> reste affiché en <b>lecture top-line secondaire</b>."),
         ("5. Benchmark par pairs de format",
          "<code>Écart vs pairs = Vs N-1 (couple) − moyenne Vs N-1 (mêmes Format et Rayon)</code>. "
          "Comparer un magasin à ses pairs (les autres Supeco sur le même rayon, par exemple) permet de distinguer un "
@@ -1206,6 +1225,7 @@ def _make_couple_row(**overrides) -> pd.DataFrame:
         "Rayon_Libelle": "BOISSON", "Format": "Hyper", "Site_Libelle": "Magasin Test",
         "CA N-1": 1000.0, "Budget": 1000.0, "CA": 1000.0,
         "Vs N-1 (%)": 0.0, "Vs Bgt (%)": 0.0,
+        "Marge N-1": 200.0, "Marge": 200.0,
         "Taux de Marge N-1": 0.20, "Taux de Marge": 0.20,
         "Débit N-1": 100.0, "Débit": 100.0, "Panier N-1": 10.0, "Panier": 10.0,
     })
@@ -1267,6 +1287,28 @@ def test_ca_a_risque():
     assert res.iloc[0] == 200.0   # perte de 200
     assert res.iloc[1] == 500.0   # rupture : perte de tout le CA N-1
     assert res.iloc[2] == -200.0  # progression : "risque" négatif
+
+
+def test_marge_a_risque():
+    marge = pd.Series([150.0, np.nan, 250.0])
+    marge_n1 = pd.Series([200.0, 100.0, 200.0])
+    res = compute_marge_a_risque(marge, marge_n1)
+    assert res.iloc[0] == 50.0    # valeur détruite : 50
+    assert res.iloc[1] == 100.0   # marge tombée : perte de toute la marge N-1
+    assert res.iloc[2] == -50.0   # marge en hausse : "risque" négatif = gain
+
+
+def test_marge_a_risque_dans_compute_flops():
+    df = _make_couple_row(**{"Marge N-1": 200.0, "Marge": 160.0})
+    res = compute_flops(df, seuil_ca=-0.10, seuil_bgt=-0.10, seuil_marge=-0.8)
+    assert res.loc[0, "Marge_a_risque"] == 40.0
+
+
+def test_marge_a_risque_colonnes_absentes():
+    df = _make_couple_row()
+    df = df.drop(columns=["Marge", "Marge N-1"])
+    res = compute_flops(df, seuil_ca=-0.10, seuil_bgt=-0.10, seuil_marge=-0.8)
+    assert pd.isna(res.loc[0, "Marge_a_risque"])
 
 
 def test_benchmark_pairs():
