@@ -1,23 +1,19 @@
 # -*- coding: utf-8 -*-
 """
-18_💸_Reporting_Vente CA.py — V4
+18_💸_Reporting_Vente CA.py — V4.1
 ============================================================
 SmartBuyer Hub — Module Reporting Commercial (Point de situation & Pilotage)
 
-V4 — analytique enrichie + refonte visuelle :
-    Analytique :
-      - CA à risque (FCFA) : priorisation Pareto des flops par enjeu réel
-      - Benchmark par pairs de format : magasin vs moyenne de son format/rayon
-      - Décomposition Trafic / Panier : d'où vient la variation de CA
-    Visuel :
-      - Écran d'accueil (rôle du module)
-      - Cartes KPI effet 3D + halo coloré conditionnel (flag KPI_STYLE_3D)
-      - Onglet Vue d'ensemble sans donut (Top 5 pleine largeur + steering wheel)
-      - Onglet Par Rayon (tops magasins CA + progression, brief enrichi vertical)
-      - Onglet Flops : table maître-détail (CA à risque, décompo, écart pairs),
-        sans scatter plot
-      - Onglet Méthodologie : logique, formules, concepts
-      - Aucune initiale d'acheteur affichée (raisonnement par rayon)
+V4.1 — refonte de l'écran d'accueil :
+    - Accueil aligné sur la charte du module Reporting Ventes
+      (titre pleine largeur + callout, colonne "Contenu du module",
+       les 4 critères C1–C4 en boîtes colorées, bloc "Fonctionnement")
+    - Reste identique à V4 :
+        * CA à risque (FCFA) : priorisation Pareto des flops
+        * Benchmark par pairs de format
+        * Décomposition Trafic / Panier
+        * Cartes KPI effet 3D + halo conditionnel
+        * Onglets Vue d'ensemble / Par Rayon / Flops (maître-détail) / Méthodologie
     Export : un seul classeur Excel COPIL multi-onglets
 
 Règles de flop (validées) :
@@ -160,11 +156,6 @@ CUSTOM_CSS = f"""
         padding: 0.75rem 1rem; box-shadow: 0 1px 3px rgba(0,0,0,0.06);
     }}
     .preset-caption {{ font-size: 11px; color: {COL_TEXT_SECONDARY}; margin-top: -6px; }}
-    .welcome-card {{
-        background-color: {COL_BG_CARD}; border-radius: 18px;
-        padding: 1.75rem 2rem; box-shadow: 0 1px 3px rgba(0,0,0,0.06);
-        max-width: 760px;
-    }}
     .method-block {{
         background-color: {COL_BG_CARD}; border-radius: 14px;
         padding: 1.1rem 1.4rem; margin-bottom: 12px;
@@ -173,6 +164,10 @@ CUSTOM_CSS = f"""
     .method-block code {{
         background: {COL_BG_QUADRANT}; padding: 2px 6px; border-radius: 6px;
         font-size: 13px;
+    }}
+    .welcome-section-title {{
+        font-size: 12px; font-weight: 700; color: {COL_TEXT_SECONDARY};
+        letter-spacing: 0.06em; text-transform: uppercase; margin: 0 0 12px 0;
     }}
 </style>
 """
@@ -698,23 +693,101 @@ def build_copil_export(df_global: pd.DataFrame, df_rayon: pd.DataFrame, df_flops
     return buffer.getvalue()
 
 
+def _welcome_criterion(tag: str, titre: str, formule: str, color: str) -> str:
+    """Boîte critère de flop pour l'accueil (style objectifs colorés du module Reporting Ventes)."""
+    r, g, b = _hex_to_rgb(color)
+    tint = f"rgba({r},{g},{b},0.07)"
+    border = f"rgba({r},{g},{b},0.20)"
+    return f"""<div style="background:{tint};border:1px solid {border};border-radius:14px;
+        padding:0.85rem 1rem;margin-bottom:9px">
+        <span style="background:{color};color:#FFFFFF;font-size:12px;font-weight:700;
+            padding:4px 10px;border-radius:8px;display:inline-block;margin-bottom:7px">{tag}</span>
+        <p style="font-size:13.5px;font-weight:600;color:{COL_TEXT_PRIMARY};margin:0 0 3px 0">{titre}</p>
+        <p style="font-size:12px;color:{COL_TEXT_SECONDARY};margin:0;
+            font-family:ui-monospace,Menlo,monospace">{formule}</p>
+    </div>"""
+
+
 def render_welcome():
-    """Écran d'accueil affiché tant qu'aucun fichier n'est chargé."""
+    """Écran d'accueil (charte type module Reporting Ventes) : présentation + 4 critères de flop."""
+    blue_r, blue_g, blue_b = _hex_to_rgb(COL_BLUE)
+    callout_bg = f"rgba({blue_r},{blue_g},{blue_b},0.07)"
+
+    # --- Titre + sous-titre (niveau page) ---
     st.markdown(
-        f"""<div class="welcome-card">
-        <p style="font-size:22px;font-weight:700;margin:0 0 4px 0">💸 Reporting Vente CA</p>
-        <p style="font-size:14px;color:{COL_TEXT_SECONDARY};margin:0 0 16px 0">
-        Point de situation commercial et orientation des acheteurs, du global au couple Magasin × Rayon.</p>
-        <p style="font-size:14px;margin:0 0 8px 0"><b>Ce module permet de :</b></p>
-        <ul style="font-size:14px;line-height:1.9;margin:0 0 16px 0;padding-left:20px">
-            <li>Prendre la température du réseau en un coup d'œil (KPI clés, points d'attention)</li>
-            <li>Détecter les <b>Flops</b> (couples Magasin × Rayon en sous-performance) selon 4 critères</li>
-            <li>Diagnostiquer chaque rayon (trafic, panier, marge) et préparer le brief à partager</li>
-            <li>Prioriser par <b>CA à risque</b> et situer chaque magasin face à ses pairs de format</li>
-            <li>Exporter une synthèse COPIL prête à diffuser</li>
-        </ul>
-        <p style="font-size:13px;color:{COL_TEXT_SECONDARY};margin:0">
-        👈 Charge ton export ventes (.xlsx ou .csv) dans la barre latérale pour démarrer.</p>
+        f"""<div style="display:flex;align-items:center;gap:12px;margin-bottom:2px">
+            <span style="font-size:34px">💸</span>
+            <span style="font-size:30px;font-weight:700;color:{COL_TEXT_PRIMARY}">Reporting Vente CA</span>
+        </div>
+        <p style="font-size:15px;color:{COL_TEXT_SECONDARY};margin:0 0 18px 0">
+        Point de situation commercial et orientation des acheteurs, du global au couple Magasin × Rayon.</p>""",
+        unsafe_allow_html=True,
+    )
+
+    # --- Callout "À quoi sert ce module ?" ---
+    st.markdown(
+        f"""<div style="background:{callout_bg};border-left:4px solid {COL_BLUE};
+            border-radius:12px;padding:1rem 1.25rem;margin-bottom:22px">
+            <p style="font-weight:600;font-size:15px;margin:0 0 6px 0">ℹ️ À quoi sert ce module ?</p>
+            <p style="font-size:14px;line-height:1.6;margin:0;color:{COL_TEXT_PRIMARY}">
+            Il transforme un export ventes (Global → Rayon → couple Magasin × Rayon) en point de situation
+            commercial : température du réseau, détection des <b>Flops</b> selon 4 critères, diagnostic par rayon
+            (trafic, panier, marge) et synthèse COPIL. Un seul fichier à charger dans la barre latérale.</p>
+        </div>""",
+        unsafe_allow_html=True,
+    )
+
+    left, right = st.columns([1.15, 1], gap="large")
+
+    # --- Colonne gauche : contenu du module ---
+    with left:
+        st.markdown('<p class="welcome-section-title">Contenu du module</p>', unsafe_allow_html=True)
+        st.markdown(
+            f"""<div class="card">
+                <p style="font-weight:600;font-size:15.5px;margin:0 0 8px 0">🎯 Vue d'ensemble & pilotage</p>
+                <p style="font-size:13.5px;line-height:1.6;color:{COL_TEXT_PRIMARY};margin:0">
+                Température du réseau en un coup d'œil : KPI clés, Top 5 des points d'attention priorisés par
+                <b>CA à risque</b>, point de situation par rayon et magasins les plus en difficulté.</p>
+            </div>""",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            f"""<div class="card">
+                <p style="font-weight:600;font-size:15.5px;margin:0 0 8px 0">🚩 Détection & diagnostic des Flops</p>
+                <p style="font-size:13.5px;line-height:1.6;color:{COL_TEXT_PRIMARY};margin:0">
+                Couples Magasin × Rayon en sous-performance selon 4 critères, décomposition
+                <b>Trafic / Panier</b>, écart vs pairs de format, brief prêt à partager et export COPIL multi-onglets.</p>
+            </div>""",
+            unsafe_allow_html=True,
+        )
+
+    # --- Colonne droite : les 4 critères de flop ---
+    with right:
+        st.markdown('<p class="welcome-section-title">Les 4 critères de flop</p>', unsafe_allow_html=True)
+        st.markdown(_welcome_criterion(
+            "C1 · Décrochage CA", "CA en repli vs N-1",
+            "Vs N-1 (%) ≤ seuil CA", COL_BLUE), unsafe_allow_html=True)
+        st.markdown(_welcome_criterion(
+            "C2 · Écart Budget", "Objectif budgétaire manqué",
+            "Vs Bgt (%) ≤ seuil Bgt · ignoré si pas de budget", COL_ORANGE), unsafe_allow_html=True)
+        st.markdown(_welcome_criterion(
+            "C3 · Dégradation marge", "Taux de marge en recul",
+            "(Taux N − Taux N-1) × 100 ≤ seuil marge (pts)", COL_AMBER), unsafe_allow_html=True)
+        st.markdown(_welcome_criterion(
+            "C4 · Rupture / fermeture", "CA nul alors que N-1 > 0 · prioritaire",
+            "CA absent/0 & CA N-1 > 0 → Critique", COL_RED), unsafe_allow_html=True)
+
+    # --- Fonctionnement ---
+    st.markdown(
+        f"""<div style="background:{COL_GREEN_BG};border-left:4px solid {COL_GREEN};
+            border-radius:12px;padding:1rem 1.25rem;margin-top:8px">
+            <p style="font-weight:700;font-size:12px;color:{COL_TEXT_SECONDARY};
+            letter-spacing:0.06em;text-transform:uppercase;margin:0 0 10px 0">Fonctionnement</p>
+            <p style="font-size:14px;line-height:1.95;margin:0;color:{COL_TEXT_PRIMARY}">
+            <b>1.</b> Charge ton export ventes (.xlsx ou .csv) dans la barre latérale.<br>
+            <b>2.</b> Choisis un preset de seuils (Strict / Standard / Souple) puis ajuste les curseurs.<br>
+            <b>3.</b> Explore les onglets : Vue d'ensemble → Par Rayon → Flops → Méthodologie.<br>
+            <b>4.</b> Télécharge la synthèse COPIL prête à diffuser.</p>
         </div>""",
         unsafe_allow_html=True,
     )
@@ -1110,7 +1183,7 @@ def render_methodology():
          "préoccupant. Un suffixe précise la position vs budget."),
         ("8. Presets de seuils",
          "Trois réglages rapides : <b>Strict</b> (−5 % CA, −5 % Budget, −0,5 pt marge), <b>Standard</b> "
-         "(−10 / −10 / −0,8), <b>Souple</b> (−15 / −15 / −1,2). Ils pré-remplissent les curseurs, qui restent ajustables "
+         "(−10 % / −10 % / −0,8), <b>Souple</b> (−15 % / −15 % / −1,2). Ils pré-remplissent les curseurs, qui restent ajustables "
          "manuellement. Le choix persiste durant la session."),
     ]
     for title, body in blocks:
@@ -1295,6 +1368,13 @@ def test_kpi_card_flat_et_3d_ne_plantent_pas():
     html_cond = kpi_card_conditional("Vs N-1", "-8%", -0.08)
     assert "CA" in html_flat and "10M" in html_flat
     assert "Vs N-1" in html_cond
+
+
+def test_welcome_criterion_contient_tag_et_formule():
+    html = _welcome_criterion("C1 · Décrochage CA", "CA en repli vs N-1", "Vs N-1 (%) ≤ seuil CA", COL_BLUE)
+    assert "C1" in html
+    assert "seuil CA" in html
+    assert COL_BLUE in html
 
 
 def test_load_data_exclut_lignes_parasites():
