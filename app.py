@@ -1,6 +1,12 @@
 import streamlit as st
+from pathlib import Path
 
 st.set_page_config(page_title="NovaRetail Solutions", page_icon="🛍️", layout="wide")
+
+# ── GARDE : n'affiche un lien que si la page existe vraiment ──────────────────
+def lien(chemin: str, label: str):
+    if Path(chemin).exists():
+        st.page_link(chemin, label=label)
 
 st.markdown("""
 <style>
@@ -64,19 +70,19 @@ with st.sidebar:
   <div style='font-size:11px;color:#8E8E93;margin-top:2px'>Hub analytique · Équipe Achats CI</div>
 </div>""", unsafe_allow_html=True)
     st.markdown("<div style='font-size:11px;font-weight:600;color:#8E8E93;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px'>Modules</div>", unsafe_allow_html=True)
-    st.page_link("pages/01_📊_Analyse_Scoring_ABC.py", label="📊  Scoring ABC")
-    st.page_link("pages/02_📈_Ventes_PBI.py",          label="📈  Ventes PBI")
-    st.page_link("pages/03_📦_Detention_Top_CA.py",    label="📦  Détention Top CA")
-    st.page_link("pages/04_💸_Performance_Promo.py",   label="💸  Performance Promo")
-    st.page_link("pages/05_🏪_Suivi_Implantation.py",  label="🏪  Suivi Implantation")
-    st.page_link("pages/06_💸_Marges_Negatives.py",    label="💸  Marges Négatives")
-    st.page_link("pages/07_📈_OTIF.py",                label="📈  OTIF")
-    st.page_link("pages/08_📦_OOS.py",                 label="📦  Ruptures OOS")
-    st.page_link("pages/09_✅_Tasks_Trackers.py",      label="✅  Tasks Tracker")
-    st.page_link("pages/10_📊_Perf_Hebdo.py",          label="📊  Perf Hebdo")
-    st.page_link("pages/11_📊_Rentabilite.py",         label="📊  Rentabilité")
-    st.page_link("pages/12_🏪_Bascule_XD.py",          label="🏪  Bascule XD")
-    st.page_link("pages/13_💸_Fidelite_cagnotte.py",   label="🏷️  Fidélité Cagnotte")
+    lien("pages/01_📊_Analyse_Scoring_ABC.py", label="📊  Scoring ABC")
+    lien("pages/02_📈_Ventes_PBI.py",          label="📈  Ventes PBI")
+    lien("pages/03_📦_Detention_Top_CA.py",    label="📦  Détention Top CA")
+    lien("pages/04_💸_Performance_Promo.py",   label="💸  Performance Promo")
+    lien("pages/05_🏪_Suivi_Implantation.py",  label="🏪  Suivi Implantation")
+    lien("pages/06_💸_Marges_Negatives.py",    label="💸  Marges Négatives")
+    lien("pages/07_📈_OTIF.py",                label="📈  OTIF")
+    lien("pages/08_📦_OOS.py",                 label="📦  Ruptures OOS")
+    lien("pages/09_✅_Tasks_Trackers.py",      label="✅  Tasks Tracker")
+    lien("pages/10_📊_Perf_Hebdo.py",          label="📊  Perf Hebdo")
+    lien("pages/11_📊_Rentabilite.py",         label="📊  Rentabilité")
+    lien("pages/12_🏪_Bascule_XD.py",          label="🏪  Bascule XD")
+    lien("pages/13_💸_Fidelite_cagnotte.py",   label="🏷️  Fidélité Cagnotte")
 
 # ── EN-TÊTE ──────────────────────────────────────────────────────────────────
 st.markdown("<div class='page-title'>NovaRetail Solutions</div>", unsafe_allow_html=True)
@@ -125,13 +131,18 @@ SECTIONS = [
 ]
 
 def mod_card(page, color, titre, desc):
+    if not Path(page).exists():
+        return
     st.markdown(f"<div class='mod-wrap' style='border-left-color:{color}'>", unsafe_allow_html=True)
     st.page_link(page, label=f"{titre}\n{desc}")
     st.markdown("</div>", unsafe_allow_html=True)
 
 for section in SECTIONS:
+    # ne garder que les modules dont le fichier existe encore
+    modules = [m for m in section["modules"] if Path(m[0]).exists()]
+    if not modules:
+        continue
     st.markdown(f"<div class='section-label'>{section['label']}</div>", unsafe_allow_html=True)
-    modules = section["modules"]
     rows = [modules[i:i+3] for i in range(0, len(modules), 3)]
     for row in rows:
         cols = st.columns(3)
@@ -141,4 +152,4 @@ for section in SECTIONS:
 
 # ── FOOTER ───────────────────────────────────────────────────────────────────
 st.markdown("---")
-st.markdown('<div style="text-align:center;color:#C7C7CC;font-size:11px;padding:8px 0">NovaRetail Solutions · v2.3 · 13 modules · Carrefour Côte d\'Ivoire</div>', unsafe_allow_html=True)
+st.markdown('<div style="text-align:center;color:#C7C7CC;font-size:11px;padding:8px 0">NovaRetail Solutions · v2.3 · Carrefour Côte d\'Ivoire</div>', unsafe_allow_html=True)
