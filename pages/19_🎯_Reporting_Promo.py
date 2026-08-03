@@ -3,18 +3,20 @@
 =========================================
 Reporting rapide de performance des articles en promotion (esprit Tesco).
 
-Colonnes obligatoires — fichier VENTES (extraction) :
+Colonnes obligatoires — fichier VENTES (extraction PBI) :
   Article, Site nom long, CA, Marge, CA Promo, Marge Promo, Qté Vente, %CA Poids Promo
   (Departement, Rayon, Famille, Sous Famille : optionnelles / contextuelles —
    tous les niveaux de sous-total, quel que soit leur nombre, sont filtrés
    automatiquement via le grain Article × Site="Total".)
+  → La PÉRIODE promo est lue dans le pied de page de l'export PBI (source de vérité).
 
 Colonnes obligatoires — fichier PRÉVISION :
   Code Article, Libellé, Prévision Qté, Prévision CA, Prévision Marge
-  + la période promo en dernière cellule de la colonne A (texte libre avec
-    dates jj/mm/aaaa), lue automatiquement et retirée des données.
+  (la période éventuellement présente en colonne A est indicative seulement).
 
-Rien n'est exploité tant que les contrôles ne sont pas au vert.
+Blocage : une couverture partielle prévision↔ventes ne bloque plus. Le seul
+garde-fou de cohérence est « au moins un article prévu a des ventes réelles sur
+la période PBI » (contrôle J2).
 """
 
 import streamlit as st
@@ -80,8 +82,8 @@ with st.sidebar:
     st.markdown("<div style='font-size:11px;font-weight:600;color:#8E8E93;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px'>Import fichiers</div>", unsafe_allow_html=True)
     f_ventes = st.file_uploader("Extraction ventes (.xlsx)", type=["xlsx", "xls", "csv"], key="ventes")
     f_prev = st.file_uploader("Liste prévision (.xlsx)", type=["xlsx", "xls", "csv"], key="prev")
-    st.caption("Ventes : Article, Site, CA, Marge, CA/Marge Promo, Qté Vente. "
-              "Prévision : Code, Libellé, Prév. Qté/CA/Marge + période en dernière cellule colonne A.")
+    st.caption("Ventes : Article, Site, CA, Marge, CA/Marge Promo, Qté Vente + période dans le pied de page PBI. "
+              "Prévision : Code, Libellé, Prév. Qté/CA/Marge.")
     st.markdown("---")
 
 # =========================================================================== #
@@ -97,9 +99,9 @@ if not (f_ventes and f_prev):
   prévisions promo pour produire la performance de chaque article (atteinte, marge, poids CA)
   et le classement des magasins sur le périmètre suivi.<br><br>
   <strong>Logique retenue :</strong> le périmètre suit ta liste prévision (pas l'inverse) — un
-  article vendu en promo mais absent du plan n'est pas comptabilisé. Chaque fichier passe par un
-  contrôle qualité avant tout calcul : rien ne s'affiche si un point est bloquant, pour éviter
-  d'exploiter une donnée mal jointe ou incomplète.
+  article vendu en promo mais absent du plan n'est pas comptabilisé. La période promo fait foi
+  côté <strong>export PBI</strong>. Une couverture partielle prévision↔ventes ne bloque pas : le
+  seul garde-fou est qu'au moins un article prévu ait des ventes réelles sur la période.
 </div>
 """, unsafe_allow_html=True)
 
@@ -110,12 +112,13 @@ if not (f_ventes and f_prev):
         ("CA / Marge", "Valeurs totales période (Poids CA, en-tête)"),
         ("CA Promo / Marge Promo", "Univers promo + alerte marge négative"),
         ("Qté Vente / %CA Poids Promo", "Axe quantité + poids promo"),
+        ("Pied de page PBI", "Période promo — lue automatiquement"),
         ("Departement / Rayon (optionnel)", "Filtres — sous-totaux filtrés automatiquement"),
     ]
     cols_prev = [
         ("Code Article / Libellé", "Clé de jointure"),
         ("Prévision Qté / CA / Marge", "3 axes obligatoires"),
-        ("Dernière cellule colonne A", "Période promo — lue automatiquement"),
+        ("Colonne A (dernière cellule)", "Période indicative — sans effet sur les calculs"),
     ]
     t1, t2 = st.columns(2)
     with t1:
@@ -205,8 +208,12 @@ sc = up.build_scorecard(kpi, df_art)
 ca_total_ext = df_art[V["ca"]].sum()
 marge_total_ext = df_art[V["marge"]].sum()
 kpi_atteinte = sc["CA réal."].sum() / sc["CA prév."].sum() if sc["CA prév."].sum() else 0
-periode_txt = (f"{prev_meta['periode_debut']} → {prev_meta['periode_fin']}"
-              if prev_meta.get("periode_debut") else "à préciser")
+
+# Période : source de vérité = export PBI (meta), fallback prévision si absente
+periode_txt = (f"{meta['periode_debut']} → {meta['periode_fin']}"
+              if meta.get("periode_debut")
+              else (f"{prev_meta['periode_debut']} → {prev_meta['periode_fin']}"
+                    if prev_meta.get("periode_debut") else "à préciser"))
 
 h1, h2, h3, h4 = st.columns(4)
 for col, label, val in [
@@ -218,7 +225,7 @@ for col, label, val in [
     col.markdown(f'<div class="card-kpi"><div class="kpi-l">{label}</div>'
                  f'<div class="kpi">{val}</div></div>', unsafe_allow_html=True)
 
-st.caption("Période lue automatiquement dans la dernière cellule de la colonne A de la liste prévision.")
+st.caption("Période lue automatiquement dans l'export PBI (extraction ventes).")
 
 # =========================================================================== #
 # SCORECARD ARTICLE
