@@ -4,6 +4,11 @@ utils_promo.py — SmartBuyer Hub / Reporting Promo Performance
 ÉTAPE 1 : ingestion robuste + contrôles qualité.
 Aucune dépendance à Streamlit ici (pur pandas) -> testable en CLI.
 Charte : réutilise l'esprit utils_io (fallback encodage, safe_sort).
+
+Logique période : la période fait foi côté EXPORT PBI (extract_meta), pas côté
+prévision. Une couverture partielle de jointure ne bloque plus (B5 = warn) ; le
+seul garde-fou de cohérence est « au moins un article prévu a des ventes réelles
+sur la période » (J2).
 """
 
 from __future__ import annotations
@@ -134,6 +139,8 @@ def _split_period_row(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     """
     Isole une éventuelle ligne 'période' en dernière position de la 1ère colonne
     (texte libre, ex. dates ou phrase de filtre) et la retire des données.
+    NB : cette période prévision reste secondaire — la période de référence
+    exploitée à l'affichage vient de l'export PBI (extract_meta).
     """
     meta = {"periode_texte": None, "periode_debut": None, "periode_fin": None}
     if df.empty:
@@ -207,7 +214,8 @@ _PERIODE_RE = re.compile(r"apr[eè]s le\s*(\d{2}/\d{2}/\d{4}).*?avant le\s*(\d{2
 
 
 def extract_meta(df_raw: pd.DataFrame) -> dict:
-    """Récupère la période depuis la ligne de filtres, si présente."""
+    """Récupère la période depuis la ligne de filtres de l'export PBI, si présente.
+    C'est LA période de référence (source de vérité) affichée dans le module."""
     meta = {"periode_debut": None, "periode_fin": None, "filtre_brut": None}
     for col in df_raw.columns:
         s = df_raw[col].astype(str)
@@ -284,12 +292,12 @@ def run_controls(df_raw: pd.DataFrame,
                   f"{len(df_raw)} lignes brutes → {len(df_art)} articles nets (sous-totaux/footer retirés)"))
 
     if meta.get("periode_debut"):
-        R.append(_chk("A3 · Période détectée", "ok",
+        R.append(_chk("A3 · Période détectée (export PBI)", "ok",
                       f"{meta['periode_debut']} → {meta['periode_fin']}",
-                      "Extraite du pied de page"))
+                      "Source de vérité : extraite du pied de page de l'export PBI"))
     else:
-        R.append(_chk("A3 · Période détectée", "warn", "—",
-                      "Pied de page absent : à renseigner manuellement"))
+        R.append(_chk("A3 · Période détectée (export PBI)", "warn", "—",
+                      "Pied de page PBI absent : à renseigner manuellement"))
 
     # --- B. CLÉ / JOINTURE ----------------------------------------------------
     if "Code" in df_art.columns:
@@ -317,13 +325,13 @@ def run_controls(df_raw: pd.DataFrame,
 
     if prev_meta:
         if prev_meta.get("periode_debut"):
-            R.append(_chk("B0 · Période promo détectée (col. A)", "ok",
+            R.append(_chk("B0 · Période promo indicative (col. A prévision)", "ok",
                           f"{prev_meta['periode_debut']}"
                           + (f" → {prev_meta['periode_fin']}" if prev_meta.get("periode_fin") else ""),
-                          "Lue dans la dernière cellule de la colonne A"))
+                          "Info : la période exploitée reste celle de l'export PBI (A3)"))
         else:
-            R.append(_chk("B0 · Période promo détectée (col. A)", "warn", "—",
-                          "Aucune date reconnue dans la dernière cellule de colonne A"))
+            R.append(_chk("B0 · Période promo indicative (col. A prévision)", "warn", "—",
+                          "Aucune date en colonne A — sans effet : période lue dans l'export PBI"))
 
     coverage_ok = (not miss_prev) and ("Code" in df_art.columns)
     if coverage_ok:
@@ -340,10 +348,14 @@ def run_controls(df_raw: pd.DataFrame,
         orphelins_prev = codes_p - codes_v          # planifiés, pas retrouvés en ventes
         promo_codes = set(df_art.loc[df_art[V["ca_promo"]].fillna(0) > 0, "Code"])
         promo_hors_prev = promo_codes - codes_p     # vendus en promo mais absents du plan
+        # Couverture partielle = NON bloquant : la période fait foi côté PBI, la
+        # cohérence réelle est vérifiée par J2 (ventes réelles sur articles prévus).
         R.append(_chk("B5 · Couverture jointure prévision→ventes",
-                      "ok" if cov >= 0.95 else "warn" if cov >= 0.8 else "err",
+                      "ok" if cov >= 0.95 else "warn",
                       f"{cov:.0%}",
-                      f"{len(inter)}/{len(codes_p)} codes prévision retrouvés"))
+                      f"{len(inter)}/{len(codes_p)} codes prévision retrouvés"
+                      + ("" if cov >= 0.8
+                         else " · couverture partielle (période PBI ≠ plan ?) — non bloquant")))
         R.append(_chk("B6 · Prévisions orphelines (planifié non vendu)",
                       "ok" if not orphelins_prev else "warn",
                       f"{len(orphelins_prev)}",
@@ -430,16 +442,24 @@ def build_perimetre(df_art: pd.DataFrame, df_prev: pd.DataFrame) -> pd.DataFrame
 
 
 def controls_jointure(perim: pd.DataFrame, df_prev: pd.DataFrame) -> tuple[list[dict], bool]:
-    """Contrôles spécifiques à la jointure avant tout calcul de KPI."""
+    """Contrôles spécifiques à la jointure avant tout calcul de KPI.
+    J2 = seul garde-fou de cohérence période : au moins un article prévu doit
+    avoir des ventes réelles (Qté ou CA > 0) sur la période de l'export PBI."""
     R = []
     n = len(perim)
     orph = int(perim["Orphelin"].sum())
-    vendus = n - orph
+    raccroches = n - orph
+    avec_ventes = int(((pd.to_numeric(perim["Ventes_Qte"], errors="coerce").fillna(0) > 0)
+                       | (pd.to_numeric(perim["Ventes_CA"], errors="coerce").fillna(0) > 0)).sum())
+
     R.append(_chk("J1 · Articles au périmètre (= prévision)",
                   "ok" if n else "err", f"{n}", "Périmètre piloté par la liste prévision"))
-    R.append(_chk("J2 · Articles raccrochés aux ventes",
-                  "ok" if vendus else "err", f"{vendus}/{n}",
-                  f"{orph} orphelin(s) = planifié(s) non vendu(s) → réalisation 0%"))
+    R.append(_chk("J2 · Ventes réelles sur les articles prévus (période PBI)",
+                  "ok" if avec_ventes else "err", f"{avec_ventes}/{n} avec ventes",
+                  (f"{raccroches} raccroché(s) · {avec_ventes} avec ventes réelles sur la période "
+                   f"(période = export PBI)." if avec_ventes
+                   else "Aucun article prévu n'a de vente : l'extraction PBI ne couvre pas "
+                        "la période promo — vérifier le fichier ventes.")))
     dup = int(perim["code"].duplicated(keep=False).sum())
     R.append(_chk("J3 · Unicité après jointure",
                   "ok" if dup == 0 else "err", f"{dup} doublon(s)",
