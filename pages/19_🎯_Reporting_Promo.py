@@ -14,9 +14,10 @@ Colonnes obligatoires — fichier PRÉVISION :
   Code Article, Libellé, Prévision Qté, Prévision CA, Prévision Marge
   (la période éventuellement présente en colonne A est indicative seulement).
 
-Blocage : une couverture partielle prévision↔ventes ne bloque plus. Le seul
-garde-fou de cohérence est « au moins un article prévu a des ventes réelles sur
-la période PBI » (contrôle J2).
+Aucun blocage : les contrôles qualité sont purement informatifs. Le reporting
+s'affiche toujours dès que les deux fichiers sont chargés — les points d'attention
+(codes en double, prévision vide, marge négative, etc.) apparaissent en alertes
+dans le rapport de contrôle, sans jamais empêcher la consultation des données.
 """
 
 import streamlit as st
@@ -171,35 +172,37 @@ if df_art.empty:
     st.warning("Aucun article ne correspond aux filtres Département/Rayon sélectionnés.")
     st.stop()
 
-report1, bloq1 = up.run_controls(df_raw, df_art, df_prev, found, meta, prev_meta)
+# Les contrôles sont exécutés et affichés à titre informatif uniquement —
+# aucun retour "bloquant" n'est exploité ici : le reporting s'affiche toujours.
+report1, _ = up.run_controls(df_raw, df_art, df_prev, found, meta, prev_meta)
 perim = up.build_perimetre(df_art, df_prev)
-report2, bloq2 = up.controls_jointure(perim, df_prev)
+report2, _ = up.controls_jointure(perim, df_prev)
 kpi = up.compute_kpi(perim)
-report3, bloq3 = up.controls_kpi(kpi)
+report3, _ = up.controls_kpi(kpi)
 
 all_reports = report1 + report2 + report3
-bloquant = bloq1 or bloq2 or bloq3
+nb_ok   = sum(1 for r in all_reports if r["statut"] == "ok")
+nb_warn = sum(1 for r in all_reports if r["statut"] == "warn")
+nb_err  = sum(1 for r in all_reports if r["statut"] == "err")
+a_surveiller = (nb_warn + nb_err) > 0
 
 def _row(r):
     b = {"ok": "chip-ok", "warn": "chip-warn", "err": "chip-err"}[r["statut"]]
-    lbl = {"ok": "OK", "warn": "WARN", "err": "STOP"}[r["statut"]]
+    lbl = {"ok": "OK", "warn": "ALERTE", "err": "ALERTE"}[r["statut"]]
     return (f'<div class="card" style="margin-bottom:6px;"><span class="badge {b}">{lbl}</span> '
             f'<b>{r["contrôle"]}</b> &nbsp;·&nbsp; {r["valeur"]}'
             f'<div style="color:#8E8E93;font-size:12px;margin-top:2px">{r["message"]}</div></div>')
 
-with st.expander(f"🔍 Rapport de contrôle qualité "
-                 f"({sum(1 for r in all_reports if r['statut']=='ok')} OK · "
-                 f"{sum(1 for r in all_reports if r['statut']=='warn')} à surveiller · "
-                 f"{sum(1 for r in all_reports if r['statut']=='err')} bloquant)",
-                 expanded=bloquant):
+with st.expander(f"🔍 Rapport de contrôle qualité — informatif, n'empêche rien "
+                 f"({nb_ok} OK · {nb_warn + nb_err} alerte(s))",
+                 expanded=a_surveiller):
     st.markdown("".join(_row(r) for r in all_reports), unsafe_allow_html=True)
 
-if bloquant:
-    st.error("⛔ Contrôles bloquants détectés — corrige les fichiers avant d'exploiter les données. "
-             "Voir le détail ci-dessus.")
-    st.stop()
-
-st.success("✅ Contrôles au vert. Données exploitées.")
+if a_surveiller:
+    st.warning(f"⚠️ {nb_warn + nb_err} point(s) d'attention détecté(s) sur les articles de la liste "
+               f"prévision — voir le détail ci-dessus. Le reporting reste exploitable.")
+else:
+    st.success("✅ Contrôles au vert. Données exploitées.")
 
 # =========================================================================== #
 # EN-TÊTE : KPI atteinte, CA total, Marge totale, Période promo
