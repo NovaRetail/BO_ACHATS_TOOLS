@@ -1160,21 +1160,47 @@ def build_workbook(rayons, week_label, quality, coverage_labels_by_rayon, kpis_b
 # 11. INTERFACE STREAMLIT
 # =============================================================================
 
-st.markdown(
-    """
-    <style>
-    .kpi-card { background:#FFFFFF; border-radius:14px; padding:16px 20px; border:1px solid #E5E5EA; margin-bottom:8px; }
-    .kpi-label { font-size:12px; color:#6E6E73; margin-bottom:4px; }
-    .kpi-value { font-size:22px; font-weight:600; color:#1D1D1F; }
-    .kpi-evo-pos { font-size:12px; color:#34C759; margin-top:4px; }
-    .kpi-evo-neg { font-size:12px; color:#FF3B30; margin-top:4px; }
-    .kpi-evo-neutral { font-size:12px; color:#6E6E73; margin-top:4px; }
-    .diag-box { background:#F2F2F7; border-radius:14px; padding:16px 20px; font-size:14px; color:#1D1D1F; margin:12px 0 20px 0; }
-    .alert-box { background:#FFF3E0; border-left:4px solid #FF9500; border-radius:8px; padding:10px 16px; font-size:13px; color:#6E6E73; margin:12px 0; }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+BLUE, GREEN, RED, AMBER, DARK, GREY, BG = "#007AFF", "#34C759", "#FF3B30", "#FF9500", "#1D1D1F", "#86868B", "#F2F2F7"
+
+st.markdown("""
+<style>
+html, body, [class*="css"] {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display",
+                 "SF Pro Text", "Helvetica Neue", Arial, sans-serif !important;
+    background-color: #F2F2F7;
+}
+.stApp { background: #F2F2F7; }
+.main .block-container { padding-top: 1.8rem; max-width: 1350px; }
+[data-testid="stSidebar"] { background: #F2F2F7 !important; border-right: 0.5px solid #D1D1D6 !important; }
+[data-testid="stMetric"] { background: #FFFFFF !important; border: 0.5px solid #E5E5EA !important; border-radius: 12px !important; padding: 16px 18px !important; }
+[data-testid="stMetricLabel"] { font-size: 11px !important; font-weight: 500 !important; color: #8E8E93 !important; text-transform: uppercase !important; letter-spacing: 0.04em !important; }
+[data-testid="stMetricValue"] { font-size: 24px !important; font-weight: 600 !important; color: #1C1C1E !important; letter-spacing: -0.02em !important; }
+[data-testid="stTabs"] button[role="tab"] { font-size: 13px !important; font-weight: 500 !important; padding: 8px 16px !important; color: #8E8E93 !important; border-radius: 0 !important; border-bottom: 2px solid transparent !important; }
+[data-testid="stTabs"] button[role="tab"][aria-selected="true"] { color: #007AFF !important; border-bottom: 2px solid #007AFF !important; background: transparent !important; }
+[data-testid="stTabs"] [role="tablist"] { border-bottom: 0.5px solid #E5E5EA !important; }
+[data-testid="stDataFrame"] { border: 0.5px solid #E5E5EA !important; border-radius: 10px !important; }
+[data-testid="stDataFrame"] th { background: #F2F2F7 !important; font-size: 11px !important; font-weight: 600 !important; color: #8E8E93 !important; text-transform: uppercase !important; letter-spacing: 0.04em !important; }
+[data-testid="stFileUploader"] { border: 1.5px dashed #D1D1D6 !important; border-radius: 10px !important; background: #F9F9FB !important; }
+.stDownloadButton > button { background: #007AFF !important; color: white !important; border: none !important; border-radius: 8px !important; font-weight: 500 !important; font-size: 13px !important; padding: 10px 24px !important; width: 100% !important; }
+.stButton > button[kind="primary"] { background: #007AFF !important; border: none !important; border-radius: 8px !important; font-weight: 600 !important; }
+hr { border-color: #E5E5EA !important; margin: 1rem 0 !important; }
+
+.page-title   { font-size: 28px; font-weight: 700; color: #1C1C1E; letter-spacing: -0.03em; margin: 0; }
+.page-caption { font-size: 13px; color: #8E8E93; margin-top: 3px; margin-bottom: 1.5rem; }
+.section-label { font-size: 11px; font-weight: 600; color: #8E8E93; text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 10px; }
+.alert-card  { padding: 12px 16px; border-radius: 10px; margin-bottom: 8px; font-size: 13px; line-height: 1.5; border-left: 3px solid; background: #FFFFFF; }
+.alert-red   { background: #FFF2F2; border-color: #FF3B30; color: #3A0000; }
+.alert-amber { background: #FFFBF0; border-color: #FF9500; color: #3A2000; }
+.alert-green { background: #F0FFF4; border-color: #34C759; color: #003A10; }
+.alert-blue  { background: #F0F8FF; border-color: #007AFF; color: #001A3A; }
+.alert-purple{ background: #F5F0FF; border-color: #AF52DE; color: #1A0033; }
+.col-required { background: #F0F8FF; border: 0.5px solid #B3D9FF; border-radius: 8px; padding: 10px 14px; margin-bottom: 6px; display: flex; align-items: flex-start; gap: 10px; }
+.col-name { font-size: 13px; font-weight: 600; color: #0066CC; font-family: monospace; }
+.col-desc { font-size: 12px; color: #3A3A3C; margin-top: 1px; }
+.card { background:#FFFFFF;border:0.5px solid #E5E5EA;border-radius:12px;padding:16px;margin-bottom:10px; }
+.small-muted { font-size:12px;color:#8E8E93; }
+</style>
+""", unsafe_allow_html=True)
 
 
 def _fmt_millions(v):
@@ -1195,13 +1221,14 @@ def _evo_css(v):
     return "kpi-evo-pos" if v > 0 else ("kpi-evo-neg" if v < 0 else "kpi-evo-neutral")
 
 
-def kpi_card(col, label, value_str, evo_val, evo_str):
-    col.markdown(
-        f'<div class="kpi-card"><div class="kpi-label">{label}</div>'
-        f'<div class="kpi-value">{value_str}</div>'
-        f'<div class="{_evo_css(evo_val)}">{evo_str}</div></div>',
-        unsafe_allow_html=True,
-    )
+def kpi_metric(col, label, kpi):
+    """Carte KPI native (st.metric), cohérente avec la charte SmartBuyer Hub."""
+    if kpi is None:
+        col.metric(label, "N/D")
+        return
+    evo = kpi.ca_evo_pct
+    delta_str = f"{evo * 100:+.1f}% vs N-1 ISO" if evo is not None else None
+    col.metric(label, _fmt_millions(kpi.ca_n), delta=delta_str)
 
 
 @st.cache_data(show_spinner="Lecture des exports...")
@@ -1218,19 +1245,95 @@ def parse_files(site_bytes, current_bytes, previous_bytes):
     return detail_rows(site_enriched), detail_rows(n_enriched), detail_rows(n1_enriched), period_n.label
 
 
-st.title("Reporting Vente CA")
-st.caption("Vue BI exploratoire - la saisie Cause / Commentaire se fait dans le fichier Excel exporté")
+st.markdown("<div class='page-title'>💸 Reporting Vente CA — Performance N vs N-1 ISO</div>", unsafe_allow_html=True)
+st.markdown("<div class='page-caption'>Comparaison stricte sur les mêmes semaines ISO · Réseau + Hyper/Market/Supeco · priorisation automatique P1/P2 par famille · export Excel prêt pour saisie acheteur</div>", unsafe_allow_html=True)
 
 with st.sidebar:
-    st.subheader("Imports")
-    site_file = st.file_uploader("Export DATA_SITE", type=["xlsx"])
+    st.markdown("""
+<div style='margin-bottom:18px'>
+  <div style='font-size:20px;font-weight:700;color:#1C1C1E;letter-spacing:-0.02em'>🛍️ SmartBuyer</div>
+  <div style='font-size:11px;color:#8E8E93;margin-top:1px'>Hub analytique · Équipe Achats</div>
+</div>""", unsafe_allow_html=True)
+    st.markdown("---")
+    st.markdown("<div style='font-size:11px;font-weight:600;color:#8E8E93;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px'>Import fichiers</div>", unsafe_allow_html=True)
+    site_file = st.file_uploader("Export DATA_SITE (Rayon x Site)", type=["xlsx"])
     current_file = st.file_uploader("Export DATA_N (semaine courante)", type=["xlsx"])
-    previous_file = st.file_uploader("Export DATA_N1_ISO", type=["xlsx"])
+    previous_file = st.file_uploader("Export DATA_N1_ISO (même semaine ISO, N-1)", type=["xlsx"])
+    st.caption("3 exports PBI requis : granularité Rayon×Site pour DATA_SITE, Rayon×Famille×Site pour DATA_N et DATA_N1_ISO.")
+    st.markdown("---")
 
 prio_cfg, drivers_cfg, quality_cfg, top_site_famille_n = render_sidebar_config()
 
+with st.sidebar:
+    st.markdown("---")
+    st.caption("SmartBuyer Hub · Module Reporting Vente CA")
+
 if not (site_file and current_file and previous_file):
-    st.info("Charge les 3 exports PBI dans la barre latérale pour démarrer l'analyse.")
+    st.markdown("""
+<div class='alert-card alert-blue'>
+  <strong>ℹ️ À quoi sert ce module ?</strong><br>
+  Ce module compare la performance commerciale <strong>N vs N-1 sur la même semaine ISO</strong>
+  (jamais vs la colonne "CA N-1" glissante des exports), identifie automatiquement les
+  <strong>familles à plus fort impact</strong> et génère un reporting Excel hebdomadaire
+  déjà analysé, ne laissant à l'acheteur que la Cause et le Commentaire à compléter.
+  Il ne produit pas de Business Review mensuelle : les fichiers hebdomadaires s'archivent
+  semaine après semaine pour constituer cet historique.
+</div>
+""", unsafe_allow_html=True)
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("<div class='section-label'>Contenu du module</div>", unsafe_allow_html=True)
+        st.markdown("""
+<div class='card'>
+  <div style='font-size:14px;font-weight:700;color:#1C1C1E;margin-bottom:8px'>📊 Vue réseau</div>
+  <div style='font-size:12px;color:#3A3A3C;line-height:1.5'>
+    CA et évolution vs N-1 ISO par rayon, alerte de périmètre si DATA_SITE est incomplet.
+  </div>
+</div>
+<div class='card'>
+  <div style='font-size:14px;font-weight:700;color:#1C1C1E;margin-bottom:8px'>🗂️ Vue rayon</div>
+  <div style='font-size:12px;color:#3A3A3C;line-height:1.5'>
+    4 blocs Réseau / Hyper / Market / Supeco (CA, Budget, Marge, Qté, Promo, Débit, Panier),
+    diagnostic automatique texte, table Familles triée par impact avec priorité et signal driver.
+  </div>
+</div>
+<div class='card'>
+  <div style='font-size:14px;font-weight:700;color:#1C1C1E;margin-bottom:8px'>🔍 Contrôles qualité</div>
+  <div style='font-size:12px;color:#3A3A3C;line-height:1.5'>
+    Couverture de sites par format, réconciliation CA DATA_SITE vs DATA_N sur le périmètre
+    commun — jamais masqué, toujours affiché explicitement.
+  </div>
+</div>
+<div class='card'>
+  <div style='font-size:14px;font-weight:700;color:#1C1C1E;margin-bottom:8px'>📥 Export Excel</div>
+  <div style='font-size:12px;color:#3A3A3C;line-height:1.5'>
+    Un onglet par rayon, cellules jaunes réservées à la saisie acheteur (Cause en liste
+    déroulante, Commentaire libre). Seuils de scoring pilotables dans la barre latérale.
+  </div>
+</div>
+""", unsafe_allow_html=True)
+    with c2:
+        st.markdown("<div class='section-label'>Règle de priorisation</div>", unsafe_allow_html=True)
+        st.markdown("""
+<div class='alert-card alert-red'><strong>P1 — Impact fort</strong> — Top 3 des écarts CA absolus du rayon, OU famille &gt;10% du rayon avec évolution significative, OU dégradation du taux de marge &gt;2 pts</div>
+<div class='alert-card alert-amber'><strong>P2 — Anomalie secondaire</strong> — CA ±10%, taux de marge ±1 pt, poids promo ±3 pts, ou contribution significative à l'écart du rayon, non déjà classée P1</div>
+<div class='alert-card alert-green'><strong>Aucune priorité</strong> — variation dans les seuils normaux, pas d'action requise</div>
+""", unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("<div class='section-label'>Colonnes attendues par export</div>", unsafe_allow_html=True)
+        for name, desc in [
+            ("DATA_SITE", "Société, Rayon, Site, CA, Budget, Débit, Panier — granularité Rayon × Site"),
+            ("DATA_N", "Société, Rayon, Famille, Site nom long, CA, Marge, Qté Vente, CA Promo — semaine courante"),
+            ("DATA_N1_ISO", "Mêmes colonnes que DATA_N, sur la même semaine ISO, année N-1"),
+        ]:
+            st.markdown(f"""
+<div class='col-required'>
+  <div style='font-size:16px'>▪️</div>
+  <div><div class='col-name'>{name}</div><div class='col-desc'>{desc}</div></div>
+</div>
+""", unsafe_allow_html=True)
+    st.info("⬅️ Charge les 3 exports PBI dans la barre latérale pour démarrer l'analyse.")
     st.stop()
 
 site_d, n_d, n1_d, period_label = parse_files(site_file.getvalue(), current_file.getvalue(), previous_file.getvalue())
@@ -1277,9 +1380,9 @@ with tab_reseau:
         code = next(c for c, l in display_label.items() if l == label)
         kpi = kpis_lookup.get((code, RESEAU))
         if kpi:
-            kpi_card(col, label, _fmt_millions(kpi.ca_n), kpi.ca_evo_pct, _fmt_pct(kpi.ca_evo_pct) + " vs N-1 ISO")
+            kpi_metric(col, label, kpi)
     if quality.has_perimeter_issue:
-        st.markdown(f'<div class="alert-box">{quality.summary_line}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="alert-card alert-amber">{quality.summary_line}</div>', unsafe_allow_html=True)
 
 with tab_rayon:
     selected_rayon = st.selectbox("Rayon", rayon_labels, key="rayon_select")
@@ -1288,10 +1391,10 @@ with tab_rayon:
     for col, scope in zip(scope_cols, SCOPE_ORDER):
         kpi = kpis_lookup.get((code, scope))
         if kpi:
-            kpi_card(col, scope.capitalize(), _fmt_millions(kpi.ca_n), kpi.ca_evo_pct, _fmt_pct(kpi.ca_evo_pct) + " vs N-1 ISO")
+            kpi_metric(col, scope.capitalize(), kpi)
     diag_text = diagnostics_by_rayon.get(selected_rayon, "")
     if diag_text:
-        st.markdown(f'<div class="diag-box">{diag_text}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="alert-card alert-blue">{diag_text}</div>', unsafe_allow_html=True)
     familles = familles_by_rayon.get(selected_rayon, [])
     if familles:
         df = pd.DataFrame([{
@@ -1301,7 +1404,7 @@ with tab_rayon:
         } for f in familles])
         st.dataframe(df, use_container_width=True, hide_index=True)
     if quality.has_perimeter_issue:
-        st.markdown(f'<div class="alert-box">{quality.summary_line}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="alert-card alert-amber">{quality.summary_line}</div>', unsafe_allow_html=True)
 
 with tab_familles:
     all_familles = []
