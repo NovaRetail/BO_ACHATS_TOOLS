@@ -1,12 +1,26 @@
 """
-SmartBuyer · On Time In Full — v6.2 (encodage robuste universel)
+SmartBuyer · On Time In Full — v6.3 (fix lecture watchlist)
 ─────────────────────────────────────────────────────────────────
-Correctifs v6.2 :
+Correctifs v6.3 (vs v6.2) :
+  - FIX CRITIQUE `load_watchlist` (branche CSV) : l'appel
+    `read_csv_robust(file_bytes, sep=None, engine="python")` provoquait
+    l'erreur "The 'low_memory' option is not supported with the
+    'python' engine" car `low_memory=False` était injecté en interne
+    par `utils_io.read_csv_robust` sans vérifier le moteur demandé.
+    → Nouvelle stratégie : test des séparateurs usuels (";", ",", "\t")
+      avec le moteur C (pas d'auto-détection python), puis repli ultime
+      sur une détection python native (pandas direct, sans passer par
+      read_csv_robust) SANS low_memory. Cette approche ne dépend plus
+      du comportement interne de utils_io.py.
+  - FIX `_classe_fills` : les classes contenant "GOLD" dans leur libellé
+    (ex: "GOLD ET PRIX PLAFONNE") tombaient dans le rendu SILVER par
+    défaut. Détection désormais par sous-chaîne ("GOLD" in c / "SILVER"
+    in c) plutôt que par égalité stricte.
+
+Correctifs v6.2 (rappel) :
   - Suppression totale de `from io import BytesIO` pour les LECTURES.
   - `load_erp` utilise `read_csv_robust()` → gère UTF-8, UTF-8-BOM,
     CP1252, Latin-1, ISO-8859-15 sans jamais lever UnicodeDecodeError.
-  - `load_watchlist` utilise `read_csv_robust()` pour la branche CSV
-    (la boucle d'essai manuelle est supprimée).
   - `read_excel_robust()` utilisé pour la branche Excel de watchlist.
   - `clean_dataframe()` appliqué systématiquement post-lecture.
   - BytesIO conservé UNIQUEMENT dans les fonctions d'export Excel
@@ -18,7 +32,10 @@ Correctifs v6.2 :
 
 Règle permanente SmartBuyer Hub :
   Toute lecture de fichier uploadé passe par utils_io.read_csv_robust
-  ou utils_io.read_excel_robust. Jamais pd.read_csv(BytesIO(...)) nu.
+  ou utils_io.read_excel_robust. Jamais pd.read_csv(BytesIO(...)) nu,
+  SAUF dans le repli ultime de load_watchlist (v6.3) qui bypass
+  volontairement read_csv_robust pour éviter le conflit
+  low_memory/engine='python' — voir commentaire dans la fonction.
 """
 
 import streamlit as st
@@ -46,12 +63,22 @@ except ImportError:
         kw.pop("thousands", None)
         kw.pop("dtype", None)
         kw.pop("parse_dates", None)
+        engine = kw.pop("engine", None)
+        # v6.3 : low_memory incompatible avec engine='python' (ou sep=None)
+        use_python_engine = (engine == "python") or (sep is None)
         for enc in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
             try:
+                if use_python_engine:
+                    return pd.read_csv(_io.BytesIO(file_bytes), sep=sep, decimal=decimal,
+                                       encoding=enc, engine="python", **kw)
                 return pd.read_csv(_io.BytesIO(file_bytes), sep=sep, decimal=decimal,
                                    encoding=enc, low_memory=False, **kw)
             except (UnicodeDecodeError, UnicodeError):
                 continue
+        if use_python_engine:
+            return pd.read_csv(_io.BytesIO(file_bytes), sep=sep, decimal=decimal,
+                               encoding="latin-1", encoding_errors="replace",
+                               engine="python", **kw)
         return pd.read_csv(_io.BytesIO(file_bytes), sep=sep, decimal=decimal,
                            encoding="latin-1", encoding_errors="replace",
                            low_memory=False, **kw)
@@ -230,7 +257,7 @@ def safe_sort(df: pd.DataFrame, keys, ascending) -> pd.DataFrame:
 
 # ══════════════════════════════════════════════════════════════════════════════
 # CHARGEMENT LISTE SURVEILLANCE
-# Utilise read_csv_robust / read_excel_robust → encodage automatique garanti
+# v6.3 : lecture CSV réécrite pour éviter le conflit low_memory/engine='python'
 # ══════════════════════════════════════════════════════════════════════════════
 @st.cache_data(show_spinner=False)
 def load_watchlist(file_bytes: bytes, filename: str) -> dict:
@@ -240,6 +267,23 @@ def load_watchlist(file_bytes: bytes, filename: str) -> dict:
       - une colonne 'code/article/ref/ean' → codes articles
       - une colonne 'classe/class/segment/categ' → libellé de classe
     Retourne un dict {code_normalisé: classe_str}.
+
+    v6.3 — FIX lecture CSV :
+      L'ancienne implémentation appelait
+      `read_csv_robust(file_bytes, sep=None, engine="python")`, ce qui
+      provoquait l'erreur pandas :
+        "The 'low_memory' option is not supported with the 'python' engine"
+      car `read_csv_robust` (utils_io.py) injecte `low_memory=False` en
+      interne sans vérifier le moteur demandé.
+
+      Nouvelle stratégie, indépendante du comportement interne de
+      utils_io.py :
+        1) essayer les séparateurs usuels (";", ",", "\\t") un par un
+           via read_csv_robust AVEC un sep explicite (→ moteur C,
+           low_memory est alors compatible, aucun risque de conflit) ;
+        2) si aucun de ces séparateurs ne donne ≥ 2 colonnes exploitables,
+           repli ultime sur une auto-détection pandas native (sans passer
+           par read_csv_robust) avec engine='python' et SANS low_memory.
     """
     try:
         fname_lower = filename.lower()
@@ -247,9 +291,39 @@ def load_watchlist(file_bytes: bytes, filename: str) -> dict:
             # ── Excel : read_excel_robust (engine openpyxl avec fallback xlrd)
             wdf = read_excel_robust(file_bytes)
         else:
-            # ── CSV : read_csv_robust (détection encodage automatique)
-            # sep=None + engine=python pour auto-détecter le séparateur
-            wdf = read_csv_robust(file_bytes, sep=None, engine="python")
+            # ── CSV : tentative avec séparateurs usuels (moteur C, sûr)
+            wdf = None
+            last_err = None
+            for candidate_sep in (";", ",", "\t"):
+                try:
+                    test_df = read_csv_robust(file_bytes, sep=candidate_sep)
+                    if test_df is not None and test_df.shape[1] >= 2:
+                        wdf = test_df
+                        break
+                except Exception as e:
+                    last_err = e
+                    continue
+
+            if wdf is None:
+                # ── Repli ultime : auto-détection python, SANS low_memory,
+                #    en bypassant volontairement read_csv_robust pour ne
+                #    pas hériter d'un low_memory injecté en interne.
+                import io as _io_wl
+                for enc in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
+                    try:
+                        wdf = pd.read_csv(
+                            _io_wl.BytesIO(file_bytes), sep=None,
+                            engine="python", encoding=enc,
+                        )
+                        break
+                    except (UnicodeDecodeError, UnicodeError) as e:
+                        last_err = e
+                        continue
+                if wdf is None:
+                    wdf = pd.read_csv(
+                        _io_wl.BytesIO(file_bytes), sep=None, engine="python",
+                        encoding="latin-1", encoding_errors="replace",
+                    )
 
         wdf = clean_dataframe(wdf)
 
@@ -671,6 +745,9 @@ def render_kpi_row(kpi: dict, watch_kpi: dict = None):
 # ══════════════════════════════════════════════════════════════════════════════
 # EXPORT EXCEL — helpers couleur classe
 # Note : BytesIO ici = PRODUCTION de bytes en sortie. Usage correct et voulu.
+# v6.3 : _classe_fills détecte désormais par sous-chaîne ("GOLD" in c /
+#        "SILVER" in c) au lieu d'une égalité stricte, pour couvrir des
+#        libellés composites comme "GOLD ET PRIX PLAFONNE".
 # ══════════════════════════════════════════════════════════════════════════════
 GOLD_FILL    = PatternFill("solid", fgColor=WATCH_GOLD_HEX)
 GOLDL_FILL   = PatternFill("solid", fgColor=WATCH_LIGHT_HEX)
@@ -680,9 +757,9 @@ SILVERL_FILL = PatternFill("solid", fgColor="F5F5F5")
 
 def _classe_fills(classe: str):
     c = str(classe).strip().upper()
-    if c == "GOLD":
+    if "GOLD" in c:
         return GOLDL_FILL, GOLD_FILL
-    elif c == "SILVER":
+    elif "SILVER" in c:
         return SILVERL_FILL, SILVER_FILL
     elif c in ("A", ""):
         return GOLDL_FILL, GOLD_FILL
@@ -1317,13 +1394,14 @@ def build_recap_fournisseur_excel(df: pd.DataFrame, watchdict: dict = None) -> B
         art_fr["fr"] = np.where(art_fr["qte_c"] > 0, art_fr["qte_r"] / art_fr["qte_c"] * 100, 0.0)
         art_under = art_fr[art_fr["fr"] < 97]
 
+        # v6.3 : détection GOLD/SILVER par sous-chaîne (couvre "GOLD ET PRIX PLAFONNE")
         gold_under = (
-            art_under[art_under["watch_c"] == "GOLD"]
+            art_under[art_under["watch_c"].str.upper().str.contains("GOLD", na=False)]
             .groupby(["Fou", "supplier_name"])["Code"].nunique()
             .reset_index().rename(columns={"Code": "refs_gold_under"})
         )
         silver_under = (
-            art_under[art_under["watch_c"] == "SILVER"]
+            art_under[art_under["watch_c"].str.upper().str.contains("SILVER", na=False)]
             .groupby(["Fou", "supplier_name"])["Code"].nunique()
             .reset_index().rename(columns={"Code": "refs_silver_under"})
         )
@@ -1417,7 +1495,7 @@ def build_recap_fournisseur_excel(df: pd.DataFrame, watchdict: dict = None) -> B
         ("Sites impactés",          "Nb de magasins avec au moins une ligne Fill Rate < 100%"),
         ("Vol. manquant",           "Somme (Qté commandée − Qté reçue retenue) pour toutes les lignes"),
         ("Impact CA proxy",         "Vol. manquant × Prix de vente HT — estimation du CA non réalisé"),
-        ("Réfs GOLD sous-service",  "Nb de réfs GOLD (watchlist) avec Fill Rate < 97% chez ce fournisseur"),
+        ("Réfs GOLD sous-service",  "Nb de réfs classées GOLD (watchlist, y compris variantes comme 'GOLD ET PRIX PLAFONNE') avec Fill Rate < 97% chez ce fournisseur"),
         ("Réfs SILVER sous-service","Nb de réfs SILVER (watchlist) avec Fill Rate < 97% chez ce fournisseur"),
     ]
     ws_leg.append([])
@@ -1513,7 +1591,8 @@ Priorité colonnes : <code>H Date</code> → <code>Date livraison</code> → <co
          """Chargez un fichier CSV/Excel avec <strong>2 colonnes</strong> :<br>
 <code>Code article</code> + <code>Classe</code> (ex: GOLD, SILVER, A, B…)<br><br>
 La classe apparaît dans <strong>toutes les vues</strong> (tableaux, graphiques, exports Excel).<br>
-Dans Excel : fond doré (GOLD) ou argent (SILVER) sur chaque ligne, colonne <em>Classe</em> en première position."""),
+Dans Excel : fond doré (GOLD) ou argent (SILVER) sur chaque ligne, colonne <em>Classe</em> en première position.<br>
+Les libellés composites contenant "GOLD" (ex: "GOLD ET PRIX PLAFONNE") sont traités comme GOLD."""),
     ]
     for title, body in docs:
         st.markdown(f"<div class='doc-card'><div class='doc-card-title'>{title}</div><div class='doc-card-body'>{body}</div></div>", unsafe_allow_html=True)
