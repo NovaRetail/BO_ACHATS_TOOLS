@@ -1,6 +1,17 @@
 """
-SmartBuyer · On Time In Full — v6.3 (fix lecture watchlist)
+SmartBuyer · OTIF (On Time In Full) — v6.4 (traduction française des extractions)
 ─────────────────────────────────────────────────────────────────
+Correctifs v6.4 (vs v6.3) :
+  - Traduction intégrale des libellés visibles dans l'interface ET
+    dans les extractions Excel : "Fill Rate" → "Taux de Service",
+    "On Time" → "Ponctualité". L'acronyme "OTIF" est conservé tel
+    quel (terme métier standard, y compris en français) et son
+    développé "On Time In Full" a été traduit en "Livraison Complète
+    et à l'Heure" partout où il apparaît en toutes lettres.
+  - Les identifiants internes (colonnes techniques, variables Python
+    comme `fill_rate`, `on_time`) restent inchangés pour ne pas casser
+    la compatibilité avec le reste du repo `bo_achats_tools`.
+
 Correctifs v6.3 (vs v6.2) :
   - FIX CRITIQUE `load_watchlist` (branche CSV) : l'appel
     `read_csv_robust(file_bytes, sep=None, engine="python")` provoquait
@@ -99,7 +110,7 @@ except ImportError:
 # CONFIG PAGE
 # ══════════════════════════════════════════════════════════════════════════════
 st.set_page_config(
-    page_title="On Time In Full · SmartBuyer",
+    page_title="OTIF · SmartBuyer",
     page_icon="📦",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -720,8 +731,8 @@ def render_kpi_row(kpi: dict, watch_kpi: dict = None):
     else:
         c1, c2, c3, c4, c5 = st.columns(5)
 
-    c1.metric("Fill Rate",    fmt_pct(kpi["fill_rate"]))
-    c2.metric("On Time",      fmt_pct(kpi["on_time"]))
+    c1.metric("Taux de Service",    fmt_pct(kpi["fill_rate"]))
+    c2.metric("Ponctualité",      fmt_pct(kpi["on_time"]))
     c3.metric("OTIF",         fmt_pct(kpi["otif"]))
     c4.metric("Score global", fmt_pct(kpi["score"]))
     with c5:
@@ -738,7 +749,7 @@ def render_kpi_row(kpi: dict, watch_kpi: dict = None):
 <div class='kpi-watch'>
   <div class='kpi-watch-label'>⭐ Articles surveillés</div>
   <div class='kpi-watch-value'>{fmt(watch_kpi['missing_qty'])}</div>
-  <div class='kpi-watch-sub'>Impact : {fmt(watch_kpi['impact_value'])} FCFA · FR {fmt_pct(watch_kpi['fill_rate'])}</div>
+  <div class='kpi-watch-sub'>Impact : {fmt(watch_kpi['impact_value'])} FCFA · TS {fmt_pct(watch_kpi['fill_rate'])}</div>
 </div>""", unsafe_allow_html=True)
 
 
@@ -924,14 +935,14 @@ def build_fiche_excel(fournisseur: str, df_all: pd.DataFrame, df_bad: pd.DataFra
     ws1.row_dimensions[1].height = 30
     ws1.row_dimensions[2].height = 18
     ws1.cell(1, 1, f"BILAN DE PERFORMANCE — {fournisseur.upper()}").font = Font(bold=True, size=14, color="1C1C1E")
-    ws1.cell(2, 1, f"Généré le {today_str}  ·  Période : export ERP  ·  Seuil : Fill Rate < {seuil}%").font = Font(size=10, italic=True, color="8E8E93")
+    ws1.cell(2, 1, f"Généré le {today_str}  ·  Période : export ERP  ·  Seuil : Taux de Service < {seuil}%").font = Font(size=10, italic=True, color="8E8E93")
     ws1.merge_cells("A1:D1"); ws1.merge_cells("A2:D2")
     ws1.append([])
     kpi_data = [
-        ("Fill Rate",       fmt_pct(kpis["fill_rate"]),    "Part de la qté commandée effectivement livrée"),
-        ("On Time",         fmt_pct(kpis["on_time"]),      "Part des livraisons respectant la date prévue"),
+        ("Taux de Service",       fmt_pct(kpis["fill_rate"]),    "Part de la qté commandée effectivement livrée"),
+        ("Ponctualité",         fmt_pct(kpis["on_time"]),      "Part des livraisons respectant la date prévue"),
         ("OTIF",            fmt_pct(kpis["otif"]),         "Livraisons complètes ET à l'heure"),
-        ("Score global",    fmt_pct(kpis["score"]),        "50% × Fill Rate + 30% × On Time + 20% × OTIF"),
+        ("Score global",    fmt_pct(kpis["score"]),        "50% × Taux de Service + 30% × Ponctualité + 20% × OTIF"),
         ("Niveau",          score_band(kpis["score"]),     "Évaluation synthétique"),
         ("Vol. manquant",   f"{int(kpis['missing_qty']):,} unités",  "Qté commandée − Qté reçue retenue"),
         ("Impact CA proxy", f"{kpis['impact_value']:,.0f} FCFA",     "Vol. manquant × Prix de vente HT"),
@@ -944,7 +955,7 @@ def build_fiche_excel(fournisseur: str, df_all: pd.DataFrame, df_bad: pd.DataFra
         ws1.cell(i, 1, label).font = S_FONT; ws1.cell(i, 1).border = THIN
         c_val = ws1.cell(i, 2, val)
         c_val.alignment = CTR; c_val.border = THIN
-        if label in ("Fill Rate", "On Time", "OTIF", "Score global"):
+        if label in ("Taux de Service", "Ponctualité", "OTIF", "Score global"):
             f = kpi_fill(val)
             if f: c_val.fill = f
         ws1.cell(i, 3, comment).alignment = LFT; ws1.cell(i, 3).border = THIN
@@ -952,27 +963,27 @@ def build_fiche_excel(fournisseur: str, df_all: pd.DataFrame, df_bad: pd.DataFra
 
     # Onglet 2 : Par magasin
     ws2 = wb.create_sheet("Par magasin")
-    ws2.cell(1, 1, f"Livraisons incomplètes par magasin — seuil Fill Rate < {seuil}%").font = T_FONT
+    ws2.cell(1, 1, f"Livraisons incomplètes par magasin — seuil Taux de Service < {seuil}%").font = T_FONT
     ws2.append([])
-    headers2 = ["Magasin", "Fill Rate", "Vol. manquant", "Impact CA proxy (FCFA)", "Cmdes", "Articles"]
+    headers2 = ["Magasin", "Taux de Service", "Vol. manquant", "Impact CA proxy (FCFA)", "Cmdes", "Articles"]
     write_header_row(ws2, 3, headers2)
     site_recap_sorted = safe_sort(site_recap, keys=["qty_missing"], ascending=[False])
     for _, r in site_recap_sorted.iterrows():
-        ws2.append([r.get("site_label",""), r.get("Fill Rate",""), r.get("Vol. manquant",""),
+        ws2.append([r.get("site_label",""), r.get("Taux de Service",""), r.get("Vol. manquant",""),
                     r.get("Impact CA proxy",""), r.get("nb_cdes",""), r.get("nb_articles","")])
         n = ws2.max_row
         for col_i in range(1, 7):
             ws2.cell(n, col_i).border = THIN
             ws2.cell(n, col_i).alignment = CTR if col_i > 1 else LFT
-        f = kpi_fill(str(r.get("Fill Rate", ""))) if r.get("Fill Rate") else None
+        f = kpi_fill(str(r.get("Taux de Service", ""))) if r.get("Taux de Service") else None
         if f: ws2.cell(n, 2).fill = f
     auto_width(ws2)
 
     # Onglet 3 : Par article
     ws3 = wb.create_sheet("Par article")
-    ws3.cell(1, 1, f"Livraisons incomplètes par article — seuil Fill Rate < {seuil}%").font = T_FONT
+    ws3.cell(1, 1, f"Livraisons incomplètes par article — seuil Taux de Service < {seuil}%").font = T_FONT
     ws3.append([])
-    headers3 = ["Classe", "Code article", "Désignation", "Fill Rate", "Vol. manquant",
+    headers3 = ["Classe", "Code article", "Désignation", "Taux de Service", "Vol. manquant",
                 "Impact CA proxy (FCFA)", "Magasins", "Cmdes"]
     write_header_row(ws3, 3, headers3)
     for _, r in art_recap.iterrows():
@@ -980,7 +991,7 @@ def build_fiche_excel(fournisseur: str, df_all: pd.DataFrame, df_bad: pd.DataFra
         classe = get_code_classe(code)
         row_data = [
             classe, code, r.get("article_label",""),
-            r.get("Fill Rate",""), r.get("Vol. manquant",""),
+            r.get("Taux de Service",""), r.get("Vol. manquant",""),
             r.get("Impact CA proxy",""), r.get("nb_sites",""), r.get("nb_cdes",""),
         ]
         n = ws3.max_row + 1
@@ -994,19 +1005,19 @@ def build_fiche_excel(fournisseur: str, df_all: pd.DataFrame, df_bad: pd.DataFra
                 ws3.cell(n, col_i).fill = fill_l
             ws3.cell(n, 1).fill = fill_b
         else:
-            f = kpi_fill(str(r.get("Fill Rate", ""))) if r.get("Fill Rate") else None
+            f = kpi_fill(str(r.get("Taux de Service", ""))) if r.get("Taux de Service") else None
             if f: ws3.cell(n, 4).fill = f
     auto_width(ws3)
 
     # Onglet 4 : Détail lignes
     ws4 = wb.create_sheet("Détail lignes")
-    ws4.cell(1, 1, f"Détail des livraisons incomplètes — {fournisseur}  (Fill Rate < {seuil}%)").font = T_FONT
+    ws4.cell(1, 1, f"Détail des livraisons incomplètes — {fournisseur}  (Taux de Service < {seuil}%)").font = T_FONT
     ws4.append([])
     headers4 = [
         "Classe", "N° Commande", "Date réception", "Date prévue", "Magasin",
         "Code article", "Désignation article",
         "Qté commandée", "Qté reçue", "Qté manquante",
-        "Fill Rate ligne", "Impact CA proxy (FCFA)",
+        "Taux de Service ligne", "Impact CA proxy (FCFA)",
         "Livré à l'heure", "Retard (jours)",
     ]
     write_header_row(ws4, 3, headers4)
@@ -1063,7 +1074,7 @@ def build_fiche_excel(fournisseur: str, df_all: pd.DataFrame, df_bad: pd.DataFra
         if not df_bad_watched.empty:
             ws5 = wb.create_sheet("⭐ Articles surveillés")
             ws5.cell(1, 1, f"Articles de surveillance — {fournisseur}").font = T_FONT
-            ws5.cell(2, 1, f"Filtre : Fill Rate < {seuil}% · liste surveillance active").font = Font(size=9, italic=True, color="8E8E93")
+            ws5.cell(2, 1, f"Filtre : Taux de Service < {seuil}% · liste surveillance active").font = Font(size=9, italic=True, color="8E8E93")
             ws5.append([])
             write_header_row(ws5, 4, headers4, gold=True)
             for _, row in df_bad_watched[src_cols].iterrows():
@@ -1133,7 +1144,7 @@ def build_export_all_fiches(df: pd.DataFrame, by_supplier: pd.DataFrame,
     ws.cell(1, 1, "LIVRAISONS INCOMPLÈTES — TOUS FOURNISSEURS").font = T_FONT
     ws.cell(2, 1, (
         f"Généré le {today_str}  ·  "
-        f"Seuil : Fill Rate < {seuil}% ou OTIF = 0  ·  "
+        f"Seuil : Taux de Service < {seuil}% ou OTIF = 0  ·  "
         f"Trié par criticité fournisseur"
         + ("  ·  Classe = segment 20/80" if watchdict else "")
     )).font = Font(size=9, italic=True, color="8E8E93")
@@ -1145,7 +1156,7 @@ def build_export_all_fiches(df: pd.DataFrame, by_supplier: pd.DataFrame,
         "N° Commande", "Date réception", "Date prévue",
         "Magasin", "Code article", "Désignation article",
         "Qté commandée", "Qté reçue", "Qté manquante",
-        "Fill Rate ligne", "Impact CA proxy (FCFA)",
+        "Taux de Service ligne", "Impact CA proxy (FCFA)",
         "OTIF", "Retard (j)",
     ]
     ws.append(HEADERS)
@@ -1318,7 +1329,7 @@ def build_recap_fournisseur_excel(df: pd.DataFrame, watchdict: dict = None) -> B
         f"Généré le {today_str}  ·  "
         "Trié par criticité décroissante  ·  "
         "Réfs livrées = au moins 1 unité reçue sur la période"
-        + ("  ·  Cols GOLD/SILVER = nb réfs en sous-service (FR < 97%)" if watchdict else "")
+        + ("  ·  Cols GOLD/SILVER = nb réfs en sous-service (TS < 97%)" if watchdict else "")
     ).font = Font(size=9, italic=True, color="8E8E93")
     ws.merge_cells(f"A1:{get_column_letter(total_cols)}1")
     ws.merge_cells(f"A2:{get_column_letter(total_cols)}2")
@@ -1327,7 +1338,7 @@ def build_recap_fournisseur_excel(df: pd.DataFrame, watchdict: dict = None) -> B
     HEADERS = [
         "Rang", "Fournisseur", "Code Fou.",
         "Réfs commandées", "Réfs livrées", "Taux couverture réfs",
-        "Fill Rate", "On Time", "OTIF", "Score", "Niveau",
+        "Taux de Service", "Ponctualité", "OTIF", "Score", "Niveau",
         "Sites impactés", "Sites total",
         "Vol. manquant", "Impact CA proxy (FCFA)",
         "Nb commandes", "Nb lignes",
@@ -1487,16 +1498,16 @@ def build_recap_fournisseur_excel(df: pd.DataFrame, watchdict: dict = None) -> B
         ("Réfs commandées",         "Nombre de codes articles distincts présents dans au moins 1 commande sur la période"),
         ("Réfs livrées",            "Nombre de codes articles avec au moins 1 unité reçue (qte_rec > 0)"),
         ("Taux couverture réfs",    "Réfs livrées / Réfs commandées × 100 — mesure la largeur de l'assortiment effectivement approvisionné"),
-        ("Fill Rate",               "Qté reçue retenue / Qté commandée × 100 — mesure la profondeur du service"),
-        ("On Time",                 "% de lignes livrées à la date prévue ou avant"),
+        ("Taux de Service",               "Qté reçue retenue / Qté commandée × 100 — mesure la profondeur du service"),
+        ("Ponctualité",                 "% de lignes livrées à la date prévue ou avant"),
         ("OTIF",                    "% de lignes complètes ET à l'heure"),
-        ("Score",                   "50% × Fill Rate + 30% × On Time + 20% × OTIF"),
+        ("Score",                   "50% × Taux de Service + 30% × Ponctualité + 20% × OTIF"),
         ("Niveau",                  "Excellent ≥ 97% · À surveiller 90–97% · Critique < 90%"),
-        ("Sites impactés",          "Nb de magasins avec au moins une ligne Fill Rate < 100%"),
+        ("Sites impactés",          "Nb de magasins avec au moins une ligne Taux de Service < 100%"),
         ("Vol. manquant",           "Somme (Qté commandée − Qté reçue retenue) pour toutes les lignes"),
         ("Impact CA proxy",         "Vol. manquant × Prix de vente HT — estimation du CA non réalisé"),
-        ("Réfs GOLD sous-service",  "Nb de réfs classées GOLD (watchlist, y compris variantes comme 'GOLD ET PRIX PLAFONNE') avec Fill Rate < 97% chez ce fournisseur"),
-        ("Réfs SILVER sous-service","Nb de réfs SILVER (watchlist) avec Fill Rate < 97% chez ce fournisseur"),
+        ("Réfs GOLD sous-service",  "Nb de réfs classées GOLD (watchlist, y compris variantes comme 'GOLD ET PRIX PLAFONNE') avec Taux de Service < 97% chez ce fournisseur"),
+        ("Réfs SILVER sous-service","Nb de réfs SILVER (watchlist) avec Taux de Service < 97% chez ce fournisseur"),
     ]
     ws_leg.append([])
     ws_leg.append(["Indicateur", "Définition"])
@@ -1528,7 +1539,7 @@ with st.sidebar:
     st.markdown("""
 <div style='margin-bottom:18px'>
   <div style='font-size:20px;font-weight:700;color:#1C1C1E;letter-spacing:-0.02em'>📦 SmartBuyer</div>
-  <div style='font-size:11px;color:#8E8E93;margin-top:1px'>Hub analytique · On Time In Full</div>
+  <div style='font-size:11px;color:#8E8E93;margin-top:1px'>Hub analytique · OTIF</div>
 </div>""", unsafe_allow_html=True)
     st.markdown("---")
 
@@ -1563,7 +1574,7 @@ with st.sidebar:
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE HEADER
 # ══════════════════════════════════════════════════════════════════════════════
-st.markdown("<div class='page-title'>📦 On Time In Full</div>", unsafe_allow_html=True)
+st.markdown("<div class='page-title'>📦 OTIF — Livraison Complète et à l'Heure</div>", unsafe_allow_html=True)
 st.markdown("<div class='page-caption'>Pilotage OTIF fournisseur · Magasin · Article · Fiche fournisseur</div>", unsafe_allow_html=True)
 
 
@@ -1574,19 +1585,19 @@ if uploaded is None:
     st.markdown("---")
     st.markdown("<div class='section-label'>Méthodologie de calcul</div>", unsafe_allow_html=True)
     docs = [
-        ("① Fill Rate — Taux de service quantitatif",
-         """<code>Fill Rate = Qté reçue retenue / Qté commandée × 100</code><br>
+        ("① Taux de Service — indicateur de service quantitatif",
+         """<code>Taux de Service = Qté reçue retenue / Qté commandée × 100</code><br>
 <strong>Règle cap :</strong> <code>Qté reçue retenue = min(Qté reçue, Qté commandée)</code><br>
 <span style='color:#34C759;font-weight:600'>✓ Objectif cible : ≥ 97%</span>"""),
-        ("② On Time — Taux de respect du délai",
-         """<code>On Time = 1 si Date réception ≤ Date prévue, sinon 0</code><br>
+        ("② Ponctualité — Taux de respect du délai",
+         """<code>Ponctualité = 1 si Date réception ≤ Date prévue, sinon 0</code><br>
 Priorité colonnes : <code>H Date</code> → <code>Date livraison</code> → <code>Date prévue</code><br>
 <span style='color:#34C759;font-weight:600'>✓ Objectif cible : ≥ 95%</span>"""),
-        ("③ OTIF — On Time In Full",
-         """<code>OTIF = 1 si Fill Rate ≥ 100% ET On Time = 1</code><br>
+        ("③ OTIF — Livraison Complète et à l'Heure",
+         """<code>OTIF = 1 si Taux de Service ≥ 100% ET Ponctualité = 1</code><br>
 <span style='color:#34C759;font-weight:600'>✓ Objectif cible : ≥ 95%</span>"""),
-        ("④ Score global", "<code>Score = 50% × Fill Rate + 30% × On Time + 20% × OTIF</code><br>🟢 ≥ 97% · 🟠 90–97% · 🔴 &lt; 90%"),
-        ("⑤ Score de criticité", "<code>Criticité = Impact CA proxy × (1 − Fill Rate)</code>"),
+        ("④ Score global", "<code>Score = 50% × Taux de Service + 30% × Ponctualité + 20% × OTIF</code><br>🟢 ≥ 97% · 🟠 90–97% · 🔴 &lt; 90%"),
+        ("⑤ Score de criticité", "<code>Criticité = Impact CA proxy × (1 − Taux de Service)</code>"),
         ("⑥ ⭐ Liste de surveillance — Classe par article",
          """Chargez un fichier CSV/Excel avec <strong>2 colonnes</strong> :<br>
 <code>Code article</code> + <code>Classe</code> (ex: GOLD, SILVER, A, B…)<br><br>
@@ -1596,7 +1607,7 @@ Les libellés composites contenant "GOLD" (ex: "GOLD ET PRIX PLAFONNE") sont tra
     ]
     for title, body in docs:
         st.markdown(f"<div class='doc-card'><div class='doc-card-title'>{title}</div><div class='doc-card-body'>{body}</div></div>", unsafe_allow_html=True)
-    st.markdown("""<div class='alert-card alert-amber'><strong>⚠️ Règle temporaire ERP</strong> : date prévue absente → ligne considérée On Time par défaut.</div>""", unsafe_allow_html=True)
+    st.markdown("""<div class='alert-card alert-amber'><strong>⚠️ Règle temporaire ERP</strong> : date prévue absente → ligne considérée Ponctualité par défaut.</div>""", unsafe_allow_html=True)
     st.stop()
 
 
@@ -1638,8 +1649,8 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("<div style='font-size:11px;font-weight:600;color:#8E8E93;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px'>📋 Fiche Fournisseur</div>", unsafe_allow_html=True)
     fiche_supplier = st.selectbox("Fournisseur à analyser", options=["— Choisir —"] + all_sup, key="fiche_sel")
-    seuil_fill = st.slider("Seuil Fill Rate (lignes 'mauvaises')", min_value=50, max_value=100, value=100, step=5, format="%d%%")
-    st.caption(f"Lignes retenues dans la fiche : Fill Rate ligne < {seuil_fill}%")
+    seuil_fill = st.slider("Seuil Taux de Service (lignes 'mauvaises')", min_value=50, max_value=100, value=100, step=5, format="%d%%")
+    st.caption(f"Lignes retenues dans la fiche : Taux de Service ligne < {seuil_fill}%")
 
 if not sel_sites: sel_sites = all_sites
 if not sel_depts: sel_depts = all_depts
@@ -1694,10 +1705,10 @@ st.markdown("---")
 st.markdown("<div class='section-label'>Alertes &amp; points d'attention</div>", unsafe_allow_html=True)
 
 if quality.get("all_dates_missing"):
-    st.markdown("<div class='alert-card alert-red'><strong>🔴 On Time non significatif</strong> — aucune date prévue dans ce fichier. On Time = 100% artificiel.</div>", unsafe_allow_html=True)
+    st.markdown("<div class='alert-card alert-red'><strong>🔴 Ponctualité non significatif</strong> — aucune date prévue dans ce fichier. Ponctualité = 100% artificiel.</div>", unsafe_allow_html=True)
 elif quality.get("missing_expected_date", 0) > 0:
     pct = round(quality["missing_expected_date"] / quality["clean_rows"] * 100, 1)
-    st.markdown(f"<div class='alert-card alert-amber'><strong>⚠️ Dates prévues partiellement manquantes</strong><br>{quality['missing_expected_date']:,} lignes sans date prévue ({pct}%) → considérées On Time par défaut.</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='alert-card alert-amber'><strong>⚠️ Dates prévues partiellement manquantes</strong><br>{quality['missing_expected_date']:,} lignes sans date prévue ({pct}%) → considérées Ponctualité par défaut.</div>", unsafe_allow_html=True)
 
 if not by_supplier.empty:
     top3_sup = by_supplier.head(3)
@@ -1708,7 +1719,7 @@ if not by_site.empty:
     st.markdown(f"<div class='alert-card alert-amber'><strong>⚠️ Magasins les plus impactés</strong><br>{' · '.join(f'<strong>{r.site_label}</strong> ({int(r.qty_missing):,} unités manquantes)' for r in top3_site.itertuples())}</div>", unsafe_allow_html=True)
 
 if watchdict and watch_kpi and watch_kpi.get("fill_rate", 100) < SEUIL_SURVEILLER:
-    st.markdown(f"<div class='alert-card alert-gold'><strong>⭐ Articles surveillance ({watch_label}) — Fill Rate dégradé</strong><br>FR = <strong>{fmt_pct(watch_kpi['fill_rate'])}</strong> · Vol. manquant : <strong>{fmt(watch_kpi['missing_qty'])}</strong> unités · Impact : <strong>{fmt(watch_kpi['impact_value'])}</strong> FCFA</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='alert-card alert-gold'><strong>⭐ Articles surveillance ({watch_label}) — Taux de Service dégradé</strong><br>TS = <strong>{fmt_pct(watch_kpi['fill_rate'])}</strong> · Vol. manquant : <strong>{fmt(watch_kpi['missing_qty'])}</strong> unités · Impact : <strong>{fmt(watch_kpi['impact_value'])}</strong> FCFA</div>", unsafe_allow_html=True)
 
 if quality.get("pv_zero_rows", 0) > 0:
     st.markdown(f"<div class='alert-card alert-amber'><strong>⚠️ Impact CA proxy sous-estimé</strong><br>{quality['pv_zero_rows']:,} ligne(s) avec PV HT = 0.</div>", unsafe_allow_html=True)
@@ -1737,27 +1748,27 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
 
 # ── Tab 1 : Fournisseurs
 with tab1:
-    st.caption("Trié par criticité décroissante = Impact CA proxy × (1 − Fill Rate)")
+    st.caption("Trié par criticité décroissante = Impact CA proxy × (1 − Taux de Service)")
     st.plotly_chart(bar_h(by_supplier, "criticality_score", "supplier_name", "#FF3B30", "Score de criticité (FCFA-équivalent)"), use_container_width=True)
     d = by_supplier.copy()
-    d["Fill Rate"]       = d["fill_rate"].apply(fmt_pct)
-    d["On Time"]         = d["on_time"].apply(fmt_pct)
+    d["Taux de Service"]       = d["fill_rate"].apply(fmt_pct)
+    d["Ponctualité"]         = d["on_time"].apply(fmt_pct)
     d["OTIF"]            = d["otif"].apply(fmt_pct)
     d["Score"]           = d["score"].apply(fmt_pct)
     d["Vol. manquant"]   = d["qty_missing"].apply(fmt)
     d["Impact CA proxy"] = d["impact_value"].apply(fmt)
-    st.dataframe(d[["supplier_name","Fill Rate","On Time","OTIF","Score","Vol. manquant","Impact CA proxy","orders","articles","sites","Niveau"]].rename(columns={"supplier_name":"Fournisseur","orders":"Cmdes","articles":"Articles","sites":"Magasins"}), use_container_width=True, hide_index=True)
+    st.dataframe(d[["supplier_name","Taux de Service","Ponctualité","OTIF","Score","Vol. manquant","Impact CA proxy","orders","articles","sites","Niveau"]].rename(columns={"supplier_name":"Fournisseur","orders":"Cmdes","articles":"Articles","sites":"Magasins"}), use_container_width=True, hide_index=True)
 
 
 # ── Tab 2 : Magasins
 with tab2:
     st.plotly_chart(bar_h(by_site, "qty_missing", "site_label", "#FF9500", "Volume manquant (unités)", fmt_fn=lambda v: f"{int(v):,}"), use_container_width=True)
     d = by_site.copy()
-    for src, dst in [("fill_rate","Fill Rate"),("on_time","On Time"),("otif","OTIF"),("score","Score")]:
+    for src, dst in [("fill_rate","Taux de Service"),("on_time","Ponctualité"),("otif","OTIF"),("score","Score")]:
         d[dst] = d[src].apply(fmt_pct)
     d["Vol. manquant"]   = d["qty_missing"].apply(fmt)
     d["Impact CA proxy"] = d["impact_value"].apply(fmt)
-    st.dataframe(d[["site_label","Fill Rate","On Time","OTIF","Score","Vol. manquant","Impact CA proxy","suppliers","articles","Niveau"]].rename(columns={"site_label":"Magasin","suppliers":"Fournisseurs","articles":"Articles"}), use_container_width=True, hide_index=True)
+    st.dataframe(d[["site_label","Taux de Service","Ponctualité","OTIF","Score","Vol. manquant","Impact CA proxy","suppliers","articles","Niveau"]].rename(columns={"site_label":"Magasin","suppliers":"Fournisseurs","articles":"Articles"}), use_container_width=True, hide_index=True)
 
 
 # ── Tab 3 : Articles
@@ -1770,11 +1781,11 @@ with tab3:
         use_container_width=True,
     )
     d = by_article.copy()
-    for src, dst in [("fill_rate","Fill Rate"),("on_time","On Time"),("otif","OTIF"),("score","Score")]:
+    for src, dst in [("fill_rate","Taux de Service"),("on_time","Ponctualité"),("otif","OTIF"),("score","Score")]:
         d[dst] = d[src].apply(fmt_pct)
     d["Vol. manquant"]   = d["qty_missing"].apply(fmt)
     d["Impact CA proxy"] = d["impact_value"].apply(fmt)
-    show_cols = [c for c in ["Classe","Code","article_label","supplier_name","Fill Rate","On Time","OTIF","Score","Vol. manquant","Impact CA proxy","sites","orders"] if c in d.columns]
+    show_cols = [c for c in ["Classe","Code","article_label","supplier_name","Taux de Service","Ponctualité","OTIF","Score","Vol. manquant","Impact CA proxy","sites","orders"] if c in d.columns]
     st.dataframe(d[show_cols].rename(columns={"article_label":"Article","supplier_name":"Fournisseur","sites":"Magasins","orders":"Cmdes"}), use_container_width=True, hide_index=True)
 
 
@@ -1804,14 +1815,14 @@ with tab4:
 <div class='kpi-watch'>
   <div class='kpi-watch-label'>⭐ {cls} ({len(cls_arts)} réf.)</div>
   <div class='kpi-watch-value'>{fmt_pct(cls_kpi['fill_rate'])}</div>
-  <div class='kpi-watch-sub'>FR · OTIF {fmt_pct(cls_kpi['otif'])} · Vol. manquant {fmt(cls_kpi['missing_qty'])}</div>
+  <div class='kpi-watch-sub'>TS · OTIF {fmt_pct(cls_kpi['otif'])} · Vol. manquant {fmt(cls_kpi['missing_qty'])}</div>
 </div>""", unsafe_allow_html=True)
 
             st.markdown("---")
             st.markdown(f"<div class='section-label'>KPIs globaux — Articles {watch_label} ({len(watched_arts)} références)</div>", unsafe_allow_html=True)
             wc1, wc2, wc3, wc4 = st.columns(4)
-            wc1.metric("Fill Rate ⭐",    fmt_pct(wk["fill_rate"]))
-            wc2.metric("On Time ⭐",      fmt_pct(wk["on_time"]))
+            wc1.metric("Taux de Service ⭐",    fmt_pct(wk["fill_rate"]))
+            wc2.metric("Ponctualité ⭐",      fmt_pct(wk["on_time"]))
             wc3.metric("OTIF ⭐",         fmt_pct(wk["otif"]))
             wc4.metric("Score global ⭐", fmt_pct(wk["score"]))
             wc5, wc6 = st.columns(2)
@@ -1830,11 +1841,11 @@ with tab4:
 
             st.markdown("---")
             dw = watched_arts.copy()
-            for src, dst in [("fill_rate","Fill Rate"),("on_time","On Time"),("otif","OTIF"),("score","Score")]:
+            for src, dst in [("fill_rate","Taux de Service"),("on_time","Ponctualité"),("otif","OTIF"),("score","Score")]:
                 dw[dst] = dw[src].apply(fmt_pct)
             dw["Vol. manquant"]   = dw["qty_missing"].apply(fmt)
             dw["Impact CA proxy"] = dw["impact_value"].apply(fmt)
-            show_w = [c for c in ["Classe","Code","article_label","supplier_name","Fill Rate","On Time","OTIF","Score","Vol. manquant","Impact CA proxy","sites","orders"] if c in dw.columns]
+            show_w = [c for c in ["Classe","Code","article_label","supplier_name","Taux de Service","Ponctualité","OTIF","Score","Vol. manquant","Impact CA proxy","sites","orders"] if c in dw.columns]
             st.dataframe(dw[show_w].rename(columns={"article_label":"Article","supplier_name":"Fournisseur","sites":"Magasins","orders":"Cmdes"}), use_container_width=True, hide_index=True)
 
             matched_codes = set(watched_arts["code_str"].tolist()) if "code_str" in watched_arts.columns else set()
@@ -1878,9 +1889,9 @@ with tab6:
     if watchdict:
         st.metric(f"⭐ Lignes articles {watch_label} matchées", f"{quality.get('watched_in_data', 0):,}")
     if quality.get("all_dates_missing"):
-        st.error("🔴 Aucune date prévue — On Time = 100% artificiel.")
+        st.error("🔴 Aucune date prévue — Ponctualité = 100% artificiel.")
     else:
-        st.warning("Règle temporaire : date prévue absente → ligne considérée On Time.")
+        st.warning("Règle temporaire : date prévue absente → ligne considérée Ponctualité.")
     if quality.get("pv_zero_rows", 0) > 0:
         st.warning(f"⚠️ {quality['pv_zero_rows']:,} ligne(s) avec PV HT = 0.")
 
@@ -1888,7 +1899,7 @@ with tab6:
 # ── Tab 7 : Fiche Fournisseur
 with tab7:
     if fiche_supplier == "— Choisir —":
-        st.markdown("<div class='alert-card alert-blue'><strong>ℹ️ Comment utiliser la Fiche Fournisseur ?</strong><br><br>1. Sélectionnez un fournisseur dans la sidebar<br>2. Ajustez le seuil Fill Rate<br>3. Téléchargez la fiche Excel (colonne Classe incluse si liste chargée)</div>", unsafe_allow_html=True)
+        st.markdown("<div class='alert-card alert-blue'><strong>ℹ️ Comment utiliser la Fiche Fournisseur ?</strong><br><br>1. Sélectionnez un fournisseur dans la sidebar<br>2. Ajustez le seuil Taux de Service<br>3. Téléchargez la fiche Excel (colonne Classe incluse si liste chargée)</div>", unsafe_allow_html=True)
     else:
         fiche_df  = view[view["supplier_name"] == fiche_supplier].copy()
         fiche_bad = safe_sort(
@@ -1926,25 +1937,25 @@ with tab7:
 
         st.markdown("<div class='section-label'>Livraisons incomplètes par magasin</div>", unsafe_allow_html=True)
         site_recap = fiche_bad.groupby("site_label", as_index=False).agg(nb_cdes=("N° Cde","nunique"), nb_articles=("Code","nunique"), qte_cde=("qte_cde","sum"), qte_rec=("qte_rec_retained","sum"), qty_missing=("qty_missing","sum"), impact_value=("service_gap_value","sum")).sort_values("qty_missing", ascending=False)
-        site_recap["Fill Rate"]       = (site_recap["qte_rec"] / site_recap["qte_cde"] * 100).apply(fmt_pct)
+        site_recap["Taux de Service"]       = (site_recap["qte_rec"] / site_recap["qte_cde"] * 100).apply(fmt_pct)
         site_recap["Vol. manquant"]   = site_recap["qty_missing"].apply(fmt)
         site_recap["Impact CA proxy"] = site_recap["impact_value"].apply(fmt)
-        st.dataframe(site_recap[["site_label","Fill Rate","Vol. manquant","Impact CA proxy","nb_cdes","nb_articles"]].rename(columns={"site_label":"Magasin","nb_cdes":"Cmdes","nb_articles":"Articles"}), use_container_width=True, hide_index=True)
+        st.dataframe(site_recap[["site_label","Taux de Service","Vol. manquant","Impact CA proxy","nb_cdes","nb_articles"]].rename(columns={"site_label":"Magasin","nb_cdes":"Cmdes","nb_articles":"Articles"}), use_container_width=True, hide_index=True)
 
         st.markdown("<div class='section-label' style='margin-top:18px'>Livraisons incomplètes par article</div>", unsafe_allow_html=True)
         art_recap = fiche_bad.groupby(["Code","article_label"], as_index=False).agg(nb_sites=("site_label","nunique"), nb_cdes=("N° Cde","nunique"), qte_cde=("qte_cde","sum"), qte_rec=("qte_rec_retained","sum"), qty_missing=("qty_missing","sum"), impact_value=("service_gap_value","sum")).sort_values("qty_missing", ascending=False)
-        art_recap["Fill Rate"]       = (art_recap["qte_rec"] / art_recap["qte_cde"] * 100).apply(fmt_pct)
+        art_recap["Taux de Service"]       = (art_recap["qte_rec"] / art_recap["qte_cde"] * 100).apply(fmt_pct)
         art_recap["Vol. manquant"]   = art_recap["qty_missing"].apply(fmt)
         art_recap["Impact CA proxy"] = art_recap["impact_value"].apply(fmt)
         if watchdict:
             art_recap["Classe"] = art_recap["Code"].apply(lambda c: get_classe(c, watchdict))
-            cols_art = ["Classe","Code","article_label","Fill Rate","Vol. manquant","Impact CA proxy","nb_sites","nb_cdes"]
+            cols_art = ["Classe","Code","article_label","Taux de Service","Vol. manquant","Impact CA proxy","nb_sites","nb_cdes"]
         else:
-            cols_art = ["Code","article_label","Fill Rate","Vol. manquant","Impact CA proxy","nb_sites","nb_cdes"]
+            cols_art = ["Code","article_label","Taux de Service","Vol. manquant","Impact CA proxy","nb_sites","nb_cdes"]
         st.dataframe(art_recap[cols_art].rename(columns={"article_label":"Article","nb_sites":"Magasins","nb_cdes":"Cmdes"}), use_container_width=True, hide_index=True)
 
         st.markdown("<div class='section-label' style='margin-top:18px'>Détail des livraisons incomplètes</div>", unsafe_allow_html=True)
-        st.caption(f"{len(fiche_bad):,} ligne(s) avec Fill Rate < {seuil_fill}% sur {len(fiche_df):,} total" + (f" · articles {watch_label} remontés en tête" if watchdict else ""))
+        st.caption(f"{len(fiche_bad):,} ligne(s) avec Taux de Service < {seuil_fill}% sur {len(fiche_df):,} total" + (f" · articles {watch_label} remontés en tête" if watchdict else ""))
         dcols_f = [c for c in ["watch_classe","N° Cde","date_received","date_expected","site_label","Code","article_label","qte_cde","qte_rec_retained","qty_missing","line_fill_rate","service_gap_value","on_time","delay_days"] if c in fiche_bad.columns]
         df_disp = fiche_bad[dcols_f].copy()
         if "line_fill_rate" in df_disp.columns:
@@ -1953,7 +1964,7 @@ with tab7:
             df_disp["service_gap_value"] = df_disp["service_gap_value"].apply(fmt)
         if "on_time" in df_disp.columns:
             df_disp["on_time"] = df_disp["on_time"].map({True:"✅",False:"❌",1:"✅",0:"❌"}).fillna("—")
-        st.dataframe(df_disp.rename(columns={"watch_classe":"Classe","N° Cde":"N° Commande","date_received":"Date réception","date_expected":"Date prévue","site_label":"Magasin","article_label":"Article","qte_cde":"Qté cde","qte_rec_retained":"Qté reçue","qty_missing":"Qté manquante","line_fill_rate":"Fill Rate ligne","service_gap_value":"Impact CA proxy","on_time":"À l'heure","delay_days":"Retard (j)"}), use_container_width=True, hide_index=True)
+        st.dataframe(df_disp.rename(columns={"watch_classe":"Classe","N° Cde":"N° Commande","date_received":"Date réception","date_expected":"Date prévue","site_label":"Magasin","article_label":"Article","qte_cde":"Qté cde","qte_rec_retained":"Qté reçue","qty_missing":"Qté manquante","line_fill_rate":"Taux de Service ligne","service_gap_value":"Impact CA proxy","on_time":"À l'heure","delay_days":"Retard (j)"}), use_container_width=True, hide_index=True)
 
         st.markdown("---")
         if st.button("📥 Générer la fiche Excel fournisseur", type="primary", key="btn_fiche"):
@@ -1977,7 +1988,7 @@ with col_exp1:
   <div style='font-size:13px;font-weight:700;color:#1C1C1E;margin-bottom:4px'>🎯 Récap priorisation fournisseurs</div>
   <div style='font-size:12px;color:#8E8E93;line-height:1.5'>
     1 ligne par fournisseur · Réfs commandées / livrées / taux couverture<br>
-    Fill Rate · OTIF · Sites impactés · Impact CA proxy<br>
+    Taux de Service · OTIF · Sites impactés · Impact CA proxy<br>
     Trié par criticité · Filtre automatique · Légende incluse{_recap_mention}
   </div>
 </div>""", unsafe_allow_html=True)
