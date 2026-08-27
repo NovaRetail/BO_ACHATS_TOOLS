@@ -3,13 +3,16 @@
 Balaie un export PROMO et sort les alertes Disponibilité (stock ≤0, avec/sans
 réappro RAL) et Marge (vente à perte, marge faible, PMP manquant), avec un
 flag combiné "Disponibilité + Marge" pour les cas cumulés prioritaires.
-Colonne "Action" : message actionnable par ligne (Rupture -> Passer commande,
-RAL -> Accélérer livraison, etc.) — pas juste un statut descriptif.
+Colonne Action : message actionnable par ligne (Rupture -> Passer commande,
+RAL -> Accélérer livraison, etc.).
+Visuel : cartes HTML façon app moderne (pas de grille type tableur) pour la
+liste des alertes et la synthèse par magasin.
 Export Excel "Cockpit Promo - AAAAMMJJ.xlsx" — valeurs calculées en Python,
 aucune formule dans le classeur.
 """
 
 import datetime as _dt
+import html as _html
 
 import streamlit as st
 import pandas as pd
@@ -51,10 +54,10 @@ html, body, [class*="css"] {
 [data-testid="stMetric"] { background: #FFFFFF !important; border: 0.5px solid #E5E5EA !important; border-radius: 12px !important; padding: 16px 18px !important; }
 [data-testid="stMetricLabel"] { font-size: 11px !important; font-weight: 500 !important; color: #8E8E93 !important; text-transform: uppercase !important; letter-spacing: 0.04em !important; }
 [data-testid="stMetricValue"] { font-size: 24px !important; font-weight: 600 !important; color: #1C1C1E !important; letter-spacing: -0.02em !important; }
-[data-testid="stDataFrame"] { border: 0.5px solid #E5E5EA !important; border-radius: 12px !important; overflow: hidden !important; }
-[data-testid="stDataFrame"] th { background: #FAFAFC !important; font-size: 11px !important; font-weight: 600 !important; color: #8E8E93 !important; text-transform: uppercase !important; letter-spacing: 0.04em !important; border-bottom: 0.5px solid #E5E5EA !important; }
-[data-testid="stDataFrame"] td { font-size: 13px !important; border-bottom: 0.5px solid #F2F2F7 !important; }
 [data-testid="stFileUploader"] { border: 1.5px dashed #D1D1D6 !important; border-radius: 10px !important; background: #F9F9FB !important; }
+[data-testid="stTabs"] button[role="tab"] { font-size: 13px !important; font-weight: 500 !important; padding: 8px 16px !important; color: #8E8E93 !important; border-radius: 0 !important; border-bottom: 2px solid transparent !important; }
+[data-testid="stTabs"] button[role="tab"][aria-selected="true"] { color: #007AFF !important; border-bottom: 2px solid #007AFF !important; background: transparent !important; }
+[data-testid="stTabs"] [role="tablist"] { border-bottom: 0.5px solid #E5E5EA !important; gap: 4px !important; }
 .stDownloadButton > button { background: #007AFF !important; color: white !important; border: none !important; border-radius: 8px !important; font-weight: 500 !important; font-size: 13px !important; padding: 10px 24px !important; width: 100% !important; }
 hr { border-color: #E5E5EA !important; margin: 1rem 0 !important; }
 
@@ -84,6 +87,27 @@ hr { border-color: #E5E5EA !important; margin: 1rem 0 !important; }
 .col-desc { font-size: 12px; color: #3A3A3C; margin-top: 1px; }
 .card { background:#FFFFFF;border:0.5px solid #E5E5EA;border-radius:12px;padding:16px;margin-bottom:10px; }
 .small-muted { font-size:12px;color:#8E8E93; }
+
+/* ---- Cartes de liste "app moderne" (remplace le tableau type tableur) ---- */
+.alist { background:#FFFFFF; border-radius:14px; border:0.5px solid #E5E5EA; overflow:hidden; margin-bottom:14px; }
+.alist-head { display:grid; grid-template-columns: 64px 1.6fr 1fr 64px 90px 70px 240px; gap:0;
+              padding:10px 16px; font-size:10.5px; font-weight:600; color:#8E8E93;
+              text-transform:uppercase; letter-spacing:.05em; background:#FAFAFC; border-bottom:0.5px solid #E5E5EA; }
+.alist-body { max-height:440px; overflow-y:auto; }
+.alist-row { display:grid; grid-template-columns: 64px 1.6fr 1fr 64px 90px 70px 240px; gap:0;
+             padding:10px 16px; font-size:13px; border-bottom:0.5px solid #F2F2F7; align-items:center; }
+.alist-row:last-child { border-bottom:none; }
+.alist-empty { padding:28px; text-align:center; font-size:13px; color:#8E8E93; }
+.pill { display:inline-block; padding:3px 10px; border-radius:8px; font-size:11px; font-weight:600; white-space:nowrap; }
+
+/* ---- Cartes de synthèse par magasin ---- */
+.site-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap:12px; margin-bottom:16px; }
+.site-card { background:#FFFFFF; border-radius:14px; border:0.5px solid #E5E5EA; padding:16px 18px; }
+.site-card-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+.site-card-title { font-size:15px; font-weight:600; color:#1C1C1E; }
+.site-stat-row { display:flex; align-items:center; justify-content:space-between; padding:5px 0; font-size:12.5px; color:#3A3A3C; border-bottom:0.5px solid #F5F5F7; }
+.site-stat-row:last-child { border-bottom:none; }
+.site-stat-val { font-weight:600; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -194,45 +218,81 @@ def build_headline(alerts, synth):
     return line1, line2
 
 # ============================================================
-# STYLE DES TABLEAUX STREAMLIT — coloration cellule par cellule
+# RENDU HTML "APP MODERNE" — remplace le tableau type tableur
 # ============================================================
-DISPLAY_COLS = {"Site": "Site", "Rayon_aff": "Rayon", "Article_aff": "Article",
-                 "Stock": "Stock", "RAL": "RAL", "Marge en cours": "Marge %", "action": "Action"}
+def _marge_pill(v, seuil):
+    if pd.isna(v):
+        return "<span style='color:#8E8E93;'>—</span>"
+    if v < 0:
+        color = "#C0392B"
+    elif v < seuil:
+        color = "#B36B00"
+    else:
+        color = "#1E7B3C"
+    return f"<span style='color:{color}; font-weight:600;'>{v:.1f}%</span>"
 
-def _color_marge(v, seuil):
-    if pd.isna(v): return ""
-    if v < 0: return "background-color:#FFF2F2; color:#C0392B; font-weight:600;"
-    if v < seuil: return "background-color:#FFFBF0; color:#B36B00; font-weight:600;"
-    return "background-color:#F0FFF4; color:#1E7B3C;"
+def _action_pill(action):
+    a = action or ""
+    if "Rupture" in a or "Vente à perte" in a:
+        bg, fg = "#FDECEA", "#C0392B"
+    elif "RAL" in a or "Marge faible" in a:
+        bg, fg = "#FFF6E5", "#B36B00"
+    elif "PMP manquant" in a:
+        bg, fg = "#F0F0F2", "#5A5A5E"
+    else:
+        bg, fg = "#F0F0F2", "#5A5A5E"
+    return f"<span class='pill' style='background:{bg}; color:{fg};'>{_html.escape(a)}</span>"
 
-def _color_stock(v):
-    if pd.isna(v): return ""
-    return "color:#C0392B; font-weight:600;" if v <= 0 else "color:#1C1C1E;"
-
-def _color_action(v):
-    if not isinstance(v, str):
-        return ""
-    if "Rupture" in v:
-        return "background-color:#FFF2F2; color:#C0392B; font-weight:600;"
-    if "RAL" in v:
-        return "background-color:#FFFBF0; color:#B36B00; font-weight:600;"
-    if "Vente à perte" in v:
-        return "background-color:#FFF2F2; color:#C0392B; font-weight:600;"
-    if "Marge faible" in v:
-        return "background-color:#FFFBF0; color:#B36B00; font-weight:600;"
-    return "background-color:#F5F5F7; color:#5A5A5E;"
-
-def render_table(d, seuil, height=None):
+def render_alert_list(d, seuil, max_height=440):
     if d.empty:
-        st.caption("Aucune ligne pour ce filtre.")
+        st.markdown("<div class='alist'><div class='alist-empty'>Aucune ligne pour ce filtre.</div></div>", unsafe_allow_html=True)
         return
-    disp = d[list(DISPLAY_COLS.keys())].rename(columns=DISPLAY_COLS).reset_index(drop=True)
-    sty = (disp.style
-           .format({"Marge %": lambda v: fmt_pct(v)})
-           .map(lambda v: _color_marge(v, seuil), subset=["Marge %"])
-           .map(_color_stock, subset=["Stock"])
-           .map(_color_action, subset=["Action"]))
-    st.dataframe(sty, use_container_width=True, hide_index=True, height=height)
+    rows_html = []
+    for _, row_ in d.iterrows():
+        stock = row_["Stock"]
+        stock_html = (f"<span style='color:#C0392B; font-weight:600;'>{int(stock)}</span>"
+                      if pd.notna(stock) and stock <= 0 else f"{fmt(stock)}")
+        ral = row_["RAL"]
+        ral_html = fmt(ral) if pd.notna(ral) and ral else "<span style='color:#C7C7CC;'>—</span>"
+        rows_html.append(f"""
+<div class="alist-row">
+  <div style="color:#8E8E93;">{int(row_['Site'])}</div>
+  <div>
+    <div style="font-weight:500; color:#1C1C1E;">{_html.escape(row_['Article_aff'])}</div>
+    <div style="font-size:11px; color:#8E8E93; margin-top:1px;">{_html.escape(row_['Rayon_aff'])}</div>
+  </div>
+  <div style="color:#8E8E93; font-size:12px;">{_html.escape(str(row_['Code_article']))}</div>
+  <div>{stock_html}</div>
+  <div style="color:#8E8E93;">{ral_html}</div>
+  <div>{_marge_pill(row_['Marge en cours'], seuil)}</div>
+  <div>{_action_pill(row_['action'])}</div>
+</div>""")
+    body = "".join(rows_html)
+    st.markdown(f"""
+<div class="alist">
+  <div class="alist-head">
+    <div>Site</div><div>Article</div><div>Code</div><div>Stock</div><div>RAL</div><div>Marge</div><div>Action</div>
+  </div>
+  <div class="alist-body" style="max-height:{max_height}px;">{body}</div>
+</div>
+""", unsafe_allow_html=True)
+
+def render_site_synthesis(synth):
+    cards = []
+    for _, r in synth.iterrows():
+        cards.append(f"""
+<div class="site-card">
+  <div class="site-card-head">
+    <div class="site-card-title">Site {int(r['Site'])}</div>
+    <span class="badge {'badge-red' if r['Dispo + Marge'] > 0 else 'badge-green'}">{int(r['Dispo + Marge'])} cumul</span>
+  </div>
+  <div class="site-stat-row"><span>Rupture sans réappro</span><span class="site-stat-val" style="color:#C0392B;">{int(r['Rupture sans réappro'])}</span></div>
+  <div class="site-stat-row"><span>Réappro en cours</span><span class="site-stat-val" style="color:#B36B00;">{int(r['Réappro en cours'])}</span></div>
+  <div class="site-stat-row"><span>Vente à perte</span><span class="site-stat-val" style="color:#C0392B;">{int(r['Vente à perte'])}</span></div>
+  <div class="site-stat-row"><span>Marge faible</span><span class="site-stat-val" style="color:#B36B00;">{int(r['Marge faible'])}</span></div>
+  <div class="site-stat-row"><span>PMP manquant</span><span class="site-stat-val" style="color:#8E8E93;">{int(r['PMP manquant'])}</span></div>
+</div>""")
+    st.markdown(f"<div class='site-grid'>{''.join(cards)}</div>", unsafe_allow_html=True)
 
 # ============================================================
 # EXPORT EXCEL — valeurs calculées en Python, aucune formule
@@ -315,8 +375,6 @@ def build_excel(alerts, synth):
     def alert_section(title, sub_df, color):
         nonlocal r
         section_bar(ws, r, 10, f"{title} — {len(sub_df)} lignes", color=color); r += 1
-        cols = ["Site", "Rayon_aff", "Article_aff", "Code_article", "Stock", "RAL",
-                "pmp_effectif", "PV Promo", "Marge en cours", "action", "Four."]
         labels = ["Site", "Rayon", "Article", "Code article", "Stock", "RAL",
                    "PMP", "PV Promo", "Marge %", "Action", "Fournisseur"]
         header_row(ws, r, labels); r += 1
@@ -487,21 +545,26 @@ c3.metric("Marge", n_marge)
 c4.metric("Cumul (critique)", n_cumul, delta_color="off")
 
 st.markdown("<div class='section-label'>Synthèse par magasin</div>", unsafe_allow_html=True)
-sty_synth = (synth.style
-             .background_gradient(subset=["Vente à perte"], cmap="Reds")
-             .background_gradient(subset=["Dispo + Marge"], cmap="Oranges"))
-st.dataframe(sty_synth, use_container_width=True, hide_index=True)
+render_site_synthesis(synth)
 
 st.markdown("<div class='section-label'>Détail des alertes</div>", unsafe_allow_html=True)
 
-st.markdown(f"<span class='badge badge-red' style='margin:14px 0 6px;'>🚨 Disponibilité + Marge — prioritaire ({n_cumul})</span>", unsafe_allow_html=True)
-render_table(alerts[alerts["type_alerte"] == "Disponibilité + Marge"].sort_values("Marge en cours"), seuil)
+tab_cumul, tab_dispo, tab_marge = st.tabs([
+    f"🚨 Cumul ({n_cumul})",
+    f"📦 Disponibilité ({n_dispo})",
+    f"📉 Marge ({n_marge})",
+])
+with tab_cumul:
+    st.caption("Articles qui cumulent une rupture et une marge dégradée — à traiter en premier.")
+    render_alert_list(alerts[alerts["type_alerte"] == "Disponibilité + Marge"].sort_values("Marge en cours"), seuil)
 
-st.markdown(f"<span class='badge badge-hyper' style='margin:14px 0 6px;'>📦 Disponibilité ({n_dispo})</span>", unsafe_allow_html=True)
-render_table(alerts[alerts["type_alerte"] == "Disponibilité"].sort_values("Stock"), seuil, height=320)
+with tab_dispo:
+    st.caption("Stock ≤ 0, triés du plus critique au moins critique.")
+    render_alert_list(alerts[alerts["type_alerte"] == "Disponibilité"].sort_values("Stock"), seuil)
 
-st.markdown(f"<span class='badge badge-amber' style='margin:14px 0 6px;'>📉 Marge ({n_marge})</span>", unsafe_allow_html=True)
-render_table(alerts[alerts["type_alerte"] == "Marge"].sort_values("Marge en cours"), seuil, height=320)
+with tab_marge:
+    st.caption("Marge négative, marge faible ou PMP manquant, triés du pire au moins grave.")
+    render_alert_list(alerts[alerts["type_alerte"] == "Marge"].sort_values("Marge en cours"), seuil)
 
 st.markdown("<div class='section-label'>Export</div>", unsafe_allow_html=True)
 xls = build_excel(alerts, synth)
