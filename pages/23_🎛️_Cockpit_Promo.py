@@ -3,6 +3,8 @@
 Balaie un export PROMO et sort les alertes Disponibilité (stock ≤0, avec/sans
 réappro RAL) et Marge (vente à perte, marge faible, PMP manquant), avec un
 flag combiné "Disponibilité + Marge" pour les cas cumulés prioritaires.
+Colonne "Action" : message actionnable par ligne (Rupture -> Passer commande,
+RAL -> Accélérer livraison, etc.) — pas juste un statut descriptif.
 Export Excel "Cockpit Promo - AAAAMMJJ.xlsx" — valeurs calculées en Python,
 aucune formule dans le classeur.
 """
@@ -15,7 +17,6 @@ import numpy as np
 import io
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.formatting.rule import CellIsRule
 
 # ============================================================
 # CONFIG & CHARTE (Apple clair — identique aux autres modules SmartBuyer)
@@ -50,8 +51,9 @@ html, body, [class*="css"] {
 [data-testid="stMetric"] { background: #FFFFFF !important; border: 0.5px solid #E5E5EA !important; border-radius: 12px !important; padding: 16px 18px !important; }
 [data-testid="stMetricLabel"] { font-size: 11px !important; font-weight: 500 !important; color: #8E8E93 !important; text-transform: uppercase !important; letter-spacing: 0.04em !important; }
 [data-testid="stMetricValue"] { font-size: 24px !important; font-weight: 600 !important; color: #1C1C1E !important; letter-spacing: -0.02em !important; }
-[data-testid="stDataFrame"] { border: 0.5px solid #E5E5EA !important; border-radius: 10px !important; }
-[data-testid="stDataFrame"] th { background: #F2F2F7 !important; font-size: 11px !important; font-weight: 600 !important; color: #8E8E93 !important; text-transform: uppercase !important; letter-spacing: 0.04em !important; }
+[data-testid="stDataFrame"] { border: 0.5px solid #E5E5EA !important; border-radius: 12px !important; overflow: hidden !important; }
+[data-testid="stDataFrame"] th { background: #FAFAFC !important; font-size: 11px !important; font-weight: 600 !important; color: #8E8E93 !important; text-transform: uppercase !important; letter-spacing: 0.04em !important; border-bottom: 0.5px solid #E5E5EA !important; }
+[data-testid="stDataFrame"] td { font-size: 13px !important; border-bottom: 0.5px solid #F2F2F7 !important; }
 [data-testid="stFileUploader"] { border: 1.5px dashed #D1D1D6 !important; border-radius: 10px !important; background: #F9F9FB !important; }
 .stDownloadButton > button { background: #007AFF !important; color: white !important; border: none !important; border-radius: 8px !important; font-weight: 500 !important; font-size: 13px !important; padding: 10px 24px !important; width: 100% !important; }
 hr { border-color: #E5E5EA !important; margin: 1rem 0 !important; }
@@ -130,10 +132,11 @@ def compute_alerts(file_bytes, seuil_marge_faible):
     df["Rayon_aff"] = df["Libellé rayon"].str.strip()
     df["Article_aff"] = df["Libellé article"].str.strip()
     df["Code_article"] = df["Code article"].astype(str).str.lstrip("0")
+    df["RAL_int"] = df["RAL"].fillna(0).astype(int)
 
     df["stat_stock"] = np.where(
-        (df["Stock"] <= 0) & (df["RAL"].fillna(0) <= 0), "Rupture sans réappro",
-        np.where((df["Stock"] <= 0) & (df["RAL"].fillna(0) > 0), "Réappro en cours", ""))
+        (df["Stock"] <= 0) & (df["RAL_int"] <= 0), "Rupture sans réappro",
+        np.where((df["Stock"] <= 0) & (df["RAL_int"] > 0), "Réappro en cours", ""))
     df["stat_marge"] = np.where(
         df["Marge en cours"] < 0, "Vente à perte",
         np.where(df["Marge en cours"] < seuil_marge_faible, "Marge faible", ""))
@@ -146,9 +149,20 @@ def compute_alerts(file_bytes, seuil_marge_faible):
                  np.where(df["flag_marge"], "Marge", "")))
     df["marge_realisee"] = df["Montant vente HT"] - df["Montant achat"]
     df["pmp_effectif"] = df["PMP"].fillna(df["DPR"])
-    df["detail_marge"] = np.where(
+
+    # ---- Colonne Action : message actionnable, pas un statut descriptif ----
+    df["action_stock"] = np.where(
+        df["stat_stock"] == "Rupture sans réappro", "Rupture - Passer commande",
+        np.where(df["stat_stock"] == "Réappro en cours",
+                 "RAL - Accélérer livraison (" + df["RAL_int"].astype(str) + ")", ""))
+    df["action_marge"] = np.where(
         df["stat_marge"] != "", df["stat_marge"],
         np.where(df["pmp_manquant"], "PMP manquant", ""))
+    df["action"] = np.where(
+        df["type_alerte"] == "Disponibilité + Marge",
+        df["action_stock"] + " + " + df["action_marge"],
+        np.where(df["type_alerte"] == "Disponibilité", df["action_stock"], df["action_marge"]))
+
     return df[df["type_alerte"] != ""].copy()
 
 def synthese_par_site(alerts):
@@ -161,7 +175,7 @@ def synthese_par_site(alerts):
             "Réappro en cours": int((sub["stat_stock"] == "Réappro en cours").sum()),
             "Vente à perte": int((sub["stat_marge"] == "Vente à perte").sum()),
             "Marge faible": int((sub["stat_marge"] == "Marge faible").sum()),
-            "PMP manquant": int((sub["detail_marge"] == "PMP manquant").sum()),
+            "PMP manquant": int((sub["action_marge"] == "PMP manquant").sum()),
             "Dispo + Marge": int((sub["type_alerte"] == "Disponibilité + Marge").sum()),
         })
     return pd.DataFrame(rows)
@@ -180,16 +194,59 @@ def build_headline(alerts, synth):
     return line1, line2
 
 # ============================================================
+# STYLE DES TABLEAUX STREAMLIT — coloration cellule par cellule
+# ============================================================
+DISPLAY_COLS = {"Site": "Site", "Rayon_aff": "Rayon", "Article_aff": "Article",
+                 "Stock": "Stock", "RAL": "RAL", "Marge en cours": "Marge %", "action": "Action"}
+
+def _color_marge(v, seuil):
+    if pd.isna(v): return ""
+    if v < 0: return "background-color:#FFF2F2; color:#C0392B; font-weight:600;"
+    if v < seuil: return "background-color:#FFFBF0; color:#B36B00; font-weight:600;"
+    return "background-color:#F0FFF4; color:#1E7B3C;"
+
+def _color_stock(v):
+    if pd.isna(v): return ""
+    return "color:#C0392B; font-weight:600;" if v <= 0 else "color:#1C1C1E;"
+
+def _color_action(v):
+    if not isinstance(v, str):
+        return ""
+    if "Rupture" in v:
+        return "background-color:#FFF2F2; color:#C0392B; font-weight:600;"
+    if "RAL" in v:
+        return "background-color:#FFFBF0; color:#B36B00; font-weight:600;"
+    if "Vente à perte" in v:
+        return "background-color:#FFF2F2; color:#C0392B; font-weight:600;"
+    if "Marge faible" in v:
+        return "background-color:#FFFBF0; color:#B36B00; font-weight:600;"
+    return "background-color:#F5F5F7; color:#5A5A5E;"
+
+def render_table(d, seuil, height=None):
+    if d.empty:
+        st.caption("Aucune ligne pour ce filtre.")
+        return
+    disp = d[list(DISPLAY_COLS.keys())].rename(columns=DISPLAY_COLS).reset_index(drop=True)
+    sty = (disp.style
+           .format({"Marge %": lambda v: fmt_pct(v)})
+           .map(lambda v: _color_marge(v, seuil), subset=["Marge %"])
+           .map(_color_stock, subset=["Stock"])
+           .map(_color_action, subset=["Action"]))
+    st.dataframe(sty, use_container_width=True, hide_index=True, height=height)
+
+# ============================================================
 # EXPORT EXCEL — valeurs calculées en Python, aucune formule
+# Couleur réservée à ce qui a un vrai impact financier (Cumul, Marge) ;
+# Disponibilité reste neutre (c'est un sujet opérationnel, pas une perte).
 # ============================================================
 def build_excel(alerts, synth):
-    BLUE_H = "FF007AFF"; DARK_H = "FF1D1D1F"; RED_H = "FFFF3B30"; AMBER_H = "FFFF9500"
-    WHITE_H = "FFFFFFFF"; LGREY_H = "FFF2F2F7"; ARIAL = "Arial"
-    thin = Side(style="thin", color="FFD1D1D6")
+    BLUE_H = "FF007AFF"; NEUTRAL_H = "FF48484A"; RED_H = "FFFF3B30"; AMBER_H = "FFFF9500"
+    WHITE_H = "FFFFFFFF"; LGREY_H = "FFF7F7F9"; ARIAL = "Arial"
+    thin = Side(style="thin", color="FFE0E0E2")
     box = Border(left=thin, right=thin, top=thin, bottom=thin)
     QTY = "#,##0"; PCT = "0.0%"; ACC = "#,##0"
 
-    def section_bar(ws, row, ncols, text, color=DARK_H):
+    def section_bar(ws, row, ncols, text, color=NEUTRAL_H):
         ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=ncols)
         c = ws.cell(row=row, column=1, value=text)
         c.font = Font(name=ARIAL, bold=True, size=11, color=WHITE_H)
@@ -259,9 +316,9 @@ def build_excel(alerts, synth):
         nonlocal r
         section_bar(ws, r, 10, f"{title} — {len(sub_df)} lignes", color=color); r += 1
         cols = ["Site", "Rayon_aff", "Article_aff", "Code_article", "Stock", "RAL",
-                "pmp_effectif", "PV Promo", "Marge en cours", "detail_marge", "Four."]
+                "pmp_effectif", "PV Promo", "Marge en cours", "action", "Four."]
         labels = ["Site", "Rayon", "Article", "Code article", "Stock", "RAL",
-                   "PMP", "PV Promo", "Marge %", "Détail", "Fournisseur"]
+                   "PMP", "PV Promo", "Marge %", "Action", "Fournisseur"]
         header_row(ws, r, labels); r += 1
         sub_sorted = sub_df.sort_values("Marge en cours")
         for i, (_, row_) in enumerate(sub_sorted.iterrows()):
@@ -269,7 +326,7 @@ def build_excel(alerts, synth):
                     row_["Stock"], (row_["RAL"] if pd.notna(row_["RAL"]) else 0),
                     row_["pmp_effectif"], row_["PV Promo"],
                     (row_["Marge en cours"] / 100 if pd.notna(row_["Marge en cours"]) else None),
-                    row_["detail_marge"],
+                    row_["action"],
                     (int(row_["Four."]) if pd.notna(row_["Four."]) else None)]
             data_row(ws, r, vals, zebra=(i % 2 == 1), left_cols=(2, 3, 10))
             ws.cell(row=r, column=9).number_format = PCT
@@ -278,12 +335,14 @@ def build_excel(alerts, synth):
             r += 1
         r += 1
 
+    # Couleur réservée aux enjeux financiers : Cumul = rouge, Marge = ambre.
+    # Disponibilité = neutre (sujet opérationnel, pas une perte en soi).
     alert_section("3.  DISPONIBILITÉ + MARGE (CUMUL, PRIORITAIRE)",
                    alerts[alerts["type_alerte"] == "Disponibilité + Marge"], RED_H)
-    alert_section("4.  DISPONIBILITÉ", alerts[alerts["type_alerte"] == "Disponibilité"], AMBER_H)
-    alert_section("5.  MARGE", alerts[alerts["type_alerte"] == "Marge"], RED_H)
+    alert_section("4.  DISPONIBILITÉ", alerts[alerts["type_alerte"] == "Disponibilité"], NEUTRAL_H)
+    alert_section("5.  MARGE", alerts[alerts["type_alerte"] == "Marge"], AMBER_H)
 
-    autosize(ws, {'A': 9, 'B': 22, 'C': 32, 'D': 13, 'E': 9, 'F': 8, 'G': 10, 'H': 11, 'I': 10, 'J': 20})
+    autosize(ws, {'A': 9, 'B': 22, 'C': 32, 'D': 13, 'E': 9, 'F': 8, 'G': 10, 'H': 11, 'I': 10, 'J': 30})
     ws.freeze_panes = "A5"
 
     buf = io.BytesIO()
@@ -318,7 +377,7 @@ if up is None:
 <div class='alert-card alert-blue'>
   <strong>ℹ️ À quoi sert ce module ?</strong><br>
   Ce module balaie un export PROMO et sort les lignes à risque de rupture et/ou de marge
-  négative, avec un flag unique par ligne et une synthèse par magasin.
+  négative, avec un flag d'action par ligne et une synthèse par magasin.
   Un fichier à charger dans la barre latérale.
 </div>
 """, unsafe_allow_html=True)
@@ -330,7 +389,7 @@ if up is None:
 <div class='card'>
   <div style='font-size:14px;font-weight:700;color:#1C1C1E;margin-bottom:8px'>📦 Disponibilité</div>
   <div style='font-size:12px;color:#3A3A3C;line-height:1.5'>
-    Stock ≤ 0 : distingue "Rupture sans réappro" (RAL = 0) et "Réappro en cours" (RAL &gt; 0).
+    Stock ≤ 0 : "Rupture - Passer commande" (RAL = 0) ou "RAL - Accélérer livraison" (RAL &gt; 0).
   </div>
 </div>
 <div class='card'>
@@ -343,7 +402,7 @@ if up is None:
 <div class='card'>
   <div style='font-size:14px;font-weight:700;color:#1C1C1E;margin-bottom:8px'>🚨 Cumul prioritaire</div>
   <div style='font-size:12px;color:#3A3A3C;line-height:1.5'>
-    Flag "Disponibilité + Marge" pour les articles qui cumulent les deux — à traiter en premier.
+    Colonne Action combinée pour les articles qui cumulent les deux — à traiter en premier.
   </div>
 </div>
 """, unsafe_allow_html=True)
@@ -428,33 +487,21 @@ c3.metric("Marge", n_marge)
 c4.metric("Cumul (critique)", n_cumul, delta_color="off")
 
 st.markdown("<div class='section-label'>Synthèse par magasin</div>", unsafe_allow_html=True)
-st.dataframe(synth, use_container_width=True, hide_index=True)
+sty_synth = (synth.style
+             .background_gradient(subset=["Vente à perte"], cmap="Reds")
+             .background_gradient(subset=["Dispo + Marge"], cmap="Oranges"))
+st.dataframe(sty_synth, use_container_width=True, hide_index=True)
 
 st.markdown("<div class='section-label'>Détail des alertes</div>", unsafe_allow_html=True)
 
-display_cols = {"Site": "Site", "Rayon_aff": "Rayon", "Article_aff": "Article",
-                 "Stock": "Stock", "RAL": "RAL", "Marge en cours": "Marge %", "detail_marge": "Détail"}
-
 st.markdown(f"<span class='badge badge-red' style='margin:14px 0 6px;'>🚨 Disponibilité + Marge — prioritaire ({n_cumul})</span>", unsafe_allow_html=True)
-d = alerts[alerts["type_alerte"] == "Disponibilité + Marge"].sort_values("Marge en cours")
-if d.empty:
-    st.caption("Aucune ligne cumulée sur ce périmètre.")
-else:
-    dd = d[list(display_cols.keys())].rename(columns=display_cols)
-    dd["Marge %"] = dd["Marge %"].map(lambda v: fmt_pct(v))
-    st.dataframe(dd, use_container_width=True, hide_index=True)
+render_table(alerts[alerts["type_alerte"] == "Disponibilité + Marge"].sort_values("Marge en cours"), seuil)
 
 st.markdown(f"<span class='badge badge-hyper' style='margin:14px 0 6px;'>📦 Disponibilité ({n_dispo})</span>", unsafe_allow_html=True)
-d = alerts[alerts["type_alerte"] == "Disponibilité"].sort_values("Stock")
-dd = d[list(display_cols.keys())].rename(columns=display_cols)
-dd["Marge %"] = dd["Marge %"].map(lambda v: fmt_pct(v))
-st.dataframe(dd, use_container_width=True, hide_index=True, height=300)
+render_table(alerts[alerts["type_alerte"] == "Disponibilité"].sort_values("Stock"), seuil, height=320)
 
 st.markdown(f"<span class='badge badge-amber' style='margin:14px 0 6px;'>📉 Marge ({n_marge})</span>", unsafe_allow_html=True)
-d = alerts[alerts["type_alerte"] == "Marge"].sort_values("Marge en cours")
-dd = d[list(display_cols.keys())].rename(columns=display_cols)
-dd["Marge %"] = dd["Marge %"].map(lambda v: fmt_pct(v))
-st.dataframe(dd, use_container_width=True, hide_index=True, height=300)
+render_table(alerts[alerts["type_alerte"] == "Marge"].sort_values("Marge en cours"), seuil, height=320)
 
 st.markdown("<div class='section-label'>Export</div>", unsafe_allow_html=True)
 xls = build_excel(alerts, synth)
@@ -462,4 +509,4 @@ today_str = _dt.date.today().strftime("%Y%m%d")
 export_filename = f"Cockpit Promo - {today_str}.xlsx"
 st.download_button(f"📥 Télécharger {export_filename}", xls, file_name=export_filename,
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-st.caption("Fichier à une feuille : synthèse réseau, synthèse par magasin, puis le détail des 3 sections d'alerte — valeurs figées, aucune formule.")
+st.caption("Fichier à une feuille : synthèse réseau, synthèse par magasin, puis le détail des 3 sections d'alerte — valeurs figées, aucune formule. Couleur réservée aux sections à enjeu financier (Marge, Cumul) ; Disponibilité reste neutre.")
