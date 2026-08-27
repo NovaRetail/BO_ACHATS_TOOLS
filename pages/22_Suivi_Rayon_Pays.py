@@ -1,41 +1,36 @@
 """
 Suivi Rayon vs Pays — PGC
 =========================
-Compare la performance d'un rayon PGC à la Tendance Pays (tout le reseau)
-et au total PGC, avec :
-  - un historique archive dans Google Sheets (meme backend que le module
-    Tasks Tracker existant),
-  - upload en masse d'exports PBI historiques,
-  - detection automatique de la date par nom de fichier, avec repli sur
-    la date du jour et confirmation manuelle (voir guess_date_from_filename),
-  - trois ecrans acheteur : Ma semaine, Ma tendance, Mes magasins a regarder.
+Compare la performance d'un rayon PGC a la Tendance Pays (tout le reseau)
+et au total PGC.
+
+Aucune persistance externe : jusqu'a MAX_HISTORIQUES exports PBI sont
+charges dans la barre laterale a chaque session. L'historique vit en
+memoire le temps de la session Streamlit — a recharger a chaque ouverture
+de l'app (voir note en fin de fichier).
+
+Ecrans : Ma semaine, Ma tendance, Mes magasins a regarder.
 
 A brancher dans bo_achats_tools comme n'importe quel autre module
-(auto-discovery app.py). Renommer le prefixe numerique selon ton
-prochain numero de module disponible.
+(auto-discovery pages/). Renommer le prefixe numerique selon ton
+prochain numero de module disponible — verifie que 22 est libre.
 
 Pre-requis avant premier lancement :
-  1. Creer un Google Sheet nomme SHEET_NAME (ou changer la constante),
-     partage avec le meme service account que Tasks Tracker.
-  2. pip install gspread google-auth pandas openpyxl streamlit
-  3. Verifier que EXPORT_COLUMNS correspond exactement a l'ordre des
-     colonnes de ton export PBI (Departement -> Volume_VsN1_pct).
+  pip install pandas openpyxl streamlit
 
-Limite connue : ce script n'a pas ete execute contre un vrai Google
-Sheet ni deploye sur Streamlit Cloud dans cet environnement — relire
-avant mise en prod, en particulier les noms de colonnes et la logique
-de detection de date.
+Limite connue : ce script n'a pas ete execute contre un vrai deploiement
+Streamlit Cloud dans cet environnement — relire avant mise en prod, en
+particulier EXPORT_COLUMNS qui doit correspondre exactement a l'ordre des
+colonnes de ton export PBI.
 """
 
 import io
 import re
-from datetime import date, datetime
+from datetime import date
 
 import numpy as np
 import pandas as pd
 import streamlit as st
-import gspread
-from google.oauth2.service_account import Credentials
 
 # ============================================================
 # CHARTE VISUELLE (alignee sur SmartBuyer Hub)
@@ -47,18 +42,10 @@ COLOR_GREEN = "#34C759"
 COLOR_ORANGE = "#FF9500"
 RADIUS = "14px"
 
-FLAG_COLOR = {"Rouge": COLOR_RED, "Orange": COLOR_ORANGE, "Vert": COLOR_GREEN}
-
-# ============================================================
-# CONFIG
-# ============================================================
-SHEET_NAME = "Journal_Suivi_Rayon_Pays"   # nom du Google Sheet a creer
-WORKSHEET_NAME = "Journal"
-
 # A ajuster : chemin du logo dans ton repo bo_achats_tools (ex: "assets/logo.png").
-# st.logo() accepte un chemin local ou une URL. Si le fichier n'existe pas encore,
-# l'appel est protege plus bas (main()) pour ne pas faire planter la page.
 LOGO_PATH = "assets/logo.png"
+
+MAX_HISTORIQUES = 6
 
 RAYONS = [
     "Tous PGC",
@@ -69,7 +56,6 @@ RAYONS = [
 ]
 
 # Ordre exact des colonnes d'un export PBI (Departement -> Volume_VsN1_pct).
-# A verifier/ajuster si le format d'export change.
 EXPORT_COLUMNS = [
     "Departement", "Rayon", "Site", "CA_N1", "Budget", "CA", "Poids",
     "VsN1_pct", "VsBgt_pct", "Marge_N1", "Marge", "TauxMarge_N1", "TauxMarge",
@@ -77,61 +63,14 @@ EXPORT_COLUMNS = [
     "Panier_N1", "Panier", "Panier_VsN1_pct", "PanierQte_N1", "PanierQte",
     "PanierQte_VsN1_pct", "Volume_N1", "Volume", "Volume_VsN1_pct",
 ]
-JOURNAL_COLUMNS = EXPORT_COLUMNS + ["Departement_rempli", "Rayon_rempli", "Format", "RowType", "Date"]
 
 SEUILS_FORMAT = {"Hyper": 0.02, "Market": 0.03, "Supeco": 0.04}
-SEUIL_ARCHIVE_SUFFISANT = 8   # semaines avant de passer sur des seuils statistiques
-SEUIL_ARCHIVE_CONFORTABLE = 13
+# Avec un plafond de MAX_HISTORIQUES (6) fichiers, on ne vise plus 8-13
+# semaines comme cible statistique — seuils volontairement plus modestes.
+SEUIL_HISTORIQUE_SUFFISANT = 4
+SEUIL_HISTORIQUE_MAX = MAX_HISTORIQUES
 
-
-# ============================================================
-# GOOGLE SHEETS
-# ============================================================
-@st.cache_resource
-def get_gspread_client():
-    creds = Credentials.from_service_account_info(
-        st.secrets["gcp_service_account"],
-        scopes=["https://www.googleapis.com/auth/spreadsheets"],
-    )
-    return gspread.authorize(creds)
-
-
-def get_journal_worksheet():
-    client = get_gspread_client()
-    sheet = client.open(SHEET_NAME)
-    try:
-        return sheet.worksheet(WORKSHEET_NAME)
-    except gspread.WorksheetNotFound:
-        ws = sheet.add_worksheet(title=WORKSHEET_NAME, rows=2000, cols=len(JOURNAL_COLUMNS))
-        ws.append_row(JOURNAL_COLUMNS)
-        return ws
-
-
-@st.cache_data(ttl=300)
-def load_journal() -> pd.DataFrame:
-    ws = get_journal_worksheet()
-    records = ws.get_all_records()
-    if not records:
-        return pd.DataFrame(columns=JOURNAL_COLUMNS)
-    df = pd.DataFrame(records)
-    df["Date"] = pd.to_datetime(df["Date"]).dt.date
-    numeric_cols = [c for c in EXPORT_COLUMNS if c not in ("Departement", "Rayon", "Site")]
-    for c in numeric_cols:
-        df[c] = pd.to_numeric(df[c], errors="coerce")
-    return df
-
-
-def archive_export(df: pd.DataFrame, export_date: date) -> tuple[bool, str]:
-    journal = load_journal()
-    if not journal.empty and export_date in set(journal["Date"]):
-        return False, f"{export_date.strftime('%d/%m/%Y')} est deja archivee — rien fait."
-    ws = get_journal_worksheet()
-    out = df.copy()
-    out["Date"] = export_date.isoformat()
-    rows = out[JOURNAL_COLUMNS].fillna("").values.tolist()
-    ws.append_rows(rows)
-    load_journal.clear()
-    return True, f"{len(rows)} lignes archivees pour le {export_date.strftime('%d/%m/%Y')}."
+FLAG_FILL_HEX = {"Rouge": "FFE0DE", "Orange": "FFEBCC", "Vert": "DCF5E3"}
 
 
 # ============================================================
@@ -179,9 +118,7 @@ DATE_PATTERN = re.compile(r"(\d{4})[-_](\d{2})[-_](\d{2})")
 
 def guess_date_from_filename(filename: str) -> date:
     """Tente de lire une date AAAA-MM-JJ dans le nom du fichier.
-    A defaut, retourne la date du jour — a confirmer par l'utilisateur.
-    A remplacer par une lecture directe d'un champ Date PBI des que ce
-    champ existera dans l'export (voir en-tete du fichier)."""
+    A defaut, retourne la date du jour — a confirmer par l'utilisateur."""
     match = DATE_PATTERN.search(filename)
     if match:
         try:
@@ -189,6 +126,60 @@ def guess_date_from_filename(filename: str) -> date:
         except ValueError:
             pass
     return date.today()
+
+
+# ============================================================
+# CONSTRUCTION DU JOURNAL EN MEMOIRE (pas de persistance externe)
+# ============================================================
+def build_journal_from_uploads(files_with_dates: list) -> pd.DataFrame:
+    frames = []
+    for uploaded_file, chosen_date in files_with_dates:
+        try:
+            df = parse_pbi_export(uploaded_file)
+        except Exception as exc:
+            st.sidebar.error(f"{uploaded_file.name} : echec de lecture ({exc})")
+            continue
+        df["Date"] = chosen_date
+        frames.append(df)
+    if not frames:
+        return pd.DataFrame()
+    journal = pd.concat(frames, ignore_index=True)
+    dup_dates = journal["Date"].drop_duplicates()
+    if dup_dates.duplicated().any():
+        pass  # deux fichiers avec la meme date : les deux sont gardes, somme naturelle via groupby en aval
+    return journal
+
+
+# ============================================================
+# EXPORT EXCEL
+# ============================================================
+def to_excel_bytes(df: pd.DataFrame, sheet_name: str = "Export", flags: list | None = None) -> bytes:
+    """Genere un classeur Excel en memoire (pas de fichier sur disque).
+    Si `flags` est fourni (une valeur Rouge/Orange/Vert par ligne, meme ordre
+    que df), l'en-tete passe en gras et chaque ligne est coloree."""
+    from openpyxl.styles import Font, PatternFill
+
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name=sheet_name)
+        ws = writer.sheets[sheet_name]
+
+        for cell in ws[1]:
+            cell.font = Font(bold=True)
+
+        if flags:
+            for row_idx, flag_value in enumerate(flags, start=2):
+                hex_color = FLAG_FILL_HEX.get(flag_value)
+                if not hex_color:
+                    continue
+                fill = PatternFill("solid", fgColor=hex_color)
+                for cell in ws[row_idx]:
+                    cell.fill = fill
+
+        for col_cells in ws.columns:
+            width = max(len(str(c.value)) for c in col_cells if c.value is not None) + 2
+            ws.column_dimensions[col_cells[0].column_letter].width = min(width, 40)
+    return buffer.getvalue()
 
 
 # ============================================================
@@ -262,8 +253,6 @@ def site_table(journal: pd.DataFrame, target_date: date, rayon: str) -> pd.DataF
             return pd.Series(["Supply", "Volume/rupture, trafic stable (piste a verifier)"])
         if r["DeltaMarge"] < -0.02 and r["CA_vs_N1"] > 0:
             return pd.Series(["Achat", "Marge brute en recul, CA en hausse"])
-        # Aucune regle dominante : on donne les chiffres bruts plutot qu'une
-        # phrase generique, pour que l'acheteur voie lui-meme ou regarder.
         cause = (
             f"Trafic {r['Debit_vs_N1']:+.0%}, panier {r['Panier_vs_N1']:+.0%}, "
             f"volume {r['Volume_vs_N1']:+.0%}, marge brute {r['DeltaMarge']*100:+.1f} pt "
@@ -279,73 +268,40 @@ def site_table(journal: pd.DataFrame, target_date: date, rayon: str) -> pd.DataF
 
 
 # ============================================================
-# EXPORT EXCEL
+# BARRE LATERALE : CHARGEMENT DES HISTORIQUES
 # ============================================================
-FLAG_FILL_HEX = {"Rouge": "FFE0DE", "Orange": "FFEBCC", "Vert": "DCF5E3"}
-
-
-def to_excel_bytes(df: pd.DataFrame, sheet_name: str = "Export", flags: list | None = None) -> bytes:
-    """Genere un classeur Excel en memoire (pas de fichier sur disque).
-    Si `flags` est fourni (une valeur Rouge/Orange/Vert par ligne, meme ordre
-    que df), l'en-tete passe en gras et chaque ligne est coloree pour
-    ressembler a l'ecran."""
-    from openpyxl.styles import Font, PatternFill
-
-    buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name=sheet_name)
-        ws = writer.sheets[sheet_name]
-
-        for cell in ws[1]:
-            cell.font = Font(bold=True)
-
-        if flags:
-            for row_idx, flag_value in enumerate(flags, start=2):
-                hex_color = FLAG_FILL_HEX.get(flag_value)
-                if not hex_color:
-                    continue
-                fill = PatternFill("solid", fgColor=hex_color)
-                for cell in ws[row_idx]:
-                    cell.fill = fill
-
-        for col_cells in ws.columns:
-            width = max(len(str(c.value)) for c in col_cells if c.value is not None) + 2
-            ws.column_dimensions[col_cells[0].column_letter].width = min(width, 40)
-    return buffer.getvalue()
-
-
-# ============================================================
-# ECRAN : ARCHIVER
-# ============================================================
-def page_upload():
-    st.markdown("### Archiver des exports PBI")
-    st.caption(
-        "Un ou plusieurs fichiers a la fois. La date est devinee depuis le nom du fichier "
-        "(ex: export_2026-08-19.xlsx) ou mise a aujourd'hui par defaut — verifie/corrige "
-        "avant d'archiver, une seule fois par fichier."
+def sidebar_upload() -> pd.DataFrame:
+    st.sidebar.markdown("### Charger l'historique")
+    st.sidebar.caption(
+        f"Jusqu'a {MAX_HISTORIQUES} exports PBI. La date est devinee depuis le nom du "
+        f"fichier (ex: export_2026-08-19.xlsx) ou mise a aujourd'hui par defaut — "
+        f"verifie/corrige avant de continuer."
     )
-    files = st.file_uploader("Exports PBI (.xlsx)", type=["xlsx"], accept_multiple_files=True)
+    files = st.sidebar.file_uploader(
+        "Exports PBI (.xlsx)", type=["xlsx"], accept_multiple_files=True
+    )
     if not files:
-        return
+        st.sidebar.info("Aucun fichier charge pour l'instant.")
+        return pd.DataFrame()
 
-    to_archive = []
+    if len(files) > MAX_HISTORIQUES:
+        st.sidebar.warning(
+            f"{len(files)} fichiers selectionnes — seuls les {MAX_HISTORIQUES} "
+            f"premiers sont pris en compte."
+        )
+        files = files[:MAX_HISTORIQUES]
+
+    files_with_dates = []
     for f in files:
         guessed = guess_date_from_filename(f.name)
-        col1, col2 = st.columns([3, 2])
-        with col1:
-            st.write(f.name)
-        with col2:
-            confirmed = st.date_input(f"Date — {f.name}", value=guessed, key=f"date_{f.name}")
-        to_archive.append((f, confirmed))
+        confirmed = st.sidebar.date_input(f.name, value=guessed, key=f"date_{f.name}")
+        files_with_dates.append((f, confirmed))
 
-    if st.button("Archiver ces exports", type="primary"):
-        for f, d in to_archive:
-            try:
-                df = parse_pbi_export(f)
-                ok, msg = archive_export(df, d)
-                (st.success if ok else st.warning)(msg)
-            except Exception as exc:
-                st.error(f"{f.name} : echec ({exc})")
+    journal = build_journal_from_uploads(files_with_dates)
+    if not journal.empty:
+        n_dates = journal["Date"].nunique()
+        st.sidebar.success(f"{n_dates} semaine(s) chargee(s).")
+    return journal
 
 
 # ============================================================
@@ -403,16 +359,19 @@ def page_ma_tendance(journal: pd.DataFrame):
     st.line_chart(trend_df)
 
     n = len(dates)
-    if n < SEUIL_ARCHIVE_SUFFISANT:
+    if n < SEUIL_HISTORIQUE_SUFFISANT:
         st.caption(
-            f"{n} semaine(s) archivee(s) — seuils encore provisoires. "
-            f"Cible : {SEUIL_ARCHIVE_SUFFISANT} a {SEUIL_ARCHIVE_CONFORTABLE} semaines pour des seuils statistiques fiables."
+            f"{n} semaine(s) chargee(s) — seuils encore provisoires. "
+            f"Cible : {SEUIL_HISTORIQUE_SUFFISANT} a {SEUIL_HISTORIQUE_MAX} semaines "
+            f"(le maximum charge d'un coup) pour un minimum de recul statistique."
         )
     else:
-        recent = pd.Series(values[-SEUIL_ARCHIVE_CONFORTABLE:]).dropna()
+        recent = pd.Series(values).dropna()
         st.caption(
             f"Seuils calibrables sur {len(recent)} semaines — moyenne {recent.mean():+.1%}, "
-            f"ecart-type {recent.std():.1%}."
+            f"ecart-type {recent.std():.1%}. Avec {SEUIL_HISTORIQUE_MAX} semaines maximum, "
+            f"ce reste un reglage indicatif, pas un seuil statistique robuste au sens strict "
+            f"(13 semaines et plus serait plus fiable)."
         )
 
 
@@ -475,18 +434,14 @@ def main():
         pass  # logo optionnel : ne bloque pas la page si le chemin n'existe pas encore
     st.title("Suivi Rayon vs Pays")
 
-    tab_upload, tab_week, tab_trend, tab_stores = st.tabs(
-        ["Archiver un export", "Ma semaine", "Ma tendance", "Mes magasins a regarder"]
-    )
-    with tab_upload:
-        page_upload()
-
-    journal = load_journal()
+    journal = sidebar_upload()
     if journal.empty:
-        with tab_week, tab_trend, tab_stores:
-            st.info("Aucune donnee archivee pour l'instant — commence par l'onglet 'Archiver un export'.")
+        st.info("Charge au moins un export PBI dans la barre laterale pour commencer.")
         return
 
+    tab_week, tab_trend, tab_stores = st.tabs(
+        ["Ma semaine", "Ma tendance", "Mes magasins a regarder"]
+    )
     with tab_week:
         page_ma_semaine(journal)
     with tab_trend:
