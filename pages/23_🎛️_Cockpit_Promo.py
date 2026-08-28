@@ -303,7 +303,7 @@ def build_excel(alerts, synth):
     """Une seule liste d'alertes (triée Cumul -> Disponibilité -> Marge). Palette
     corporate (navy/Calibri, pastilles de couleur sur la colonne Type) plutôt que
     le bleu vif de l'app — même esprit que le classeur Marges Négatives par Site."""
-    NAVY = "FF1B2A4A"; NAVY2 = "FF2E4B7A"; INK = "FF1A1A2E"
+    NAVY = "FF1B2A4A"; NAVY2 = "FF2E4B7A"; GOLD = "FF8A6D2E"; INK = "FF1A1A2E"
     WHITE_H = "FFFFFFFF"; LGREY_H = "FFF5F6F8"; CAL = "Calibri"
     REDT_F = "FFFDECEA"; RED_TX = "FFC0392B"
     AMBER_F = "FFFFF3E0"; AMBER_TX = "FFB36B00"
@@ -315,7 +315,7 @@ def build_excel(alerts, synth):
     box = Border(left=thin, right=thin, top=thin, bottom=thin)
     QTY = "#,##0"; PCT = "0.0%"; ACC = "#,##0"
 
-    def section_bar(ws, row, ncols, text, color=NAVY2):
+    def section_bar(ws, row, ncols, text, color=GOLD):
         ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=ncols)
         c = ws.cell(row=row, column=1, value=text)
         c.font = Font(name=CAL, bold=True, size=11, color=WHITE_H)
