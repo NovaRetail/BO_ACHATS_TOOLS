@@ -300,8 +300,12 @@ def render_site_synthesis(synth):
 # Disponibilité reste neutre (c'est un sujet opérationnel, pas une perte).
 # ============================================================
 def build_excel(alerts, synth):
-    BLUE_H = "FF007AFF"; NEUTRAL_H = "FF48484A"; RED_H = "FFFF3B30"; AMBER_H = "FFFF9500"
+    """Une seule liste d'alertes (triée Cumul -> Disponibilité -> Marge), avec une
+    colonne Type en couleur de texte plutôt que 3 blocs de section répétés."""
+    BLUE_H = "FF007AFF"; NEUTRAL_H = "FF48484A"
     WHITE_H = "FFFFFFFF"; LGREY_H = "FFF7F7F9"; ARIAL = "Arial"
+    TYPE_COLOR = {"Disponibilité + Marge": "FFC0392B", "Disponibilité": "FF5F5E5A", "Marge": "FFB36B00"}
+    TYPE_LABEL = {"Disponibilité + Marge": "Cumul", "Disponibilité": "Disponibilité", "Marge": "Marge"}
     thin = Side(style="thin", color="FFE0E0E2")
     box = Border(left=thin, right=thin, top=thin, bottom=thin)
     QTY = "#,##0"; PCT = "0.0%"; ACC = "#,##0"
@@ -338,32 +342,28 @@ def build_excel(alerts, synth):
     ws = wb.active
     ws.title = "Cockpit Promo"
     ws.sheet_view.showGridLines = False
-    ws.merge_cells("A1:J1")
+    ws.merge_cells("A1:K1")
     ws["A1"] = "COCKPIT PROMO — ALERTES DISPONIBILITÉ & MARGE"
     ws["A1"].font = Font(name=ARIAL, bold=True, size=14, color=WHITE_H)
     ws["A1"].fill = PatternFill("solid", fgColor=BLUE_H)
     ws["A1"].alignment = Alignment(horizontal="left", vertical="center", indent=1)
     ws.row_dimensions[1].height = 26
-    ws["A2"] = "Généré le :"; ws["A2"].font = Font(name=ARIAL, bold=True, size=10)
-    ws["B2"] = _dt.date.today().strftime("%d/%m/%Y"); ws["B2"].font = Font(name=ARIAL, size=10, color="FF0000FF", bold=True)
+
+    # ---- Bandeau compact : date + KPI sur une seule ligne ----
+    n_cumul = int((alerts["type_alerte"] == "Disponibilité + Marge").sum())
+    n_dispo = int((alerts["type_alerte"] == "Disponibilité").sum())
+    n_marge = int((alerts["type_alerte"] == "Marge").sum())
+    ws.merge_cells("A2:K2")
+    kpi_txt = (f"Généré le {_dt.date.today().strftime('%d/%m/%Y')}   ·   "
+               f"{len(alerts)} alertes   ·   {n_cumul} cumul   ·   {n_dispo} disponibilité   ·   {n_marge} marge")
+    ws["A2"] = kpi_txt
+    ws["A2"].font = Font(name=ARIAL, size=10, color="FF48484A")
+    ws["A2"].fill = PatternFill("solid", fgColor=LGREY_H)
+    ws["A2"].alignment = Alignment(horizontal="left", vertical="center", indent=1)
+    ws.row_dimensions[2].height = 20
 
     r = 4
-    section_bar(ws, r, 10, "1.  SYNTHÈSE RÉSEAU"); r += 1
-    header_row(ws, r, ["Indicateur", "Valeur"]); r += 1
-    n_cumul = int((alerts["type_alerte"] == "Disponibilité + Marge").sum())
-    kpi_rows = [
-        ("Total lignes en alerte", len(alerts)),
-        ("Disponibilité", int((alerts["type_alerte"] == "Disponibilité").sum())),
-        ("Marge", int((alerts["type_alerte"] == "Marge").sum())),
-        ("Disponibilité + Marge (cumul)", n_cumul),
-    ]
-    for i, (label, v) in enumerate(kpi_rows):
-        data_row(ws, r, [label, v], zebra=(i % 2 == 1), left_cols=(1,))
-        ws.cell(row=r, column=2).number_format = QTY
-        r += 1
-    r += 1
-
-    section_bar(ws, r, 10, "2.  SYNTHÈSE PAR MAGASIN"); r += 1
+    section_bar(ws, r, 11, "SYNTHÈSE PAR MAGASIN"); r += 1
     header_row(ws, r, list(synth.columns)); r += 1
     for i, (_, row_) in enumerate(synth.iterrows()):
         data_row(ws, r, list(row_.values), zebra=(i % 2 == 1), left_cols=(1,))
@@ -372,36 +372,36 @@ def build_excel(alerts, synth):
         r += 1
     r += 1
 
-    def alert_section(title, sub_df, color):
-        nonlocal r
-        section_bar(ws, r, 10, f"{title} — {len(sub_df)} lignes", color=color); r += 1
-        labels = ["Site", "Rayon", "Article", "Code article", "Stock", "RAL",
-                   "PMP", "PV Promo", "Marge %", "Action", "Fournisseur"]
-        header_row(ws, r, labels); r += 1
-        sub_sorted = sub_df.sort_values("Marge en cours")
-        for i, (_, row_) in enumerate(sub_sorted.iterrows()):
-            vals = [row_["Site"], row_["Rayon_aff"], row_["Article_aff"], row_["Code_article"],
-                    row_["Stock"], (row_["RAL"] if pd.notna(row_["RAL"]) else 0),
-                    row_["pmp_effectif"], row_["PV Promo"],
-                    (row_["Marge en cours"] / 100 if pd.notna(row_["Marge en cours"]) else None),
-                    row_["action"],
-                    (int(row_["Four."]) if pd.notna(row_["Four."]) else None)]
-            data_row(ws, r, vals, zebra=(i % 2 == 1), left_cols=(2, 3, 10))
-            ws.cell(row=r, column=9).number_format = PCT
-            for c in (5, 6, 7, 8):
-                ws.cell(row=r, column=c).number_format = ACC
-            r += 1
+    # ---- Liste unique, triée Cumul -> Disponibilité -> Marge, puis par marge croissante ----
+    section_bar(ws, r, 11, f"DÉTAIL DES ALERTES — {len(alerts)} lignes"); r += 1
+    labels = ["Site", "Rayon", "Article", "Code article", "Stock", "RAL",
+               "PMP", "PV Promo", "Marge %", "Type", "Action", "Fournisseur"]
+    header_row(ws, r, labels); r += 1
+    table_start = r
+
+    priority = {"Disponibilité + Marge": 0, "Disponibilité": 1, "Marge": 2}
+    sorted_alerts = alerts.assign(_p=alerts["type_alerte"].map(priority)).sort_values(
+        ["_p", "Marge en cours"])
+
+    for i, (_, row_) in enumerate(sorted_alerts.iterrows()):
+        vals = [row_["Site"], row_["Rayon_aff"], row_["Article_aff"], row_["Code_article"],
+                row_["Stock"], (row_["RAL"] if pd.notna(row_["RAL"]) else 0),
+                row_["pmp_effectif"], row_["PV Promo"],
+                (row_["Marge en cours"] / 100 if pd.notna(row_["Marge en cours"]) else None),
+                TYPE_LABEL[row_["type_alerte"]], row_["action"],
+                (int(row_["Four."]) if pd.notna(row_["Four."]) else None)]
+        data_row(ws, r, vals, zebra=(i % 2 == 1), left_cols=(2, 3, 11))
+        ws.cell(row=r, column=9).number_format = PCT
+        for c in (5, 6, 7, 8):
+            ws.cell(row=r, column=c).number_format = ACC
+        type_cell = ws.cell(row=r, column=10)
+        type_cell.font = Font(name=ARIAL, size=10, bold=True, color=TYPE_COLOR[row_["type_alerte"]])
         r += 1
 
-    # Couleur réservée aux enjeux financiers : Cumul = rouge, Marge = ambre.
-    # Disponibilité = neutre (sujet opérationnel, pas une perte en soi).
-    alert_section("3.  DISPONIBILITÉ + MARGE (CUMUL, PRIORITAIRE)",
-                   alerts[alerts["type_alerte"] == "Disponibilité + Marge"], RED_H)
-    alert_section("4.  DISPONIBILITÉ", alerts[alerts["type_alerte"] == "Disponibilité"], NEUTRAL_H)
-    alert_section("5.  MARGE", alerts[alerts["type_alerte"] == "Marge"], AMBER_H)
-
-    autosize(ws, {'A': 9, 'B': 22, 'C': 32, 'D': 13, 'E': 9, 'F': 8, 'G': 10, 'H': 11, 'I': 10, 'J': 30})
-    ws.freeze_panes = "A5"
+    autosize(ws, {'A': 8, 'B': 20, 'C': 32, 'D': 13, 'E': 8, 'F': 7, 'G': 9, 'H': 10,
+                   'I': 9, 'J': 15, 'K': 30, 'L': 13})
+    ws.freeze_panes = f"A{table_start}"
+    ws.auto_filter.ref = f"A{table_start - 1}:L{r - 1}"
 
     buf = io.BytesIO()
     wb.save(buf)
@@ -572,4 +572,4 @@ today_str = _dt.date.today().strftime("%Y%m%d")
 export_filename = f"Cockpit Promo - {today_str}.xlsx"
 st.download_button(f"📥 Télécharger {export_filename}", xls, file_name=export_filename,
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-st.caption("Fichier à une feuille : synthèse réseau, synthèse par magasin, puis le détail des 3 sections d'alerte — valeurs figées, aucune formule. Couleur réservée aux sections à enjeu financier (Marge, Cumul) ; Disponibilité reste neutre.")
+st.caption("Fichier à une feuille : synthèse par magasin puis une liste unique triée Cumul → Disponibilité → Marge, filtre automatique activé — valeurs figées, aucune formule.")
