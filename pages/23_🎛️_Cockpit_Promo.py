@@ -300,20 +300,25 @@ def render_site_synthesis(synth):
 # Disponibilité reste neutre (c'est un sujet opérationnel, pas une perte).
 # ============================================================
 def build_excel(alerts, synth):
-    """Une seule liste d'alertes (triée Cumul -> Disponibilité -> Marge), avec une
-    colonne Type en couleur de texte plutôt que 3 blocs de section répétés."""
-    BLUE_H = "FF007AFF"; NEUTRAL_H = "FF48484A"
-    WHITE_H = "FFFFFFFF"; LGREY_H = "FFF7F7F9"; ARIAL = "Arial"
-    TYPE_COLOR = {"Disponibilité + Marge": "FFC0392B", "Disponibilité": "FF5F5E5A", "Marge": "FFB36B00"}
+    """Une seule liste d'alertes (triée Cumul -> Disponibilité -> Marge). Palette
+    corporate (navy/Calibri, pastilles de couleur sur la colonne Type) plutôt que
+    le bleu vif de l'app — même esprit que le classeur Marges Négatives par Site."""
+    NAVY = "FF1B2A4A"; NAVY2 = "FF2E4B7A"; INK = "FF1A1A2E"
+    WHITE_H = "FFFFFFFF"; LGREY_H = "FFF5F6F8"; CAL = "Calibri"
+    REDT_F = "FFFDECEA"; RED_TX = "FFC0392B"
+    AMBER_F = "FFFFF3E0"; AMBER_TX = "FFB36B00"
+    SLATE_F = "FFEEF1F5"; SLATE_TX = "FF4A5568"
+    TYPE_FILL = {"Disponibilité + Marge": REDT_F, "Disponibilité": SLATE_F, "Marge": AMBER_F}
+    TYPE_TEXT = {"Disponibilité + Marge": RED_TX, "Disponibilité": SLATE_TX, "Marge": AMBER_TX}
     TYPE_LABEL = {"Disponibilité + Marge": "Cumul", "Disponibilité": "Disponibilité", "Marge": "Marge"}
-    thin = Side(style="thin", color="FFE0E0E2")
+    thin = Side(style="thin", color="FFDADFE6")
     box = Border(left=thin, right=thin, top=thin, bottom=thin)
     QTY = "#,##0"; PCT = "0.0%"; ACC = "#,##0"
 
-    def section_bar(ws, row, ncols, text, color=NEUTRAL_H):
+    def section_bar(ws, row, ncols, text, color=NAVY2):
         ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=ncols)
         c = ws.cell(row=row, column=1, value=text)
-        c.font = Font(name=ARIAL, bold=True, size=11, color=WHITE_H)
+        c.font = Font(name=CAL, bold=True, size=11, color=WHITE_H)
         c.fill = PatternFill("solid", fgColor=color)
         c.alignment = Alignment(horizontal="left", vertical="center", indent=1)
         ws.row_dimensions[row].height = 20
@@ -321,15 +326,15 @@ def build_excel(alerts, synth):
     def header_row(ws, row, labels):
         for i, lbl in enumerate(labels, start=1):
             c = ws.cell(row=row, column=i, value=lbl)
-            c.font = Font(name=ARIAL, bold=True, size=10, color=WHITE_H)
-            c.fill = PatternFill("solid", fgColor=BLUE_H)
+            c.font = Font(name=CAL, bold=True, size=10, color=WHITE_H)
+            c.fill = PatternFill("solid", fgColor=NAVY2)
             c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
     def data_row(ws, row, values, zebra=False, left_cols=()):
         fillc = LGREY_H if zebra else "FFFFFFFF"
         for i, v in enumerate(values, start=1):
             c = ws.cell(row=row, column=i, value=v)
-            c.font = Font(name=ARIAL, size=10)
+            c.font = Font(name=CAL, size=10, color=INK)
             c.border = box
             c.fill = PatternFill("solid", fgColor=fillc)
             c.alignment = Alignment(horizontal="left" if i in left_cols else "center")
@@ -344,25 +349,37 @@ def build_excel(alerts, synth):
     ws.sheet_view.showGridLines = False
     ws.merge_cells("A1:K1")
     ws["A1"] = "COCKPIT PROMO — ALERTES DISPONIBILITÉ & MARGE"
-    ws["A1"].font = Font(name=ARIAL, bold=True, size=14, color=WHITE_H)
-    ws["A1"].fill = PatternFill("solid", fgColor=BLUE_H)
+    ws["A1"].font = Font(name=CAL, bold=True, size=14, color=WHITE_H)
+    ws["A1"].fill = PatternFill("solid", fgColor=NAVY)
     ws["A1"].alignment = Alignment(horizontal="left", vertical="center", indent=1)
-    ws.row_dimensions[1].height = 26
+    ws.row_dimensions[1].height = 28
 
-    # ---- Bandeau compact : date + KPI sur une seule ligne ----
+    ws.merge_cells("A2:K2")
+    ws["A2"] = f"Généré le {_dt.date.today().strftime('%d/%m/%Y')}"
+    ws["A2"].font = Font(name=CAL, size=9, italic=True, color="FF8B95A6")
+    ws["A2"].fill = PatternFill("solid", fgColor=NAVY)
+    ws["A2"].alignment = Alignment(horizontal="left", vertical="center", indent=1)
+
+    # ---- Bandeau KPI façon carte (comme le récap Marges Négatives par Site) ----
     n_cumul = int((alerts["type_alerte"] == "Disponibilité + Marge").sum())
     n_dispo = int((alerts["type_alerte"] == "Disponibilité").sum())
     n_marge = int((alerts["type_alerte"] == "Marge").sum())
-    ws.merge_cells("A2:K2")
-    kpi_txt = (f"Généré le {_dt.date.today().strftime('%d/%m/%Y')}   ·   "
-               f"{len(alerts)} alertes   ·   {n_cumul} cumul   ·   {n_dispo} disponibilité   ·   {n_marge} marge")
-    ws["A2"] = kpi_txt
-    ws["A2"].font = Font(name=ARIAL, size=10, color="FF48484A")
-    ws["A2"].fill = PatternFill("solid", fgColor=LGREY_H)
-    ws["A2"].alignment = Alignment(horizontal="left", vertical="center", indent=1)
-    ws.row_dimensions[2].height = 20
+    kpi_data = [("Total alertes", len(alerts), INK), ("Cumul (prioritaire)", n_cumul, RED_TX),
+                ("Disponibilité", n_dispo, SLATE_TX), ("Marge", n_marge, AMBER_TX)]
+    for j, (lbl, val, color) in enumerate(kpi_data, start=1):
+        c4 = ws.cell(row=4, column=j, value=lbl)
+        c4.font = Font(name=CAL, bold=True, size=9, color=WHITE_H)
+        c4.fill = PatternFill("solid", fgColor=NAVY2)
+        c4.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        c5 = ws.cell(row=5, column=j, value=val)
+        c5.font = Font(name=CAL, bold=True, size=14, color=color)
+        c5.fill = PatternFill("solid", fgColor=WHITE_H)
+        c5.border = box
+        c5.alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[4].height = 26
+    ws.row_dimensions[5].height = 22
 
-    r = 4
+    r = 7
     section_bar(ws, r, 11, "SYNTHÈSE PAR MAGASIN"); r += 1
     header_row(ws, r, list(synth.columns)); r += 1
     for i, (_, row_) in enumerate(synth.iterrows()):
@@ -395,7 +412,8 @@ def build_excel(alerts, synth):
         for c in (5, 6, 7, 8):
             ws.cell(row=r, column=c).number_format = ACC
         type_cell = ws.cell(row=r, column=10)
-        type_cell.font = Font(name=ARIAL, size=10, bold=True, color=TYPE_COLOR[row_["type_alerte"]])
+        type_cell.fill = PatternFill("solid", fgColor=TYPE_FILL[row_["type_alerte"]])
+        type_cell.font = Font(name=CAL, size=10, bold=True, color=TYPE_TEXT[row_["type_alerte"]])
         r += 1
 
     autosize(ws, {'A': 8, 'B': 20, 'C': 32, 'D': 13, 'E': 8, 'F': 7, 'G': 9, 'H': 10,
