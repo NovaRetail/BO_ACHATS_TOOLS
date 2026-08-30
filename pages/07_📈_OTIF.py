@@ -57,6 +57,7 @@ from datetime import date as _date
 from openpyxl import Workbook
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.datavalidation import DataValidation
 import plotly.graph_objects as go
 
 # ── Import module I/O robuste SmartBuyer Hub ──────────────────────────────
@@ -249,6 +250,43 @@ SEUIL_SURVEILLER = 90
 
 WATCH_GOLD_HEX  = "FFD60A"
 WATCH_LIGHT_HEX = "FFFDE7"
+
+# ── PLAN D'ACTION OTIF — Responsable Achat ─────────────────────────────────
+CFAO_NAVY   = "24235C"
+CFAO_ORANGE = "F09F39"
+
+CAUSES_RACINE = [
+    "Rupture usine / capacité fournisseur",
+    "Rupture matière première",
+    "Logistique-transport",
+    "Erreur de commande / donnée",
+    "Non-conformité qualité",
+    "Blocage financier",
+    "Fournisseur non joignable / sans réponse",
+    "Autre",
+]
+STATUTS_SUIVI = ["À contacter", "Contacté", "Cause identifiée", "Plan en cours", "Résolu"]
+
+
+def classe_bucket(classe: str) -> str:
+    """GOLD/SILVER par sous-chaîne — couvre les libellés composites (cf. _classe_fills)."""
+    c = str(classe).strip().upper()
+    if "GOLD" in c:
+        return "GOLD"
+    if "SILVER" in c:
+        return "SILVER"
+    return ""
+
+
+def format_magasin(site_label: str) -> str:
+    u = str(site_label).upper()
+    if "HYPER" in u:
+        return "Hyper"
+    if "SUPECO" in u:
+        return "Supeco"
+    if "MARKET" in u:
+        return "Market"
+    return "Autre"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -601,7 +639,7 @@ def compute_global_kpis(df: pd.DataFrame) -> dict:
     fill_rate = safe_div(received, ordered) * 100
     on_time   = df["on_time"].mean() * 100
     otif      = df["otif"].mean() * 100
-    score     = 0.5 * fill_rate + 0.3 * on_time + 0.2 * otif
+    score     = (5 * fill_rate + 2 * otif) / 7
     return dict(
         fill_rate=fill_rate, on_time=on_time, otif=otif, score=score,
         ordered_qty=ordered, received_qty=received,
@@ -621,7 +659,7 @@ def _enrich(g: pd.DataFrame) -> pd.DataFrame:
     g["fill_rate"] = np.where(g["qte_cde"] > 0, g["qte_rec"] / g["qte_cde"] * 100, 0.0)
     g["on_time"]  *= 100
     g["otif"]     *= 100
-    g["score"]     = 0.5 * g["fill_rate"] + 0.3 * g["on_time"] + 0.2 * g["otif"]
+    g["score"]     = (5 * g["fill_rate"] + 2 * g["otif"]) / 7  # Ponctualité exclue : dates prévues non fiables (cf. alerte qualité)
     g["Niveau"]    = g["score"].apply(score_band)
     g["criticality_score"] = g["impact_value"] * (1 - g["fill_rate"] / 100)
     return g
@@ -1533,10 +1571,368 @@ def build_recap_fournisseur_excel(df: pd.DataFrame, watchdict: dict = None) -> B
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# EXPORT EXCEL — PLAN D'ACTION OTIF (vue Responsable Achat)
+# 4 onglets, zéro formule (règle SmartBuyer Hub), couleurs CFAO Consumer,
+# police Segoe UI appliquée à toutes les cellules en fin de génération.
+# ══════════════════════════════════════════════════════════════════════════════
+PA_H_FILL      = PatternFill("solid", fgColor=CFAO_NAVY)
+PA_H_FONT      = Font(bold=True, color="FFFFFF", size=10)
+PA_T_FONT      = Font(bold=True, size=13, color=CFAO_NAVY)
+PA_SUB_FONT    = Font(size=9, italic=True, color="8E8E93")
+PA_INPUT_FILL  = PatternFill("solid", fgColor="FFFDE7")
+PA_GRN_FILL    = PatternFill("solid", fgColor="E8F8EE")
+PA_AMB_FILL    = PatternFill("solid", fgColor="FFF8E8")
+PA_RED_FILL    = PatternFill("solid", fgColor="FFF0F0")
+PA_GOLD_FILL   = PatternFill("solid", fgColor=WATCH_GOLD_HEX)
+PA_SILVER_FILL = PatternFill("solid", fgColor="E8E8E8")
+PA_GOLD_ROW    = PatternFill("solid", fgColor="FFF9C4")
+PA_SILVER_ROW  = PatternFill("solid", fgColor="EFEFEF")
+PA_ALT_FILL    = PatternFill("solid", fgColor="F7F7F5")
+PA_NODATA_FONT = Font(color="C7C7CC", size=10)
+PA_CTR   = Alignment(horizontal="center", vertical="center")
+PA_LFT   = Alignment(horizontal="left", vertical="center", wrap_text=True)
+PA_THIN_SIDE = Side(style="thin", color="E5E5EA")
+PA_THIN  = Border(left=PA_THIN_SIDE, right=PA_THIN_SIDE, top=PA_THIN_SIDE, bottom=PA_THIN_SIDE)
+PA_DATE_FMT = "dd/mm/yyyy"
+
+
+def _pa_score_fill(v):
+    if v >= SEUIL_EXCELLENT:
+        return PA_GRN_FILL
+    if v >= SEUIL_SURVEILLER:
+        return PA_AMB_FILL
+    return PA_RED_FILL
+
+
+def _pa_auto_width(ws, widths):
+    for i, w in enumerate(widths, 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+
+
+def _pa_write_title(ws, title, subtitle, n_cols):
+    ws.cell(1, 1, title).font = PA_T_FONT
+    ws.cell(2, 1, subtitle).font = PA_SUB_FONT
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=n_cols)
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=n_cols)
+    ws.row_dimensions[1].height = 22
+    ws.row_dimensions[2].height = 14
+
+
+def _pa_write_header(ws, row_n, headers):
+    for i, h in enumerate(headers, 1):
+        c = ws.cell(row_n, i, h)
+        c.fill = PA_H_FILL
+        c.font = PA_H_FONT
+        c.alignment = PA_CTR
+        c.border = PA_THIN
+    ws.row_dimensions[row_n].height = 28
+
+
+def _pa_format_key(site):
+    u = str(site).upper()
+    if "HYPER" in u:
+        fmt = 0
+    elif "MARKET" in u:
+        fmt = 1
+    elif "SUPECO" in u:
+        fmt = 2
+    else:
+        fmt = 3
+    return (fmt, site)
+
+
+def _pa_apply_font_family(wb, name="Segoe UI"):
+    for ws in wb.worksheets:
+        for row in ws.iter_rows():
+            for cell in row:
+                f = cell.font
+                cell.font = Font(name=name, size=f.size, bold=f.bold, italic=f.italic,
+                                  color=f.color, underline=f.underline)
+
+
+def build_plan_action_excel(df: pd.DataFrame, by_supplier: pd.DataFrame, quality: dict,
+                             watchdict: dict = None) -> BytesIO:
+    """
+    Plan d'action OTIF pour les fournisseurs Niveau Critique — 4 onglets :
+    Résumé · Suivi Fournisseurs · Taux de Service par Site · Détail Commandes.
+    Zéro formule (règle SmartBuyer Hub) : tout est calculé en Python, le
+    classeur produit est le résultat figé de la semaine.
+    """
+    from datetime import datetime as _datetime
+    now = _datetime.now()
+    today_str = now.strftime("%d/%m/%Y %H:%M")
+    watchdict = watchdict or {}
+
+    crit_sup = by_supplier[by_supplier["Niveau"] == "🔴 Critique"].sort_values(
+        "qty_missing", ascending=False
+    ).reset_index(drop=True)
+    n_crit = len(crit_sup)
+    crit_fou = set(crit_sup["Fou"])
+
+    crit_lines = df[(df["otif"] == 0) & (df["Fou"].isin(crit_fou))].copy()
+    all_crit_supplier_lines = df[df["Fou"].isin(crit_fou)].copy()
+
+    fou_rank = {row["Fou"]: idx for idx, row in crit_sup.iterrows()}
+    crit_lines["_rank"] = crit_lines["Fou"].map(fou_rank)
+    det = crit_lines.sort_values(
+        ["_rank", "qty_missing", "service_gap_value"], ascending=[True, False, False]
+    ).reset_index(drop=True)
+
+    # Réfs GOLD/SILVER en sous-service (< 97%) par fournisseur
+    gold_counts, silver_counts = {}, {}
+    if watchdict:
+        w = all_crit_supplier_lines.copy()
+        w["bucket"] = w["code_str"].map(watchdict).fillna("").apply(classe_bucket)
+        art_fr = w.groupby(["Fou", "Code", "bucket"], as_index=False).agg(
+            qte_c=("qte_cde", "sum"), qte_r=("qte_rec_retained", "sum")
+        )
+        art_fr["fr"] = (art_fr["qte_r"] / art_fr["qte_c"] * 100).fillna(0)
+        under = art_fr[art_fr["fr"] < 97]
+        gold_counts = under[under["bucket"] == "GOLD"].groupby("Fou")["Code"].nunique().to_dict()
+        silver_counts = under[under["bucket"] == "SILVER"].groupby("Fou")["Code"].nunique().to_dict()
+
+    # Matrice Taux de Service par Site — colonnes triées par format
+    all_sites = sorted(all_crit_supplier_lines["site_label"].dropna().unique(), key=_pa_format_key)
+    pivot = all_crit_supplier_lines.groupby(["Fou", "site_label"], as_index=False).agg(
+        qte_cde=("qte_cde", "sum"), qte_rec=("qte_rec_retained", "sum")
+    )
+    pivot["fr"] = (pivot["qte_rec"] / pivot["qte_cde"] * 100).round(1)
+    pivot_map = {(r["Fou"], r["site_label"]): r["fr"] for _, r in pivot.iterrows()}
+
+    wb = Workbook()
+
+    # ── Onglet 1 : Résumé ────────────────────────────────────────────────
+    ws1 = wb.active
+    ws1.title = "Résumé"
+    ws1.sheet_properties.tabColor = CFAO_ORANGE
+    _pa_write_title(ws1, "PLAN D'ACTION OTIF — RÉSUMÉ",
+                     f"Généré le {today_str} · Périmètre : fournisseurs Niveau Critique (Score < {SEUIL_SURVEILLER}%)", 2)
+    ws1.append([])
+    _pa_write_header(ws1, 4, ["Indicateur", "Valeur"])
+    n_gold_matched = sum(1 for c in watchdict.values() if classe_bucket(c) == "GOLD") if watchdict else 0
+    n_silver_matched = sum(1 for c in watchdict.values() if classe_bucket(c) == "SILVER") if watchdict else 0
+    resume_rows = [
+        ("Fournisseurs Niveau Critique", n_crit),
+        ("Fournisseurs à surveiller", int((by_supplier["Niveau"] == "🟠 À surveiller").sum())),
+        ("Fournisseurs Excellent", int((by_supplier["Niveau"] == "🟢 Excellent").sum())),
+        ("Vol. manquant — fournisseurs critiques", int(crit_lines["qty_missing"].sum())),
+        ("Magasins concernés", int(crit_lines["site_label"].nunique())),
+        ("Commandes concernées", int(crit_lines["N° Cde"].nunique())),
+        ("Liste de surveillance — codes GOLD", n_gold_matched),
+        ("Liste de surveillance — codes SILVER", n_silver_matched),
+    ]
+    for label, val in resume_rows:
+        n = ws1.max_row + 1
+        ws1.append([label, val])
+        ws1.cell(n, 1).font = Font(bold=True, size=10)
+        ws1.cell(n, 1).border = PA_THIN
+        ws1.cell(n, 2).alignment = PA_CTR
+        ws1.cell(n, 2).border = PA_THIN
+
+    pct_no_pv = round(quality["pv_zero_rows"] / quality["clean_rows"] * 100, 1) if quality["clean_rows"] else 0
+    pct_no_date = round(quality["missing_expected_date"] / quality["clean_rows"] * 100, 1) if quality["clean_rows"] else 0
+    ws1.append([])
+    n = ws1.max_row + 1
+    ws1.cell(n, 1, "Qualité de la donnée — à lire avant d'interpréter les chiffres").font = Font(bold=True, size=10, color="A32D2D")
+    ws1.merge_cells(start_row=n, start_column=1, end_row=n, end_column=2)
+    dq_rows = [
+        f"{pct_no_pv}% des lignes n'ont pas de Prix de Vente HT — l'Impact CA proxy est sous-estimé sur cette part et n'est pas affiché dans ce fichier.",
+        f"{pct_no_date}% des lignes n'ont pas de date prévue — la Ponctualité n'est pas mesurable, elle n'entre plus dans le Score (recalculé sur Taux de Service et OTIF uniquement).",
+        f"Lignes brutes export ERP : {quality['raw_rows']:,} · Lignes exploitables : {quality['clean_rows']:,} ({quality['usable_rate']}%).",
+    ]
+    for line in dq_rows:
+        n = ws1.max_row + 1
+        ws1.append([line])
+        ws1.merge_cells(start_row=n, start_column=1, end_row=n, end_column=2)
+        ws1.cell(n, 1).font = Font(size=9, italic=True, color="8E8E93")
+        ws1.cell(n, 1).alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+        ws1.row_dimensions[n].height = 26
+
+    _pa_auto_width(ws1, [55, 20])
+    ws1.freeze_panes = "A5"
+
+    # ── Onglet 2 : Suivi Fournisseurs ───────────────────────────────────
+    ws2 = wb.create_sheet("Suivi Fournisseurs")
+    ws2.sheet_properties.tabColor = CFAO_ORANGE
+    headers2 = [
+        "Code Fournisseur", "Fournisseur", "Qté commandée", "Qté reçue", "Qté manquante",
+        "Nb commandes", "Nb articles", "Nb sites", "Taux de Service", "Liste de surveillance",
+        "Escalade suggérée", "Acheteur", "Cause racine", "Commentaire", "Plan d'action",
+        "Date de retour à la normale", "Statut",
+    ]
+    _pa_write_title(ws2, "SUIVI FOURNISSEURS — PLAN D'ACTION OTIF",
+                     f"Généré le {today_str} · {n_crit} fournisseurs Niveau Critique · Trié par volume manquant décroissant", len(headers2))
+    ws2.append([])
+    _pa_write_header(ws2, 4, headers2)
+
+    row2_start = 5
+    for idx, row in crit_sup.iterrows():
+        fou = row["Fou"]
+        watch_n = int(gold_counts.get(fou, 0)) + int(silver_counts.get(fou, 0))
+        escalade = "Responsable Achat" if (watch_n > 0 and row["fill_rate"] < 20) else "Acheteur"
+        n = ws2.max_row + 1
+        ws2.append([
+            int(fou) if pd.notna(fou) else "",
+            row["supplier_name"],
+            int(row["qte_cde"]),
+            int(row["qte_rec"]),
+            int(row["qty_missing"]),
+            int(row["orders"]),
+            int(row["articles"]),
+            int(row["sites"]),
+            round(row["fill_rate"], 1),
+            watch_n,
+            escalade,
+            "", "", "", "", "", "",
+        ])
+        for col_i in range(1, len(headers2) + 1):
+            cell = ws2.cell(n, col_i)
+            cell.border = PA_THIN
+            cell.alignment = PA_LFT if col_i in (2, 14, 15) else PA_CTR
+        ws2.cell(n, 9).fill = _pa_score_fill(row["fill_rate"])
+        ws2.cell(n, 9).number_format = '0.0"%"'
+        if watch_n > 0:
+            ws2.cell(n, 10).fill = PA_GOLD_FILL
+        if escalade == "Responsable Achat":
+            ws2.cell(n, 11).fill = PA_RED_FILL
+        for col_i in range(12, 18):
+            ws2.cell(n, col_i).fill = PA_INPUT_FILL
+        ws2.cell(n, 16).number_format = PA_DATE_FMT
+
+    row2_end = ws2.max_row
+
+    cause_dv = DataValidation(type="list", formula1='"' + ",".join(CAUSES_RACINE) + '"', allow_blank=True)
+    cause_dv.error = "Choisissez une cause dans la liste."
+    cause_dv.errorTitle = "Cause non valide"
+    ws2.add_data_validation(cause_dv)
+    cause_dv.add(f"M{row2_start}:M{row2_end}")
+
+    statut_dv = DataValidation(type="list", formula1='"' + ",".join(STATUTS_SUIVI) + '"', allow_blank=True)
+    statut_dv.error = "Choisissez un statut dans la liste."
+    statut_dv.errorTitle = "Statut non valide"
+    ws2.add_data_validation(statut_dv)
+    statut_dv.add(f"Q{row2_start}:Q{row2_end}")
+
+    _pa_auto_width(ws2, [10, 26, 10, 10, 12, 9, 9, 8, 11, 14, 16, 14, 22, 26, 30, 18, 16])
+    ws2.freeze_panes = "A5"
+    ws2.auto_filter.ref = f"A4:{get_column_letter(len(headers2))}{row2_end}"
+
+    # ── Onglet 3 : Taux de Service par Site ─────────────────────────────
+    ws3 = wb.create_sheet("Taux de Service par Site")
+    ws3.sheet_properties.tabColor = CFAO_ORANGE
+    headers3 = ["Fournisseur"] + all_sites
+    _pa_write_title(ws3, "TAUX DE SERVICE PAR SITE",
+                     f"Généré le {today_str} · {n_crit} fournisseurs critiques × {len(all_sites)} magasins · "
+                     f"« - » = aucune commande sur ce couple · En-tête coloré par format (navy = Hyper, bleu = Market, orange = Supeco)",
+                     len(headers3))
+    ws3.append([])
+    _pa_write_header(ws3, 4, headers3)
+
+    PA_FORMAT_HEADER_FILL = {
+        0: (PatternFill("solid", fgColor=CFAO_NAVY), Font(bold=True, color="FFFFFF", size=10)),
+        1: (PatternFill("solid", fgColor="2A78D6"), Font(bold=True, color="FFFFFF", size=10)),
+        2: (PatternFill("solid", fgColor=CFAO_ORANGE), Font(bold=True, color=CFAO_NAVY, size=10)),
+        3: (PatternFill("solid", fgColor="8E8E93"), Font(bold=True, color="FFFFFF", size=10)),
+    }
+    for j, site in enumerate(all_sites, start=2):
+        fmt_idx = _pa_format_key(site)[0]
+        fill, font = PA_FORMAT_HEADER_FILL[fmt_idx]
+        ws3.cell(4, j).fill = fill
+        ws3.cell(4, j).font = font
+
+    for idx, row in crit_sup.iterrows():
+        fou = row["Fou"]
+        n = ws3.max_row + 1
+        line = [row["supplier_name"]]
+        for site in all_sites:
+            v = pivot_map.get((fou, site))
+            line.append(v if v is not None else "-")
+        ws3.append(line)
+        ws3.cell(n, 1).border = PA_THIN
+        ws3.cell(n, 1).alignment = PA_LFT
+        for j, site in enumerate(all_sites, start=2):
+            cell = ws3.cell(n, j)
+            cell.border = PA_THIN
+            cell.alignment = PA_CTR
+            v = pivot_map.get((fou, site))
+            if v is None:
+                cell.font = PA_NODATA_FONT
+            else:
+                cell.number_format = "0.0"
+                cell.fill = _pa_score_fill(v)
+
+    _pa_auto_width(ws3, [26] + [13] * len(all_sites))
+    ws3.freeze_panes = "B5"
+    ws3.auto_filter.ref = f"A4:{get_column_letter(len(headers3))}{ws3.max_row}"
+
+    # ── Onglet 4 : Détail Commandes ─────────────────────────────────────
+    ws4 = wb.create_sheet("Détail Commandes")
+    ws4.sheet_properties.tabColor = CFAO_ORANGE
+    headers4 = [
+        "Fournisseur", "Code Fou.", "Magasin", "Code article", "Désignation",
+        "N° Commande", "Date de commande", "Jours depuis commande",
+        "Qté cde", "Qté reçue", "Qté manquante",
+    ]
+    _pa_write_title(ws4, "DÉTAIL COMMANDES — FOURNISSEURS CRITIQUES",
+                     f"Généré le {today_str} · Toutes les lignes non-OTIF des {n_crit} fournisseurs critiques "
+                     f"({len(det)} lignes) · Groupées par fournisseur (ordre de criticité), triées par volume manquant · "
+                     f"Fond doré = article GOLD · Fond gris = article SILVER",
+                     len(headers4))
+    ws4.append([])
+    _pa_write_header(ws4, 4, headers4)
+
+    prev_fou = None
+    shade = False
+    for _, row in det.iterrows():
+        n = ws4.max_row + 1
+        classe_raw = row.get("watch_classe", "")
+        if row["Fou"] != prev_fou:
+            shade = not shade
+            prev_fou = row["Fou"]
+        date_cde = row.get("Date de commande", None)
+        jours = (now.date() - date_cde.date()).days if pd.notna(date_cde) else ""
+        ws4.append([
+            row.get("supplier_name", ""),
+            int(row["Fou"]) if pd.notna(row["Fou"]) else "",
+            row.get("site_label", ""),
+            row.get("Code", ""),
+            row.get("article_label", ""),
+            row.get("N° Cde", ""),
+            date_cde,
+            jours,
+            int(row.get("qte_cde", 0)),
+            int(row.get("qte_rec_retained", 0)),
+            int(row.get("qty_missing", 0)),
+        ])
+        bucket = classe_bucket(classe_raw)
+        for col_i in range(1, len(headers4) + 1):
+            cell = ws4.cell(n, col_i)
+            cell.border = PA_THIN
+            cell.alignment = PA_LFT if col_i in (1, 3, 5) else PA_CTR
+            if bucket == "GOLD":
+                cell.fill = PA_GOLD_ROW
+            elif bucket == "SILVER":
+                cell.fill = PA_SILVER_ROW
+            elif shade:
+                cell.fill = PA_ALT_FILL
+        ws4.cell(n, 7).number_format = PA_DATE_FMT
+
+    _pa_auto_width(ws4, [26, 10, 20, 12, 30, 12, 14, 12, 10, 10, 12])
+    ws4.freeze_panes = "A5"
+    ws4.auto_filter.ref = f"A4:{get_column_letter(len(headers4))}{ws4.max_row}"
+
+    _pa_apply_font_family(wb, "Segoe UI")
+
+    buf = BytesIO(); wb.save(buf); buf.seek(0)
+    return buf
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # SIDEBAR
 # ══════════════════════════════════════════════════════════════════════════════
 with st.sidebar:
     st.markdown("""
+
 <div style='margin-bottom:18px'>
   <div style='font-size:20px;font-weight:700;color:#1C1C1E;letter-spacing:-0.02em'>📦 SmartBuyer</div>
   <div style='font-size:11px;color:#8E8E93;margin-top:1px'>Hub analytique · OTIF</div>
@@ -1735,7 +2131,8 @@ st.markdown("---")
 n_watched_arts_tab = int((by_article["Classe"] != "").sum()) if "Classe" in by_article.columns else 0
 watch_tab_label = f"⭐ {watch_label} ({n_watched_arts_tab})" if watchdict else "⭐ Surveillance"
 
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+tab0, tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    "🎯 Responsable Achat",
     f"🚛 Fournisseurs ({len(by_supplier)})",
     f"🏪 Magasins ({len(by_site)})",
     f"📦 Articles ({len(by_article)})",
@@ -1744,6 +2141,59 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "🧪 Qualité des données",
     "📋 Fiche Fournisseur",
 ])
+
+
+# ── Tab 0 : Responsable Achat ────────────────────────────────────────────
+with tab0:
+    crit_only = by_supplier[by_supplier["Niveau"] == "🔴 Critique"]
+    n_crit_rt = len(crit_only)
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Taux de Service", fmt_pct(kpi["fill_rate"]))
+    c2.metric("OTIF", fmt_pct(kpi["otif"]))
+    c3.metric("Score global", fmt_pct(kpi["score"]))
+    c4.metric("Vol. manquant", fmt(kpi["missing_qty"]))
+
+    st.markdown("<div class='section-label' style='margin-top:1rem'>Taux de service par format</div>", unsafe_allow_html=True)
+    fmt_view = view.copy()
+    fmt_view["format_magasin"] = fmt_view["site_label"].apply(format_magasin)
+    fmt_agg = fmt_view[fmt_view["format_magasin"] != "Autre"].groupby("format_magasin", as_index=False).agg(
+        qte_cde=("qte_cde", "sum"), qte_rec=("qte_rec_retained", "sum"),
+    )
+    fmt_agg["fill_rate"] = np.where(fmt_agg["qte_cde"] > 0, fmt_agg["qte_rec"] / fmt_agg["qte_cde"] * 100, 0.0)
+    fmt_order = {"Hyper": 0, "Market": 1, "Supeco": 2}
+    fmt_agg = fmt_agg.sort_values("format_magasin", key=lambda s: s.map(fmt_order))
+    fmt_cols = st.columns(len(fmt_agg)) if len(fmt_agg) else []
+    for i, r in enumerate(fmt_agg.itertuples()):
+        with fmt_cols[i]:
+            st.markdown(f"""
+<div style='background:#FFFFFF;border:0.5px solid #E5E5EA;border-radius:12px;padding:16px 18px'>
+  <div style='font-size:13px;color:#8E8E93;margin-bottom:6px'>{r.format_magasin}</div>
+  <div style='font-size:20px;font-weight:700;color:{score_color(r.fill_rate)}'>{fmt_pct(r.fill_rate)}</div>
+</div>""", unsafe_allow_html=True)
+
+    st.markdown("<div class='section-label' style='margin-top:1.5rem'>Top 15 fournisseurs critiques</div>", unsafe_allow_html=True)
+    top15 = crit_only.sort_values("qty_missing", ascending=False).head(15).copy()
+    top15["Taux de Service"] = top15["fill_rate"].apply(fmt_pct)
+    top15["Score"] = top15["score"].apply(fmt_pct)
+    top15["Vol. manquant"] = top15["qty_missing"].apply(fmt)
+    st.dataframe(
+        top15[["supplier_name", "Taux de Service", "Score", "Vol. manquant"]].rename(columns={"supplier_name": "Fournisseur"}),
+        use_container_width=True, hide_index=True,
+    )
+
+    st.markdown("---")
+    st.caption(f"{n_crit_rt} fournisseur(s) Niveau Critique · plan d'action à distribuer aux acheteurs")
+    if st.button("Générer le Plan d'Action", type="primary", key="btn_plan_action"):
+        with st.spinner("Génération…"):
+            buf_plan = build_plan_action_excel(view, by_supplier, quality, watchdict=watchdict)
+        st.download_button(
+            "⬇️ Télécharger — Plan d'Action",
+            data=buf_plan,
+            file_name=f"Taux de Service - {_date.today().strftime('%d-%m-%Y')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="dl_plan_action",
+        )
 
 
 # ── Tab 1 : Fournisseurs
