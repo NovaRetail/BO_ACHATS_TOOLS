@@ -35,7 +35,6 @@ GREY = "#86868B"
 BG = "#F2F2F7"
 
 MARGE_FAIBLE_DEFAUT = 10  # % — modifiable dans la sidebar
-VALID_SITES = {"0010301", "0010202", "0010203"}  # à ajuster si le périmètre magasins change
 
 REQUIRED_COLS = ["Code site", "Rayon", "Libellé rayon", "Libellé article", "Code article",
                   "DPR", "PV Promo", "Taux TVA", "PMP", "Stock", "RAL", "Marge en cours", "Four."]
@@ -146,7 +145,10 @@ def to_num(s: pd.Series) -> pd.Series:
 def compute_alerts(file_bytes, seuil_marge_faible):
     df = read_csv_robust(io.BytesIO(file_bytes))
     df.columns = [c.strip() for c in df.columns]
-    df = df[df["Code site"].isin(VALID_SITES)].copy()
+    # Garde uniquement les lignes avec un code site numérique valide (écarte en-têtes
+    # dupliqués et lignes corrompues éventuellement présents dans l'export) — aucune
+    # restriction sur quels sites sont acceptés : tout le périmètre magasins passe.
+    df = df[df["Code site"].astype(str).str.strip().str.fullmatch(r"\d+")].copy()
 
     for c in ["DPR", "PV Promo", "Taux TVA", "PMP", "Stock", "RAL", "Marge en cours",
               "Quantité vendue", "Montant vente HT", "Montant achat", "Four."]:
