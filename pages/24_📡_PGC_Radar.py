@@ -50,32 +50,64 @@ st.markdown(f"""
 html, body, [class*="css"], .stApp {{
     font-family: 'Nunito', -apple-system, BlinkMacSystemFont, sans-serif;
 }}
-.stApp {{ background-color: {GRIS_CLAIR}; }}
+.stApp {{ background-color: #F5F6FA; }}
+
+.stTabs [data-baseweb="tab-list"] {{
+    background: #E9EAF0; border-radius: 12px; padding: 3px; gap: 0;
+}}
+.stTabs [data-baseweb="tab"] {{
+    flex: 1; justify-content: center; border-radius: 10px;
+    font-weight: 700; color: {GRIS}; background: transparent; height: 36px;
+}}
+.stTabs [aria-selected="true"] {{
+    background: #fff !important; color: {NOIR} !important;
+}}
+.stTabs [data-baseweb="tab-highlight"], .stTabs [data-baseweb="tab-border"] {{ display: none; }}
+
+.stDownloadButton button {{
+    background: #0A2540 !important; color: #fff !important;
+    border-radius: 12px !important; font-weight: 700 !important; border: none !important;
+}}
+
+.hero {{
+    background: linear-gradient(135deg, #0A2540 0%, #1D4E89 55%, #6A5ACD 100%);
+    border-radius: 18px; padding: 18px 20px; margin-bottom: 14px;
+}}
+.hero-title {{ font-size: 19px; font-weight: 800; color: #fff; }}
+.hero-sub {{ font-size: 11px; color: rgba(255,255,255,0.75); font-weight: 600; }}
+.hero-chips {{ display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }}
+.chip {{ background: rgba(255,255,255,0.14); color: #fff; font-size: 12px;
+         font-weight: 700; padding: 4px 12px; border-radius: 11px; }}
+.chip-alert {{ background: rgba(255,90,80,0.4); }}
 
 .page-title {{ font-size: 26px; font-weight: 900; color: {NOIR}; padding: 2px 0; }}
 .page-sub {{ font-size: 13px; color: {GRIS}; font-weight: 600; margin-bottom: 16px; }}
 .section-title {{ font-size: 15px; font-weight: 800; color: {NOIR}; margin: 6px 0 10px 0; }}
 
 .kpi-card {{
-    background: #fff; border-radius: 18px; padding: 16px 18px;
-    display: flex; flex-direction: column; gap: 8px; height: 100%;
-    border: 1px solid rgba(0,0,0,0.03);
+    border-radius: 18px; padding: 16px 18px;
+    display: flex; flex-direction: column; gap: 7px; height: 100%;
 }}
-.kpi-top {{ display: flex; align-items: center; gap: 10px; }}
+.kpi-blue   {{ background: #EAF2FF; }}
+.kpi-violet {{ background: #F3EDFC; }}
+.kpi-top {{ display: flex; justify-content: space-between; align-items: center; }}
+.kpi-label {{ font-size: 13px; font-weight: 800; }}
+.lab-blue   {{ color: #4A6FA5; }}
+.lab-violet {{ color: #7A5FA8; }}
 .kpi-ico {{
-    width: 38px; height: 38px; border-radius: 12px;
-    display: flex; align-items: center; justify-content: center; font-size: 18px;
+    width: 34px; height: 34px; border-radius: 11px;
+    display: flex; align-items: center; justify-content: center; font-size: 16px;
 }}
-.ico-blue   {{ background: #E8F1FF; }}
-.ico-violet {{ background: #F5EBFC; }}
-.ico-orange {{ background: #FFF2DE; }}
-.kpi-label {{ font-size: 13px; color: {GRIS}; font-weight: 700; }}
-.kpi-value {{ font-size: 32px; color: {NOIR}; font-weight: 900; line-height: 1.05; }}
+.ico-blue   {{ background: {BLEU}; }}
+.ico-violet {{ background: {VIOLET}; }}
+.kpi-value {{ font-size: 32px; font-weight: 900; line-height: 1.05; }}
+.val-blue   {{ color: #0C2D5B; }}
+.val-violet {{ color: #3E2467; }}
 .pill {{
     display: inline-block; font-size: 12px; font-weight: 800;
     padding: 3px 12px; border-radius: 12px; width: fit-content;
 }}
-.pill-neg {{ background: #FFE5E3; color: {ROUGE}; }}
+.pill-neg {{ background: #FFE0DD; color: #C82D24; }}
 .pill-pos {{ background: #E4F8EA; color: #1E9E47; }}
 .pill-mut {{ background: {GRIS_CLAIR}; color: {GRIS}; }}
 
@@ -86,21 +118,22 @@ html, body, [class*="css"], .stApp {{
     border: 1px dashed #E0E0E5;
 }}
 
-.list-card {{ background: #fff; border-radius: 16px; overflow: hidden; margin-bottom: 18px;
-              border: 1px solid rgba(0,0,0,0.03); }}
-.list-row {{
-    display: flex; justify-content: space-between; align-items: center;
-    padding: 12px 16px; border-bottom: 0.5px solid #E5E5EA;
-    font-size: 14px; color: {NOIR}; font-weight: 700;
-}}
-.list-row:last-child {{ border-bottom: none; }}
-.list-row.total {{ background: {GRIS_CLAIR}; font-weight: 900; }}
+.bench-card {{ background: #fff; border-radius: 16px; padding: 14px 16px; margin-bottom: 18px;
+               border: 1px solid rgba(0,0,0,0.03); }}
+.bench-item {{ margin-bottom: 10px; }}
+.bench-item:last-child {{ margin-bottom: 0; }}
+.bench-line {{ display: flex; justify-content: space-between; font-size: 13px;
+               font-weight: 700; color: {NOIR}; margin-bottom: 4px; }}
+.bench-track {{ height: 6px; background: {GRIS_CLAIR}; border-radius: 3px; }}
+.bench-fill {{ height: 100%; background: {BLEU}; border-radius: 3px; }}
 
 .fmt-block {{ background: #fff; border-radius: 16px; padding: 14px 16px; margin-bottom: 14px;
               border: 1px solid rgba(0,0,0,0.03); }}
 .fmt-head {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }}
 .fmt-name {{ font-size: 15px; font-weight: 900; color: {NOIR}; }}
 .fmt-sub {{ font-size: 12px; color: {GRIS}; font-weight: 700; }}
+.contrib-bar {{ display: flex; height: 10px; border-radius: 5px; overflow: hidden;
+                gap: 2px; margin: 8px 0 6px 0; }}
 .site-row {{
     display: flex; justify-content: space-between; padding: 7px 0 7px 10px;
     font-size: 13px; color: {NOIR}; font-weight: 700;
@@ -113,17 +146,23 @@ html, body, [class*="css"], .stApp {{
 .badge-att  {{ background: #FFF2DE; color: {ORANGE}; }}
 .badge-ok   {{ background: #E4F8EA; color: #1E9E47; }}
 
-.alert-card {{ background: #fff; border-radius: 16px; padding: 14px 16px; margin-bottom: 12px;
+.alert-card {{ background: #fff; padding: 14px 16px; margin-bottom: 12px;
                border: 1px solid rgba(0,0,0,0.03); border-left: 4px solid transparent;
                border-radius: 0 16px 16px 0; }}
 .alert-crit {{ border-left-color: {ROUGE}; }}
 .alert-att  {{ border-left-color: {ORANGE}; }}
-.alert-head {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }}
+.alert-flex {{ display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }}
+.avatar {{ width: 34px; height: 34px; border-radius: 50%; font-size: 13px; font-weight: 800;
+           display: flex; align-items: center; justify-content: center; flex-shrink: 0; }}
+.av-crit {{ background: #FFE5E3; color: {ROUGE}; }}
+.av-att  {{ background: #FFF2DE; color: {ORANGE}; }}
+.alert-head {{ display: flex; justify-content: space-between; align-items: center; }}
 .alert-title {{ font-size: 14px; font-weight: 900; color: {NOIR}; }}
+.alert-poids {{ font-size: 11px; color: {GRIS}; font-weight: 700; }}
 .alert-line {{ font-size: 12px; color: {GRIS}; font-weight: 700; margin-top: 3px; }}
 
 .landing-hero {{
-    background: linear-gradient(135deg, #E8F1FF 0%, #F5EBFC 100%);
+    background: linear-gradient(135deg, #0A2540 0%, #1D4E89 55%, #6A5ACD 100%);
     border-radius: 18px; padding: 20px 22px; margin-bottom: 16px;
 }}
 .landing-card {{ background: #fff; border-radius: 16px; padding: 16px 18px; height: 100%;
@@ -422,10 +461,10 @@ if not up:
     st.markdown("<div class='page-sub'>Pilotage hebdomadaire de la performance PGC — "
                 "Vs N-1 et marge en premier plan, budget en référence</div>", unsafe_allow_html=True)
 
-    st.markdown(f"""<div class='landing-hero'>
-        <div style='font-size:16px; font-weight:900; color:{NOIR}; margin-bottom:4px;'>
+    st.markdown("""<div class='landing-hero'>
+        <div style='font-size:17px; font-weight:900; color:#fff; margin-bottom:4px;'>
             Où en est le réseau, et qui doit creuser quoi&nbsp;?</div>
-        <div style='font-size:13px; color:{NOIR}; font-weight:600;'>
+        <div style='font-size:13px; color:rgba(255,255,255,0.85); font-weight:600;'>
             Dépose l'export PBI hebdomadaire dans la barre latérale : le module produit
             une vue direction, un détail par format, et la liste des alertes à transmettre
             aux acheteurs — avec export Excel prêt à partager.</div>
@@ -514,9 +553,17 @@ with st.sidebar:
         width="stretch",
     )
 
-st.markdown("<div class='page-title'>📡 PGC Radar</div>", unsafe_allow_html=True)
-st.markdown("<div class='page-sub'>Performance réseau PGC — Vs N-1 et marge en premier plan, "
-            "budget en référence</div>", unsafe_allow_html=True)
+st.markdown(f"""<div class='hero'>
+    <div style='display:flex; justify-content:space-between; align-items:center;'>
+        <span class='hero-title'>📡 PGC Radar</span>
+        <span class='hero-sub'>Semaine en cours · Vs N-1 et marge en premier plan</span>
+    </div>
+    <div class='hero-chips'>
+        <span class='chip'>CA {fmt_m(pgc["CA"])}</span>
+        <span class='chip'>Marge {f"{pgc['Taux de Marge']*100:.1f}%".replace(".", ",")}</span>
+        <span class='chip chip-alert'>{len(al_actives)} alertes</span>
+    </div>
+</div>""", unsafe_allow_html=True)
 
 tab1, tab2, tab3 = st.tabs(["Vue d'ensemble", "Format", "Alertes"])
 
@@ -526,23 +573,23 @@ with tab1:
     with c1:
         d = pgc["Vs N-1 (%)"]
         pill = "pill-neg" if d < 0 else "pill-pos"
-        st.markdown(f"""<div class='kpi-card'>
+        st.markdown(f"""<div class='kpi-card kpi-blue'>
             <div class='kpi-top'>
+                <span class='kpi-label lab-blue'>CA PGC</span>
                 <div class='kpi-ico ico-blue'>💶</div>
-                <div class='kpi-label'>CA PGC</div>
             </div>
-            <div class='kpi-value'>{fmt_m(pgc["CA"])}</div>
+            <div class='kpi-value val-blue'>{fmt_m(pgc["CA"])}</div>
             <span class='pill {pill}'>{'▼' if d < 0 else '▲'} {fmt_pct(abs(d))[1:]} vs N-1</span>
         </div>""", unsafe_allow_html=True)
     with c2:
         mpt = pgc["Taux de Marge N Vs N-1"]
         pill = "pill-neg" if mpt < 0 else "pill-pos"
-        st.markdown(f"""<div class='kpi-card'>
+        st.markdown(f"""<div class='kpi-card kpi-violet'>
             <div class='kpi-top'>
+                <span class='kpi-label lab-violet'>Taux de marge</span>
                 <div class='kpi-ico ico-violet'>📈</div>
-                <div class='kpi-label'>Taux de marge</div>
             </div>
-            <div class='kpi-value'>{f"{pgc['Taux de Marge']*100:.1f}%".replace(".", ",")}</div>
+            <div class='kpi-value val-violet'>{f"{pgc['Taux de Marge']*100:.1f}%".replace(".", ",")}</div>
             <span class='pill {pill}'>{'▼' if mpt < 0 else '▲'} {fmt_pt(abs(mpt))[1:]} vs N-1</span>
         </div>""", unsafe_allow_html=True)
 
@@ -551,26 +598,46 @@ with tab1:
         <span>{fmt_m(pgc["Budget"])} · écart {fmt_pct(pgc["Vs Bgt (%)"])}</span>
     </div>""", unsafe_allow_html=True)
 
-    st.markdown("<div class='section-title'>Benchmark départements</div>", unsafe_allow_html=True)
-    rows_html = ""
-    for _, r in dept.iterrows():
-        if r["Département"] == "01 - PGC":
-            continue
+    autres_dept = dept[dept["Département"] != "01 - PGC"]
+    ca_max = autres_dept["CA"].max()
+    bench_html = ""
+    for _, r in autres_dept.iterrows():
         d = r["Vs N-1 (%)"]
-        rows_html += (f"<div class='list-row'><span>{r['Département'].title()} "
-                      f"<span class='mut'>{fmt_m(r['CA'])}</span></span>"
-                      f"<span class='{cls(d)}'>{fmt_pct(d)} N-1</span></div>")
-    rows_html += (f"<div class='list-row total'><span>Total magasin "
-                  f"<span class='mut'>{fmt_m(ca_reseau)}</span></span><span></span></div>")
-    st.markdown(f"<div class='list-card'>{rows_html}</div>", unsafe_allow_html=True)
+        width = max(4, r["CA"] / ca_max * 100)
+        bench_html += (f"<div class='bench-item'>"
+                       f"<div class='bench-line'><span>{r['Département'].title()} "
+                       f"<span class='mut'>{fmt_m(r['CA'])}</span></span>"
+                       f"<span class='{cls(d)}'>{fmt_pct(d)} N-1</span></div>"
+                       f"<div class='bench-track'><div class='bench-fill' "
+                       f"style='width:{width:.0f}%;'></div></div></div>")
+    bench_html += (f"<div class='bench-line' style='margin-top:10px; padding-top:10px; "
+                   f"border-top:0.5px solid #F0F0F3;'><span>Total magasin</span>"
+                   f"<span class='mut'>{fmt_m(ca_reseau)}</span></div>")
+    st.markdown("<div class='section-title'>Benchmark départements</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='bench-card'>{bench_html}</div>", unsafe_allow_html=True)
 
 # ---------------- Écran 2 — Format ----------------
 with tab2:
+    RAMP = ["#E24B4A", "#F0997B", "#F5C4B3", "#FAD9CE"]
     for _, f in fmt_lvl.iterrows():
         b_cls, b_txt = BADGE[alerte(f["Vs_N1"], f["Marge_pt"])]
         sites_f = site_lvl[site_lvl["format"] == f["format"]].sort_values("ecart_n1")
         gros = sites_f[sites_f["poids"] >= SEUIL_POIDS_SITE]
         autres = sites_f[sites_f["poids"] < SEUIL_POIDS_SITE]
+
+        negs = sites_f[sites_f["ecart_n1"] < 0]
+        bar_html = ""
+        if len(negs):
+            total_neg = negs["ecart_n1"].sum()
+            segs, cum = "", 0.0
+            for i, (_, s_) in enumerate(negs.iterrows()):
+                part = s_["ecart_n1"] / total_neg * 100
+                cum += part
+                segs += (f"<div style='width:{part:.0f}%; "
+                         f"background:{RAMP[min(i, len(RAMP)-1)]};'></div>")
+            if cum < 99:
+                segs += f"<div style='width:{100-cum:.0f}%; background:#E5E5EA;'></div>"
+            bar_html = f"<div class='contrib-bar'>{segs}</div>"
 
         sites_html = ""
         for _, s_ in gros.iterrows():
@@ -592,6 +659,7 @@ with tab2:
             </div>
             <div class='fmt-sub'>Vs N-1 <span class='{cls(f['Vs_N1'])}'>{fmt_pct(f['Vs_N1'])}</span>
                 · Vs Budget <span class='mut'>{fmt_pct(f['Vs_Bgt'])}</span></div>
+            {bar_html}
             {sites_html}
         </div>""", unsafe_allow_html=True)
 
@@ -606,21 +674,30 @@ with tab3:
     else:
         for _, r in al_actives.iterrows():
             b_cls, b_txt = BADGE[r["Alerte"]]
-            side = "alert-crit" if r["Alerte"] == "Critique" else "alert-att"
+            crit = r["Alerte"] == "Critique"
+            side = "alert-crit" if crit else "alert-att"
+            av = "av-crit" if crit else "av-att"
             site_court = r["Site"].split(" - ")[1]
+            nom_court = site_court.split(" ", 1)[1] if " " in site_court else site_court
+            initiales = "".join(w[0] for w in nom_court.split()[:2]).upper()
             rayon_court = r["Rayon"].split(" - ")[1].title()
             st.markdown(f"""<div class='alert-card {side}'>
-                <div class='alert-head'>
-                    <span class='alert-title'>{site_court} — {rayon_court}</span>
-                    <span class='badge {b_cls}'>{b_txt}</span>
+                <div class='alert-flex'>
+                    <span class='avatar {av}'>{initiales}</span>
+                    <div style='flex:1;'>
+                        <div class='alert-head'>
+                            <span class='alert-title'>{nom_court} — {rayon_court}</span>
+                            <span class='badge {b_cls}'>{b_txt}</span>
+                        </div>
+                        <div class='alert-poids'>{r['poids']*100:.0f}% du recul réseau</div>
+                    </div>
                 </div>
                 <div class='alert-line'>CA {fmt_m(r['CA'])} ·
                     <span class='{cls(r['Vs_N1'])}'>{fmt_pct(r['Vs_N1'])} N-1</span> ·
                     <span class='mut'>Budget {fmt_pct(r['Vs_Bgt'])}</span> ·
                     Marge <span class='{cls(r['Marge_pt'])}'>{fmt_pt(r['Marge_pt'])}</span></div>
                 <div class='alert-line'>Débit <span class='{cls(r['Debit_vs_n1'])}'>{fmt_pct(r['Debit_vs_n1'])} N-1</span>
-                    · Panier <span class='{cls(r['Panier_vs_n1'])}'>{fmt_pct(r['Panier_vs_n1'])} N-1</span>
-                    · <b>{r['poids']*100:.0f}% du recul réseau</b></div>
+                    · Panier <span class='{cls(r['Panier_vs_n1'])}'>{fmt_pct(r['Panier_vs_n1'])} N-1</span></div>
             </div>""", unsafe_allow_html=True)
 
         with st.expander("✏️ Saisir les causes (à transmettre aux acheteurs)"):
