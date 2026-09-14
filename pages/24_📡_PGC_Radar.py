@@ -1,3 +1,4 @@
+import re
 import io
 
 import numpy as np
@@ -9,6 +10,11 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 
 st.set_page_config(page_title="PGC Radar", page_icon="📡", layout="wide")
+
+def render_html(fragment):
+    """Compacte le HTML en une ligne — évite l'interprétation markdown en bloc de code."""
+    st.markdown(re.sub(r"\n\s*", " ", fragment), unsafe_allow_html=True)
+
 
 # ============================================================
 # Constantes métier
@@ -43,7 +49,7 @@ GRN_F, GRN_T = "C6EFCE", "006100"
 # Charte visuelle — Apple style, police arrondie
 # ============================================================
 
-st.markdown(f"""
+render_html(f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap');
 
@@ -52,16 +58,31 @@ html, body, [class*="css"], .stApp {{
 }}
 .stApp {{ background-color: #F5F6FA; }}
 
+div[data-testid="stTabs"] [data-baseweb="tab-list"],
 .stTabs [data-baseweb="tab-list"] {{
     background: #E9EAF0; border-radius: 12px; padding: 3px; gap: 0;
+    border-bottom: none !important;
 }}
+div[data-testid="stTabs"] button[data-baseweb="tab"],
 .stTabs [data-baseweb="tab"] {{
     flex: 1; justify-content: center; border-radius: 10px;
     font-weight: 700; color: {GRIS}; background: transparent; height: 36px;
+    border: none !important;
 }}
+div[data-testid="stTabs"] button[data-baseweb="tab"] p,
+.stTabs [data-baseweb="tab"] p {{
+    font-weight: 700; color: {GRIS};
+}}
+div[data-testid="stTabs"] button[aria-selected="true"],
 .stTabs [aria-selected="true"] {{
     background: #fff !important; color: {NOIR} !important;
 }}
+div[data-testid="stTabs"] button[aria-selected="true"] p,
+.stTabs [aria-selected="true"] p {{
+    color: {NOIR} !important;
+}}
+div[data-testid="stTabs"] [data-baseweb="tab-highlight"],
+div[data-testid="stTabs"] [data-baseweb="tab-border"],
 .stTabs [data-baseweb="tab-highlight"], .stTabs [data-baseweb="tab-border"] {{ display: none; }}
 
 .stDownloadButton button {{
@@ -179,7 +200,7 @@ html, body, [class*="css"], .stApp {{
 .pos {{ color: #1E9E47; font-weight: 800; }}
 .mut {{ color: {GRIS}; font-weight: 700; }}
 </style>
-""", unsafe_allow_html=True)
+""")
 
 # ============================================================
 # Chargement et calculs
@@ -445,9 +466,9 @@ def build_excel(pgc, dept, ca_reseau, fmt_lvl, site_lvl, al_actives):
 # ============================================================
 
 with st.sidebar:
-    st.markdown(f"<div style='font-size:18px; font-weight:900; color:{NOIR};'>📡 PGC Radar</div>"
+    render_html(f"<div style='font-size:18px; font-weight:900; color:{NOIR};'>📡 PGC Radar</div>"
                 f"<div style='font-size:12px; color:{GRIS}; font-weight:600; margin-bottom:12px;'>"
-                "SmartBuyer Hub</div>", unsafe_allow_html=True)
+                "SmartBuyer Hub</div>")
     st.markdown("**Import fichier**")
     up = st.file_uploader("Export Département / Rayon / Site (avec Budget)", type=["xlsx"])
     st.caption("Un seul export PBI hebdomadaire suffit.")
@@ -457,41 +478,41 @@ with st.sidebar:
 # ============================================================
 
 if not up:
-    st.markdown("<div class='page-title'>📡 PGC Radar</div>", unsafe_allow_html=True)
-    st.markdown("<div class='page-sub'>Pilotage hebdomadaire de la performance PGC — "
-                "Vs N-1 et marge en premier plan, budget en référence</div>", unsafe_allow_html=True)
+    render_html("<div class='page-title'>📡 PGC Radar</div>")
+    render_html("<div class='page-sub'>Pilotage hebdomadaire de la performance PGC — "
+                "Vs N-1 et marge en premier plan, budget en référence</div>")
 
-    st.markdown("""<div class='landing-hero'>
+    render_html("""<div class='landing-hero'>
         <div style='font-size:17px; font-weight:900; color:#fff; margin-bottom:4px;'>
             Où en est le réseau, et qui doit creuser quoi&nbsp;?</div>
         <div style='font-size:13px; color:rgba(255,255,255,0.85); font-weight:600;'>
             Dépose l'export PBI hebdomadaire dans la barre latérale : le module produit
             une vue direction, un détail par format, et la liste des alertes à transmettre
             aux acheteurs — avec export Excel prêt à partager.</div>
-    </div>""", unsafe_allow_html=True)
+    </div>""")
 
     c1, c2 = st.columns(2)
     with c1:
-        st.markdown(f"""<div class='landing-card'>
+        render_html(f"""<div class='landing-card'>
             <div class='section-title'>🧭 Ce que contient le module</div>
             <div class='rule-row'><span>Vue d'ensemble</span><span class='mut'>CA, marge, benchmark départements</span></div>
             <div class='rule-row'><span>Format</span><span class='mut'>Hyper / Market / Supeco + sites en recul</span></div>
             <div class='rule-row'><span>Alertes</span><span class='mut'>Rayon × Site, causes à saisir</span></div>
             <div class='rule-row'><span>Export Excel</span><span class='mut'>4 onglets, figé, prêt à diffuser</span></div>
-        </div>""", unsafe_allow_html=True)
+        </div>""")
     with c2:
-        st.markdown(f"""<div class='landing-card'>
+        render_html(f"""<div class='landing-card'>
             <div class='section-title'>⚙️ Comment ça marche</div>
             <div class='rule-row'><span>1. Exporter</span><span class='mut'>PBI, semaine en cours, Dépt/Rayon/Site</span></div>
             <div class='rule-row'><span>2. Déposer</span><span class='mut'>le fichier dans la barre latérale</span></div>
             <div class='rule-row'><span>3. Lire</span><span class='mut'>Vue d'ensemble → Format → Alertes</span></div>
             <div class='rule-row'><span>4. Transmettre</span><span class='mut'>l'Excel avec causes aux acheteurs</span></div>
-        </div>""", unsafe_allow_html=True)
+        </div>""")
 
-    st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
+    render_html("<div style='height:14px'></div>")
     c3, c4 = st.columns(2)
     with c3:
-        st.markdown(f"""<div class='landing-card'>
+        render_html(f"""<div class='landing-card'>
             <div class='section-title'>🚨 Règles d'alerte</div>
             <div class='rule-row'><span>Déclencheur</span><span class='mut'>Vs N-1 + marge — jamais le Budget</span></div>
             <div class='rule-row'><span>CA Critique</span><span class='neg'>&lt; -5% vs N-1</span></div>
@@ -500,9 +521,9 @@ if not up:
             <div class='rule-row'><span>Marge Attention</span><span class='att' style='color:{ORANGE};'>&lt; -0,5 pt vs N-1</span></div>
             <div class='rule-row'><span>Matérialité</span><span class='mut'>écart ≥ 1 M FCFA (Rayon × Site)</span></div>
             <div class='rule-row'><span>Poids ds le recul</span><span class='mut'>part des écarts négatifs vs N-1, par niveau</span></div>
-        </div>""", unsafe_allow_html=True)
+        </div>""")
     with c4:
-        st.markdown("""<div class='landing-card'>
+        render_html("""<div class='landing-card'>
             <div class='section-title'>📄 Colonnes attendues (onglet « Export »)</div>
             <span class='col-chip'>Département</span><span class='col-chip'>Rayon</span>
             <span class='col-chip'>Site</span><span class='col-chip'>CA</span>
@@ -514,7 +535,7 @@ if not up:
             <div class='fmt-sub' style='margin-top:10px;'>Budget absent pour Supeco : géré
             automatiquement (« — »). Débit et Panier : fiables au niveau Rayon × Site
             uniquement, Vs N-1 seulement.</div>
-        </div>""", unsafe_allow_html=True)
+        </div>""")
 
     st.info("Dépose l'export PBI dans la barre latérale pour démarrer.")
     st.stop()
@@ -553,7 +574,7 @@ with st.sidebar:
         width="stretch",
     )
 
-st.markdown(f"""<div class='hero'>
+render_html(f"""<div class='hero'>
     <div style='display:flex; justify-content:space-between; align-items:center;'>
         <span class='hero-title'>📡 PGC Radar</span>
         <span class='hero-sub'>Semaine en cours · Vs N-1 et marge en premier plan</span>
@@ -563,7 +584,7 @@ st.markdown(f"""<div class='hero'>
         <span class='chip'>Marge {f"{pgc['Taux de Marge']*100:.1f}%".replace(".", ",")}</span>
         <span class='chip chip-alert'>{len(al_actives)} alertes</span>
     </div>
-</div>""", unsafe_allow_html=True)
+</div>""")
 
 tab1, tab2, tab3 = st.tabs(["Vue d'ensemble", "Format", "Alertes"])
 
@@ -573,30 +594,30 @@ with tab1:
     with c1:
         d = pgc["Vs N-1 (%)"]
         pill = "pill-neg" if d < 0 else "pill-pos"
-        st.markdown(f"""<div class='kpi-card kpi-blue'>
+        render_html(f"""<div class='kpi-card kpi-blue'>
             <div class='kpi-top'>
                 <span class='kpi-label lab-blue'>CA PGC</span>
                 <div class='kpi-ico ico-blue'>💶</div>
             </div>
             <div class='kpi-value val-blue'>{fmt_m(pgc["CA"])}</div>
             <span class='pill {pill}'>{'▼' if d < 0 else '▲'} {fmt_pct(abs(d))[1:]} vs N-1</span>
-        </div>""", unsafe_allow_html=True)
+        </div>""")
     with c2:
         mpt = pgc["Taux de Marge N Vs N-1"]
         pill = "pill-neg" if mpt < 0 else "pill-pos"
-        st.markdown(f"""<div class='kpi-card kpi-violet'>
+        render_html(f"""<div class='kpi-card kpi-violet'>
             <div class='kpi-top'>
                 <span class='kpi-label lab-violet'>Taux de marge</span>
                 <div class='kpi-ico ico-violet'>📈</div>
             </div>
             <div class='kpi-value val-violet'>{f"{pgc['Taux de Marge']*100:.1f}%".replace(".", ",")}</div>
             <span class='pill {pill}'>{'▼' if mpt < 0 else '▲'} {fmt_pt(abs(mpt))[1:]} vs N-1</span>
-        </div>""", unsafe_allow_html=True)
+        </div>""")
 
-    st.markdown(f"""<div class='ref-line'>
+    render_html(f"""<div class='ref-line'>
         <span>Budget (référence — non déclencheur d'alerte)</span>
         <span>{fmt_m(pgc["Budget"])} · écart {fmt_pct(pgc["Vs Bgt (%)"])}</span>
-    </div>""", unsafe_allow_html=True)
+    </div>""")
 
     autres_dept = dept[dept["Département"] != "01 - PGC"]
     ca_max = autres_dept["CA"].max()
@@ -613,8 +634,8 @@ with tab1:
     bench_html += (f"<div class='bench-line' style='margin-top:10px; padding-top:10px; "
                    f"border-top:0.5px solid #F0F0F3;'><span>Total magasin</span>"
                    f"<span class='mut'>{fmt_m(ca_reseau)}</span></div>")
-    st.markdown("<div class='section-title'>Benchmark départements</div>", unsafe_allow_html=True)
-    st.markdown(f"<div class='bench-card'>{bench_html}</div>", unsafe_allow_html=True)
+    render_html("<div class='section-title'>Benchmark départements</div>")
+    render_html(f"<div class='bench-card'>{bench_html}</div>")
 
 # ---------------- Écran 2 — Format ----------------
 with tab2:
@@ -651,7 +672,7 @@ with tab2:
         elif not len(gros):
             sites_html += "<div class='autres'>Aucun site significatif dans le recul</div>"
 
-        st.markdown(f"""<div class='fmt-block'>
+        render_html(f"""<div class='fmt-block'>
             <div class='fmt-head'>
                 <span class='fmt-name'>{f['format']}
                     <span class='fmt-sub'>{int(f['nb_sites'])} sites · {fmt_m(f['CA'])}</span></span>
@@ -661,13 +682,13 @@ with tab2:
                 · Vs Budget <span class='mut'>{fmt_pct(f['Vs_Bgt'])}</span></div>
             {bar_html}
             {sites_html}
-        </div>""", unsafe_allow_html=True)
+        </div>""")
 
 # ---------------- Écran 3 — Alertes ----------------
 with tab3:
-    st.markdown(f"<div class='fmt-sub' style='margin-bottom:10px;'>"
+    render_html(f"<div class='fmt-sub' style='margin-bottom:10px;'>"
                 f"{len(al_actives)} lignes en alerte · déclencheur N-1 + marge · "
-                f"écart ≥ {MATERIALITE_FCFA/1e6:.0f} M FCFA</div>", unsafe_allow_html=True)
+                f"écart ≥ {MATERIALITE_FCFA/1e6:.0f} M FCFA</div>")
 
     if al_actives.empty:
         st.success("Aucune alerte cette semaine.")
@@ -681,7 +702,7 @@ with tab3:
             nom_court = site_court.split(" ", 1)[1] if " " in site_court else site_court
             initiales = "".join(w[0] for w in nom_court.split()[:2]).upper()
             rayon_court = r["Rayon"].split(" - ")[1].title()
-            st.markdown(f"""<div class='alert-card {side}'>
+            render_html(f"""<div class='alert-card {side}'>
                 <div class='alert-flex'>
                     <span class='avatar {av}'>{initiales}</span>
                     <div style='flex:1;'>
@@ -698,7 +719,7 @@ with tab3:
                     Marge <span class='{cls(r['Marge_pt'])}'>{fmt_pt(r['Marge_pt'])}</span></div>
                 <div class='alert-line'>Débit <span class='{cls(r['Debit_vs_n1'])}'>{fmt_pct(r['Debit_vs_n1'])} N-1</span>
                     · Panier <span class='{cls(r['Panier_vs_n1'])}'>{fmt_pct(r['Panier_vs_n1'])} N-1</span></div>
-            </div>""", unsafe_allow_html=True)
+            </div>""")
 
         with st.expander("✏️ Saisir les causes (à transmettre aux acheteurs)"):
             saisie = al_actives[["Site", "Rayon", "Alerte"]].copy()
