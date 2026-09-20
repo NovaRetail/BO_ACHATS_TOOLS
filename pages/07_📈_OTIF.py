@@ -262,6 +262,24 @@ DATE_EXPECTED_CANDIDATES = ["H Date", "Date livraison", "Date prévue", "Date"]
 SEUIL_EXCELLENT  = 97
 SEUIL_SURVEILLER = 90
 
+# ── Rayon (Libellé rayon) — Droguerie + Parfumerie Hygiène fusionnés en DPH
+# pour retrouver les 3 rayons réels de l'équipe (Épicerie, Boissons, DPH).
+# "Libellé département" n'est PAS utilisable pour cette segmentation : il ne
+# contient qu'une seule valeur ("PGC") sur l'export ERP, quel que soit le rayon.
+RAYON_MAP = {
+    "EPICERIE": "Épicerie",
+    "BOISSONS": "Boissons",
+    "DROGUERIE": "DPH",
+    "PARFUMERIE HYGIENE": "DPH",
+}
+
+
+def rayon_bucket(v) -> str:
+    s = str(v).strip()
+    if not s or s.lower() == "nan":
+        return "Inconnu"
+    return RAYON_MAP.get(s.upper(), s)
+
 WATCH_GOLD_HEX  = "FFD60A"
 WATCH_LIGHT_HEX = "FFFDE7"
 
@@ -574,6 +592,7 @@ def prepare_dataset(df: pd.DataFrame, exclude_technical: bool = True,
     work["supplier_name"] = (work[supplier_col] if supplier_col else pd.Series("Inconnu", index=work.index)).fillna("Inconnu").astype(str).str.strip()
     work["article_label"] = _col("Libellé article").fillna("Inconnu").astype(str).str.strip()
     work["dept_label"]    = _col("Libellé département").fillna("Inconnu").astype(str).str.strip()
+    work["rayon_label"]   = _col("Libellé rayon").fillna("Inconnu").astype(str).str.strip().apply(rayon_bucket)
     work["famille_label"] = _col("Libellé famille").fillna("Inconnu").astype(str).str.strip()
 
     work["qte_cde"] = pd.to_numeric(work.get("Qté cde"), errors="coerce").fillna(0)
@@ -1654,51 +1673,77 @@ def _pa_format_key(site):
 def build_plan_action_excel(df: pd.DataFrame, by_supplier: pd.DataFrame, quality: dict,
                              watchdict: dict = None) -> BytesIO:
     """
-    Plan d'action OTIF pour les fournisseurs Niveau Critique — 4 onglets :
+    Plan d'action OTIF pour les situations Niveau Critique — 4 onglets :
     Résumé · Suivi Fournisseurs · Taux de Service par Site · Détail Commandes.
     Zéro formule (règle SmartBuyer Hub) : tout est calculé en Python, le
     classeur produit est le résultat figé de la semaine.
+
+    Unité d'analyse : Fournisseur × Rayon, pas Fournisseur seul. Un fournisseur
+    livrant plusieurs rayons (Épicerie/Boissons/DPH) a un Taux de Service
+    distinct par rayon — le blender masquerait un rayon en difficulté derrière
+    la moyenne d'un autre (ex. TRANSMED SA CI : 26.8% Épicerie vs 42.7% DPH,
+    contre 26.7% affiché si on blend). "Libellé département" n'est pas utilisable
+    pour cette segmentation (une seule valeur "PGC" sur tout l'export ERP) ;
+    "Libellé rayon" est le champ fiable, utilisé ici via rayon_label.
     """
     from datetime import datetime as _datetime
     now = _datetime.now()
     today_str = now.strftime("%d/%m/%Y %H:%M")
     watchdict = watchdict or {}
 
-    crit_sup = by_supplier[by_supplier["Niveau"] == "🔴 Critique"].sort_values(
+    # ── Agrégation Fournisseur × Rayon (remplace l'agrégation Fournisseur seul
+    #    de by_supplier pour toute la logique de criticité de ce classeur) ──
+    by_sr = df.groupby(["Fou", "supplier_name", "rayon_label"], as_index=False).agg(
+        qte_cde     =("qte_cde",            "sum"),
+        qte_rec     =("qte_rec_retained",    "sum"),
+        qty_missing =("qty_missing",         "sum"),
+        otif        =("otif",                "mean"),
+        orders      =("N° Cde",              "nunique"),
+        articles    =("Code",                "nunique"),
+        sites       =("site_label",          "nunique"),
+    )
+    by_sr["fill_rate"] = np.where(by_sr["qte_cde"] > 0, by_sr["qte_rec"] / by_sr["qte_cde"] * 100, 0.0)
+    by_sr["otif"]      = by_sr["otif"] * 100
+    by_sr["score"]     = by_sr["fill_rate"]  # Score = Taux de Service seul (cf. alerte qualité)
+    by_sr["Niveau"]    = by_sr["score"].apply(score_band)
+
+    crit_sup = by_sr[by_sr["Niveau"] == "🔴 Critique"].sort_values(
         "qty_missing", ascending=False
     ).reset_index(drop=True)
     n_crit = len(crit_sup)
-    crit_fou = set(crit_sup["Fou"])
+    n_crit_fou = crit_sup["Fou"].nunique()
+    crit_pairs = set(zip(crit_sup["Fou"], crit_sup["rayon_label"]))
 
-    crit_lines = df[(df["otif"] == 0) & (df["Fou"].isin(crit_fou))].copy()
-    all_crit_supplier_lines = df[df["Fou"].isin(crit_fou)].copy()
+    df["_pair"] = list(zip(df["Fou"], df["rayon_label"]))
+    crit_lines = df[(df["otif"] == 0) & (df["_pair"].isin(crit_pairs))].copy()
+    all_crit_supplier_lines = df[df["_pair"].isin(crit_pairs)].copy()
 
-    fou_rank = {row["Fou"]: idx for idx, row in crit_sup.iterrows()}
-    crit_lines["_rank"] = crit_lines["Fou"].map(fou_rank)
+    pair_rank = {(row["Fou"], row["rayon_label"]): idx for idx, row in crit_sup.iterrows()}
+    crit_lines["_rank"] = crit_lines["_pair"].map(pair_rank)
     det = crit_lines.sort_values(
         ["_rank", "qty_missing", "service_gap_value"], ascending=[True, False, False]
     ).reset_index(drop=True)
 
-    # Réfs GOLD/SILVER en sous-service (< 97%) par fournisseur
+    # Réfs GOLD/SILVER en sous-service (< 97%) par couple (Fournisseur, Rayon)
     gold_counts, silver_counts = {}, {}
     if watchdict:
         w = all_crit_supplier_lines.copy()
         w["bucket"] = w["code_str"].map(watchdict).fillna("").apply(classe_bucket)
-        art_fr = w.groupby(["Fou", "Code", "bucket"], as_index=False).agg(
+        art_fr = w.groupby(["Fou", "rayon_label", "Code", "bucket"], as_index=False).agg(
             qte_c=("qte_cde", "sum"), qte_r=("qte_rec_retained", "sum")
         )
         art_fr["fr"] = (art_fr["qte_r"] / art_fr["qte_c"] * 100).fillna(0)
         under = art_fr[art_fr["fr"] < 97]
-        gold_counts = under[under["bucket"] == "GOLD"].groupby("Fou")["Code"].nunique().to_dict()
-        silver_counts = under[under["bucket"] == "SILVER"].groupby("Fou")["Code"].nunique().to_dict()
+        gold_counts = under[under["bucket"] == "GOLD"].groupby(["Fou", "rayon_label"])["Code"].nunique().to_dict()
+        silver_counts = under[under["bucket"] == "SILVER"].groupby(["Fou", "rayon_label"])["Code"].nunique().to_dict()
 
     # Matrice Taux de Service par Site — colonnes triées par format
     all_sites = sorted(all_crit_supplier_lines["site_label"].dropna().unique(), key=_pa_format_key)
-    pivot = all_crit_supplier_lines.groupby(["Fou", "site_label"], as_index=False).agg(
+    pivot = all_crit_supplier_lines.groupby(["Fou", "rayon_label", "site_label"], as_index=False).agg(
         qte_cde=("qte_cde", "sum"), qte_rec=("qte_rec_retained", "sum")
     )
     pivot["fr"] = (pivot["qte_rec"] / pivot["qte_cde"] * 100).round(1)
-    pivot_map = {(r["Fou"], r["site_label"]): r["fr"] for _, r in pivot.iterrows()}
+    pivot_map = {(r["Fou"], r["rayon_label"], r["site_label"]): r["fr"] for _, r in pivot.iterrows()}
 
     wb = Workbook()
 
@@ -1707,16 +1752,17 @@ def build_plan_action_excel(df: pd.DataFrame, by_supplier: pd.DataFrame, quality
     ws1.title = "Résumé"
     ws1.sheet_properties.tabColor = CFAO_ORANGE
     _pa_write_title(ws1, "PLAN D'ACTION OTIF — RÉSUMÉ",
-                     f"Généré le {today_str} · Périmètre : fournisseurs Niveau Critique (Score < {SEUIL_SURVEILLER}%)", 2)
+                     f"Généré le {today_str} · Périmètre : situations Fournisseur × Rayon Niveau Critique (Score < {SEUIL_SURVEILLER}%)", 2)
     ws1.append([])
     _pa_write_header(ws1, 4, ["Indicateur", "Valeur"])
     n_gold_matched = sum(1 for c in watchdict.values() if classe_bucket(c) == "GOLD") if watchdict else 0
     n_silver_matched = sum(1 for c in watchdict.values() if classe_bucket(c) == "SILVER") if watchdict else 0
     resume_rows = [
-        ("Fournisseurs Niveau Critique", n_crit),
-        ("Fournisseurs à surveiller", int((by_supplier["Niveau"] == "🟠 À surveiller").sum())),
-        ("Fournisseurs Excellent", int((by_supplier["Niveau"] == "🟢 Excellent").sum())),
-        ("Vol. manquant — fournisseurs critiques", int(crit_lines["qty_missing"].sum())),
+        ("Situations critiques (Fournisseur × Rayon)", n_crit),
+        ("Fournisseurs distincts concernés", n_crit_fou),
+        ("Situations à surveiller (Fournisseur × Rayon)", int((by_sr["Niveau"] == "🟠 À surveiller").sum())),
+        ("Situations Excellent (Fournisseur × Rayon)", int((by_sr["Niveau"] == "🟢 Excellent").sum())),
+        ("Vol. manquant — situations critiques", int(crit_lines["qty_missing"].sum())),
         ("Magasins concernés", int(crit_lines["site_label"].nunique())),
         ("Commandes concernées", int(crit_lines["N° Cde"].nunique())),
         ("Liste de surveillance — codes GOLD", n_gold_matched),
@@ -1741,6 +1787,7 @@ def build_plan_action_excel(df: pd.DataFrame, by_supplier: pd.DataFrame, quality
         f"{pct_no_pv}% des lignes n'ont pas de Prix de Vente HT — l'Impact CA proxy est sous-estimé sur cette part et n'est pas affiché dans ce fichier.",
         f"{pct_no_date}% des lignes n'ont pas de date prévue — la Ponctualité n'est pas mesurable. L'OTIF en dépendant aussi, le Score retenu est le Taux de Service seul.",
         f"Lignes brutes export ERP : {quality['raw_rows']:,} · Lignes exploitables : {quality['clean_rows']:,} ({quality['usable_rate']}%).",
+        "Un même fournisseur peut apparaître plusieurs fois dans ce fichier (une ligne par rayon livré) — le Taux de Service affiché est propre à chaque rayon, jamais mélangé.",
     ]
     for line in dq_rows:
         n = ws1.max_row + 1
@@ -1757,25 +1804,27 @@ def build_plan_action_excel(df: pd.DataFrame, by_supplier: pd.DataFrame, quality
     ws2 = wb.create_sheet("Suivi Fournisseurs")
     ws2.sheet_properties.tabColor = CFAO_ORANGE
     headers2 = [
-        "Code Fournisseur", "Fournisseur", "Qté commandée", "Qté reçue", "Qté manquante",
+        "Code Fournisseur", "Fournisseur", "Rayon", "Qté commandée", "Qté reçue", "Qté manquante",
         "Nb commandes", "Nb articles", "Nb sites", "Taux de Service", "Liste de surveillance",
-        "Escalade suggérée", "Acheteur", "Cause racine", "Commentaire", "Plan d'action",
+        "Escalade suggérée", "Acheteur", "Cause racine", "Plan d'action",
         "Date de retour à la normale", "Statut",
     ]
     _pa_write_title(ws2, "SUIVI FOURNISSEURS — PLAN D'ACTION OTIF",
-                     f"Généré le {today_str} · {n_crit} fournisseurs Niveau Critique · Trié par volume manquant décroissant", len(headers2))
+                     f"Généré le {today_str} · {n_crit} situations Niveau Critique ({n_crit_fou} fournisseurs distincts) · "
+                     f"Trié par volume manquant décroissant · 1 ligne = 1 fournisseur sur 1 rayon", len(headers2))
     ws2.append([])
     _pa_write_header(ws2, 4, headers2)
 
     row2_start = 5
     for idx, row in crit_sup.iterrows():
-        fou = row["Fou"]
-        watch_n = int(gold_counts.get(fou, 0)) + int(silver_counts.get(fou, 0))
+        fou, rayon = row["Fou"], row["rayon_label"]
+        watch_n = int(gold_counts.get((fou, rayon), 0)) + int(silver_counts.get((fou, rayon), 0))
         escalade = "Responsable Achat" if (watch_n > 0 and row["fill_rate"] < 20) else "Acheteur"
         n = ws2.max_row + 1
         ws2.append([
             int(fou) if pd.notna(fou) else "",
             row["supplier_name"],
+            rayon,
             int(row["qte_cde"]),
             int(row["qte_rec"]),
             int(row["qty_missing"]),
@@ -1785,20 +1834,20 @@ def build_plan_action_excel(df: pd.DataFrame, by_supplier: pd.DataFrame, quality
             round(row["fill_rate"], 1),
             watch_n,
             escalade,
-            "", "", "", "", "", "",
+            "", "", "", "", "",
         ])
         for col_i in range(1, len(headers2) + 1):
             cell = ws2.cell(n, col_i)
             cell.font = PA_BASE_FONT
             cell.border = PA_THIN
-            cell.alignment = PA_LFT if col_i in (2, 14, 15) else PA_CTR
-        ws2.cell(n, 9).fill = _pa_score_fill(row["fill_rate"])
-        ws2.cell(n, 9).number_format = '0.0"%"'
+            cell.alignment = PA_LFT if col_i in (2, 15) else PA_CTR
+        ws2.cell(n, 10).fill = _pa_score_fill(row["fill_rate"])
+        ws2.cell(n, 10).number_format = '0.0"%"'
         if watch_n > 0:
-            ws2.cell(n, 10).fill = PA_GOLD_FILL
+            ws2.cell(n, 11).fill = PA_GOLD_FILL
         if escalade == "Responsable Achat":
-            ws2.cell(n, 11).fill = PA_RED_FILL
-        for col_i in range(12, 18):
+            ws2.cell(n, 12).fill = PA_RED_FILL
+        for col_i in range(13, 18):
             ws2.cell(n, col_i).fill = PA_INPUT_FILL
         ws2.cell(n, 16).number_format = PA_DATE_FMT
 
@@ -1808,7 +1857,7 @@ def build_plan_action_excel(df: pd.DataFrame, by_supplier: pd.DataFrame, quality
     cause_dv.error = "Choisissez une cause dans la liste."
     cause_dv.errorTitle = "Cause non valide"
     ws2.add_data_validation(cause_dv)
-    cause_dv.add(f"M{row2_start}:M{row2_end}")
+    cause_dv.add(f"N{row2_start}:N{row2_end}")
 
     statut_dv = DataValidation(type="list", formula1='"' + ",".join(STATUTS_SUIVI) + '"', allow_blank=True)
     statut_dv.error = "Choisissez un statut dans la liste."
@@ -1816,16 +1865,16 @@ def build_plan_action_excel(df: pd.DataFrame, by_supplier: pd.DataFrame, quality
     ws2.add_data_validation(statut_dv)
     statut_dv.add(f"Q{row2_start}:Q{row2_end}")
 
-    _pa_auto_width(ws2, [10, 26, 10, 10, 12, 9, 9, 8, 11, 14, 16, 14, 22, 26, 30, 18, 16])
+    _pa_auto_width(ws2, [10, 26, 11, 10, 10, 12, 9, 9, 8, 11, 14, 16, 14, 22, 30, 18, 16])
     ws2.freeze_panes = "A5"
     ws2.auto_filter.ref = f"A4:{get_column_letter(len(headers2))}{row2_end}"
 
     # ── Onglet 3 : Taux de Service par Site ─────────────────────────────
     ws3 = wb.create_sheet("Taux de Service par Site")
     ws3.sheet_properties.tabColor = CFAO_ORANGE
-    headers3 = ["Fournisseur"] + all_sites
+    headers3 = ["Fournisseur", "Rayon"] + all_sites
     _pa_write_title(ws3, "TAUX DE SERVICE PAR SITE",
-                     f"Généré le {today_str} · {n_crit} fournisseurs critiques × {len(all_sites)} magasins · "
+                     f"Généré le {today_str} · {n_crit} situations critiques × {len(all_sites)} magasins · "
                      f"« - » = aucune commande sur ce couple · En-tête coloré par format (navy = Hyper, bleu = Market, orange = Supeco)",
                      len(headers3))
     ws3.append([])
@@ -1837,28 +1886,31 @@ def build_plan_action_excel(df: pd.DataFrame, by_supplier: pd.DataFrame, quality
         2: (PatternFill("solid", fgColor=CFAO_ORANGE), Font(bold=True, color=CFAO_NAVY, size=10)),
         3: (PatternFill("solid", fgColor="8E8E93"), Font(bold=True, color="FFFFFF", size=10)),
     }
-    for j, site in enumerate(all_sites, start=2):
+    for j, site in enumerate(all_sites, start=3):
         fmt_idx = _pa_format_key(site)[0]
         fill, font = PA_FORMAT_HEADER_FILL[fmt_idx]
         ws3.cell(4, j).fill = fill
         ws3.cell(4, j).font = font
 
     for idx, row in crit_sup.iterrows():
-        fou = row["Fou"]
+        fou, rayon = row["Fou"], row["rayon_label"]
         n = ws3.max_row + 1
-        line = [row["supplier_name"]]
+        line = [row["supplier_name"], rayon]
         for site in all_sites:
-            v = pivot_map.get((fou, site))
+            v = pivot_map.get((fou, rayon, site))
             line.append(v if v is not None else "-")
         ws3.append(line)
         ws3.cell(n, 1).font = PA_BASE_FONT
         ws3.cell(n, 1).border = PA_THIN
         ws3.cell(n, 1).alignment = PA_LFT
-        for j, site in enumerate(all_sites, start=2):
+        ws3.cell(n, 2).font = PA_BASE_FONT
+        ws3.cell(n, 2).border = PA_THIN
+        ws3.cell(n, 2).alignment = PA_CTR
+        for j, site in enumerate(all_sites, start=3):
             cell = ws3.cell(n, j)
             cell.border = PA_THIN
             cell.alignment = PA_CTR
-            v = pivot_map.get((fou, site))
+            v = pivot_map.get((fou, rayon, site))
             if v is None:
                 cell.font = PA_NODATA_FONT
             else:
@@ -1866,29 +1918,29 @@ def build_plan_action_excel(df: pd.DataFrame, by_supplier: pd.DataFrame, quality
                 cell.number_format = "0.0"
                 cell.fill = _pa_score_fill(v)
 
-    _pa_auto_width(ws3, [26] + [13] * len(all_sites))
-    ws3.freeze_panes = "B5"
+    _pa_auto_width(ws3, [26, 11] + [13] * len(all_sites))
+    ws3.freeze_panes = "C5"
     ws3.auto_filter.ref = f"A4:{get_column_letter(len(headers3))}{ws3.max_row}"
 
     # ── Onglet 4 : Détail Commandes ─────────────────────────────────────
     ws4 = wb.create_sheet("Détail Commandes")
     ws4.sheet_properties.tabColor = CFAO_ORANGE
     headers4 = [
-        "Fournisseur", "Code Fou.", "Magasin", "Code article", "Désignation",
+        "Fournisseur", "Code Fou.", "Rayon", "Magasin", "Code article", "Désignation",
         "N° Commande", "Date de commande", "Jours depuis commande",
         "Qté cde", "Qté reçue", "Qté manquante",
     ]
-    _pa_write_title(ws4, "DÉTAIL COMMANDES — FOURNISSEURS CRITIQUES",
-                     f"Généré le {today_str} · Toutes les lignes non-OTIF des {n_crit} fournisseurs critiques "
-                     f"({len(det)} lignes) · Groupées par fournisseur (ordre de criticité), triées par volume manquant · "
+    _pa_write_title(ws4, "DÉTAIL COMMANDES — SITUATIONS CRITIQUES",
+                     f"Généré le {today_str} · Toutes les lignes non-OTIF des {n_crit} situations Fournisseur × Rayon critiques "
+                     f"({len(det)} lignes) · Groupées par situation (ordre de criticité), triées par volume manquant · "
                      f"Fond doré = article GOLD · Fond gris = article SILVER",
                      len(headers4))
     ws4.append([])
     _pa_write_header(ws4, 4, headers4)
 
-    # Écriture allégée : pas de style cellule par cellule sur ~26 000 lignes
-    # (le quadrillage Excel natif suffit) — seuls les fonds GOLD/SILVER,
-    # porteurs de sens métier, sont appliqués. Gain mesuré : ~2 min → ~5 s.
+    # Écriture allégée : pas de style cellule par cellule sur des dizaines de
+    # milliers de lignes (le quadrillage Excel natif suffit) — seuls les
+    # fonds GOLD/SILVER, porteurs de sens métier, sont appliqués.
     n_cols4 = len(headers4)
     for _, row in det.iterrows():
         date_cde = row.get("Date de commande", None)
@@ -1897,6 +1949,7 @@ def build_plan_action_excel(df: pd.DataFrame, by_supplier: pd.DataFrame, quality
         ws4.append([
             row.get("supplier_name", ""),
             int(row["Fou"]) if pd.notna(row["Fou"]) else "",
+            row.get("rayon_label", ""),
             row.get("site_label", ""),
             row.get("Code", ""),
             row.get("article_label", ""),
@@ -1914,7 +1967,7 @@ def build_plan_action_excel(df: pd.DataFrame, by_supplier: pd.DataFrame, quality
             for col_i in range(1, n_cols4 + 1):
                 ws4.cell(n, col_i).fill = fill
 
-    _pa_auto_width(ws4, [26, 10, 20, 12, 30, 12, 14, 12, 10, 10, 12])
+    _pa_auto_width(ws4, [26, 10, 11, 20, 12, 30, 12, 14, 12, 10, 10, 12])
     ws4.freeze_panes = "A5"
     ws4.auto_filter.ref = f"A4:{get_column_letter(len(headers4))}{ws4.max_row}"
 
@@ -2027,13 +2080,15 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("<div style='font-size:11px;font-weight:600;color:#8E8E93;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px'>Filtres globaux</div>", unsafe_allow_html=True)
 
-    all_sites = sorted([x for x in df["site_label"].dropna().unique()    if x not in ("", "Inconnu")])
-    all_sup   = sorted([x for x in df["supplier_name"].dropna().unique()  if x not in ("", "Inconnu")])
-    all_depts = sorted([x for x in df["dept_label"].dropna().unique()     if x not in ("", "Inconnu")])
+    all_sites  = sorted([x for x in df["site_label"].dropna().unique()    if x not in ("", "Inconnu")])
+    all_sup    = sorted([x for x in df["supplier_name"].dropna().unique()  if x not in ("", "Inconnu")])
+    all_depts  = sorted([x for x in df["dept_label"].dropna().unique()     if x not in ("", "Inconnu")])
+    all_rayons = sorted([x for x in df["rayon_label"].dropna().unique()    if x not in ("", "Inconnu")])
 
-    sel_sites = st.multiselect("Magasin",     all_sites, default=all_sites)
-    sel_sup   = st.multiselect("Fournisseur", all_sup,   default=[])
-    sel_depts = st.multiselect("Département", all_depts, default=all_depts)
+    sel_sites  = st.multiselect("Magasin",     all_sites, default=all_sites)
+    sel_sup    = st.multiselect("Fournisseur", all_sup,   default=[])
+    sel_rayons = st.multiselect("Rayon",       all_rayons, default=all_rayons)
+    sel_depts  = st.multiselect("Département", all_depts, default=all_depts)
     only_crit  = st.checkbox("Uniquement OTIF = 0", value=False)
     only_watch = st.checkbox(f"Uniquement articles ⭐ {watch_label}", value=False, disabled=(not watchdict))
 
@@ -2045,8 +2100,9 @@ with st.sidebar:
 
 if not sel_sites: sel_sites = all_sites
 if not sel_depts: sel_depts = all_depts
+if not sel_rayons: sel_rayons = all_rayons
 
-view = df[df["site_label"].isin(sel_sites) & df["dept_label"].isin(sel_depts)].copy()
+view = df[df["site_label"].isin(sel_sites) & df["dept_label"].isin(sel_depts) & df["rayon_label"].isin(sel_rayons)].copy()
 if sel_sup:
     view = view[view["supplier_name"].isin(sel_sup)].copy()
 if only_crit:
