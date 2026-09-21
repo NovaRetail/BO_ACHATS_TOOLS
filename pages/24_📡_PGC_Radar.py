@@ -275,7 +275,7 @@ def agg_niveau(site_df, by):
 # Export Excel — 100% calculé en Python, aucune formule
 # ============================================================
 
-def build_excel(pgc, dept, ca_reseau, fmt_lvl, site_lvl, al_actives):
+def build_excel(pgc, dept, ca_reseau, fmt_lvl, rayon_lvl, site_lvl, al_actives):
     wb = Workbook()
     head_fill = PatternFill("solid", fgColor=NAVY_XL)
     head_font = Font(name="Arial", color="FFFFFF", bold=True, size=10)
@@ -389,6 +389,36 @@ def build_excel(pgc, dept, ca_reseau, fmt_lvl, site_lvl, al_actives):
     for col, w in zip(range(1, 9), [26, 9, 10, 10, 10, 15, 15, 12]):
         ws.column_dimensions[get_column_letter(col)].width = w
 
+    # ---- Rayon ----
+    ws = wb.create_sheet("Rayon")
+    ws.sheet_properties.tabColor = ORANGE_XL
+    ws.cell(row=1, column=1,
+            value="Performance par rayon (tous formats et sites confondus)").font = title_font
+    header(ws, 3, ["Rayon", "Nb sites", "CA (M)", "Vs N-1", "Vs Budget",
+                   "Marge (pt vs N-1)", "Poids ds le recul", "Alerte"])
+    r = 4
+    for _, ry in rayon_lvl.iterrows():
+        lvl = alerte(ry["Vs_N1"], ry["Marge_pt"])
+        nom = ry["Rayon"].split(" - ")[1].title() if " - " in ry["Rayon"] else ry["Rayon"]
+        ws.cell(row=r, column=1, value=nom).font = bold
+        ws.cell(row=r, column=2, value=int(ry["nb_sites"])).font = base
+        ws.cell(row=r, column=3, value=round(ry["CA"] / 1e6, 1)).font = bold
+        c = ws.cell(row=r, column=4, value=round(ry["Vs_N1"], 4))
+        c.number_format = "+0.0%;-0.0%"
+        c.font = base
+        c = ws.cell(row=r, column=5, value=round(ry["Vs_Bgt"], 4) if pd.notna(ry["Vs_Bgt"]) else None)
+        c.number_format = "+0.0%;-0.0%"
+        c.font = base
+        c = ws.cell(row=r, column=6, value=round(ry["Marge_pt"], 2))
+        c.font = base
+        c = ws.cell(row=r, column=7, value=round(ry["poids"], 3) if ry["poids"] > 0 else None)
+        c.number_format = "0%"
+        c.font = base
+        paint(ws.cell(row=r, column=8, value=lvl), lvl)
+        r += 1
+    for col, w in zip(range(1, 9), [26, 9, 10, 10, 10, 15, 15, 12]):
+        ws.column_dimensions[get_column_letter(col)].width = w
+
     # ---- Alertes ----
     ws = wb.create_sheet("Alertes")
     ws.sheet_properties.tabColor = ORANGE_XL
@@ -442,6 +472,8 @@ def build_excel(pgc, dept, ca_reseau, fmt_lvl, site_lvl, al_actives):
                                     "à la maille Rayon × Site".replace(",", " ")),
         ("Poids dans le recul", "part de la ligne dans la somme des écarts négatifs vs N-1, "
                                 "calculée au même niveau d'agrégation"),
+        ("Rayon Global", "vue agrégée tous formats et sites confondus, même logique "
+                         "de poids et d'alerte que le niveau Format"),
         ("Budget Supeco", "absent de l'export source — affiché « — », exclu des calculs"),
         ("Débit / Panier", "fiables uniquement au niveau Rayon × Site ; jamais sommés "
                            "entre rayons ; pas de budget disponible pour ces indicateurs"),
@@ -487,8 +519,8 @@ if not up:
             Où en est le réseau, et qui doit creuser quoi&nbsp;?</div>
         <div style='font-size:13px; color:rgba(255,255,255,0.85); font-weight:600;'>
             Dépose l'export PBI hebdomadaire dans la barre latérale : le module produit
-            une vue direction, un détail par format, et la liste des alertes à transmettre
-            aux acheteurs — avec export Excel prêt à partager.</div>
+            une vue direction, un détail par format, un détail par rayon, et la liste des
+            alertes à transmettre aux acheteurs — avec export Excel prêt à partager.</div>
     </div>""")
 
     c1, c2 = st.columns(2)
@@ -497,15 +529,16 @@ if not up:
             <div class='section-title'>🧭 Ce que contient le module</div>
             <div class='rule-row'><span>Vue d'ensemble</span><span class='mut'>CA, marge, benchmark départements</span></div>
             <div class='rule-row'><span>Format</span><span class='mut'>Hyper / Market / Supeco + sites en recul</span></div>
+            <div class='rule-row'><span>Rayon</span><span class='mut'>Vue agrégée réseau, tous formats confondus</span></div>
             <div class='rule-row'><span>Alertes</span><span class='mut'>Rayon × Site, causes à saisir</span></div>
-            <div class='rule-row'><span>Export Excel</span><span class='mut'>4 onglets, figé, prêt à diffuser</span></div>
+            <div class='rule-row'><span>Export Excel</span><span class='mut'>5 onglets, figé, prêt à diffuser</span></div>
         </div>""")
     with c2:
         render_html(f"""<div class='landing-card'>
             <div class='section-title'>⚙️ Comment ça marche</div>
             <div class='rule-row'><span>1. Exporter</span><span class='mut'>PBI, semaine en cours, Dépt/Rayon/Site</span></div>
             <div class='rule-row'><span>2. Déposer</span><span class='mut'>le fichier dans la barre latérale</span></div>
-            <div class='rule-row'><span>3. Lire</span><span class='mut'>Vue d'ensemble → Format → Alertes</span></div>
+            <div class='rule-row'><span>3. Lire</span><span class='mut'>Vue d'ensemble → Format → Rayon → Alertes</span></div>
             <div class='rule-row'><span>4. Transmettre</span><span class='mut'>l'Excel avec causes aux acheteurs</span></div>
         </div>""")
 
@@ -550,6 +583,7 @@ pgc = dept[dept["Département"] == "01 - PGC"].iloc[0]
 fmt_lvl = agg_niveau(site, "format").set_index("format") \
     .reindex(["Hyper", "Market", "Supeco"]).reset_index()
 site_lvl = agg_niveau(site, ["code_site", "site_court", "format"])
+rayon_lvl = agg_niveau(site, "Rayon").sort_values("ecart_n1")
 
 al = site.copy()
 al["Vs_N1"] = al["Vs N-1 (%)"]
@@ -568,7 +602,7 @@ with st.sidebar:
     st.divider()
     st.download_button(
         "⬇️ Export Excel",
-        data=build_excel(pgc, dept, ca_reseau, fmt_lvl, site_lvl, al_actives),
+        data=build_excel(pgc, dept, ca_reseau, fmt_lvl, rayon_lvl, site_lvl, al_actives),
         file_name="PGC_Radar.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         width="stretch",
@@ -586,7 +620,7 @@ render_html(f"""<div class='hero'>
     </div>
 </div>""")
 
-tab1, tab2, tab3 = st.tabs(["Vue d'ensemble", "Format", "Alertes"])
+tab1, tab2, tab3, tab4 = st.tabs(["Vue d'ensemble", "Format", "Rayon", "Alertes"])
 
 # ---------------- Écran 1 — Vue d'ensemble ----------------
 with tab1:
@@ -684,8 +718,45 @@ with tab2:
             {sites_html}
         </div>""")
 
-# ---------------- Écran 3 — Alertes ----------------
+# ---------------- Écran 3 — Rayon Global ----------------
 with tab3:
+    RAMP_R = ["#E24B4A", "#F0997B", "#F5C4B3", "#FAD9CE"]
+    render_html("<div class='fmt-sub' style='margin-bottom:10px;'>"
+                "Performance par rayon, tous formats et sites confondus</div>")
+
+    negs_r = rayon_lvl[rayon_lvl["ecart_n1"] < 0]
+    if len(negs_r):
+        total_neg_r = negs_r["ecart_n1"].sum()
+        segs, cum = "", 0.0
+        for i, (_, r_) in enumerate(negs_r.iterrows()):
+            part = r_["ecart_n1"] / total_neg_r * 100
+            cum += part
+            segs += (f"<div style='width:{part:.0f}%; "
+                     f"background:{RAMP_R[min(i, len(RAMP_R)-1)]};'></div>")
+        if cum < 99:
+            segs += f"<div style='width:{100-cum:.0f}%; background:#E5E5EA;'></div>"
+        render_html("<div class='section-title'>Poids des rayons dans le recul réseau</div>")
+        render_html(f"<div class='contrib-bar'>{segs}</div>")
+
+    for _, r_ in rayon_lvl.iterrows():
+        b_cls, b_txt = BADGE[alerte(r_["Vs_N1"], r_["Marge_pt"])]
+        nom = r_["Rayon"].split(" - ")[1].title() if " - " in r_["Rayon"] else r_["Rayon"]
+        poids_html = (f"· <b>{r_['poids']*100:.0f}% du recul réseau</b>"
+                      if r_["poids"] > 0 else "")
+        render_html(f"""<div class='fmt-block'>
+            <div class='fmt-head'>
+                <span class='fmt-name'>{nom}
+                    <span class='fmt-sub'>{int(r_['nb_sites'])} sites · {fmt_m(r_['CA'])}</span></span>
+                <span class='badge {b_cls}'>{b_txt}</span>
+            </div>
+            <div class='fmt-sub'>Vs N-1 <span class='{cls(r_['Vs_N1'])}'>{fmt_pct(r_['Vs_N1'])}</span>
+                · Vs Budget <span class='mut'>{fmt_pct(r_['Vs_Bgt'])}</span>
+                · Marge <span class='{cls(r_['Marge_pt'])}'>{fmt_pt(r_['Marge_pt'])}</span>
+                {poids_html}</div>
+        </div>""")
+
+# ---------------- Écran 4 — Alertes ----------------
+with tab4:
     render_html(f"<div class='fmt-sub' style='margin-bottom:10px;'>"
                 f"{len(al_actives)} lignes en alerte · déclencheur N-1 + marge · "
                 f"écart ≥ {MATERIALITE_FCFA/1e6:.0f} M FCFA</div>")
