@@ -1353,36 +1353,36 @@ def sidebar() -> tuple:
 
 LANDING_CSS = """
 <style>
-.lp-title{display:flex;align-items:center;gap:14px;margin:18px 0 4px}
-.lp-title h1{font-size:44px;font-weight:800;margin:0;padding:0;letter-spacing:-.5px;color:#1C2433}
-.lp-title .emo{font-size:40px}
-.lp-sub{color:#6B7280;font-size:17px;margin:0 0 26px;max-width:1100px;line-height:1.5}
+.lp-title{display:flex;align-items:center;gap:10px;margin:8px 0 2px}
+.lp-title h1{font-size:30px;font-weight:800;margin:0;padding:0;letter-spacing:-.5px;color:#1C2433}
+.lp-title .emo{font-size:26px}
+.lp-sub{color:#6B7280;font-size:14px;margin:0 0 18px;max-width:1100px;line-height:1.5}
 .lp-info{background:#F3F7FE;border:1px solid #E1EAFB;border-left:5px solid #2F6FEB;border-radius:18px;
-  padding:18px 24px;font-size:17px;line-height:1.6;color:#1C2433;margin-bottom:30px}
-.lp-info b.t{display:block;font-size:18px;margin-bottom:4px}
-.lp-lab{font-size:13px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#6B7280;margin:0 0 14px}
-.lp-card{background:#fff;border:1px solid #E7E9EF;border-radius:18px;padding:22px 26px;margin-bottom:16px}
-.lp-card h4{margin:0 0 10px;font-size:20px;font-weight:800;color:#1C2433;padding:0}
-.lp-card p{margin:0;font-size:15.5px;line-height:1.6;color:#3B4252}
-.lp-rule{border-radius:18px;padding:18px 24px;margin-bottom:14px;border:1px solid}
-.lp-rule .bd{display:inline-block;color:#fff;font-weight:800;font-size:15px;padding:6px 14px;border-radius:9px;margin-bottom:10px}
-.lp-rule p{margin:0;color:#6B7280;font-size:15.5px}
+  padding:12px 18px;font-size:14px;line-height:1.55;color:#1C2433;margin-bottom:22px}
+.lp-info b.t{display:block;font-size:14.5px;margin-bottom:2px}
+.lp-lab{font-size:11px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#6B7280;margin:0 0 10px}
+.lp-card{background:#fff;border:1px solid #E7E9EF;border-radius:14px;padding:14px 18px;margin-bottom:10px}
+.lp-card h4{margin:0 0 6px;font-size:15px;font-weight:800;color:#1C2433;padding:0}
+.lp-card p{margin:0;font-size:13px;line-height:1.5;color:#3B4252}
+.lp-rule{border-radius:14px;padding:12px 18px;margin-bottom:10px;border:1px solid}
+.lp-rule .bd{display:inline-block;color:#fff;font-weight:800;font-size:12.5px;padding:4px 10px;border-radius:8px;margin-bottom:6px}
+.lp-rule p{margin:0;color:#6B7280;font-size:13px}
 .lp-rule p b{color:#1C2433}
 .r-navy{background:#F2F6FD;border-color:#D9E4F7}.r-navy .bd{background:#1F3A5F}
 .r-green{background:#F1FBF4;border-color:#D3EFDB}.r-green .bd{background:#1E5631}
 .r-violet{background:#F6F2FD;border-color:#E3D8F6}.r-violet .bd{background:#5B2C83}
 .r-red{background:#FEF3F2;border-color:#F8D7D3}.r-red .bd{background:#9B1C1C}
 .lp-steps{background:#F1FBF4;border:1px solid #D3EFDB;border-left:5px solid #34C759;border-radius:18px;
-  padding:18px 24px;font-size:16px;line-height:1.75;color:#1C2433}
+  padding:12px 18px;font-size:13.5px;line-height:1.65;color:#1C2433}
 .lp-steps ol{margin:0;padding-left:20px}.lp-steps li::marker{font-weight:800}
-.lp-exp{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-bottom:26px}
+.lp-exp{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:18px}
 .lp-exp .lp-card{margin:0}
-.lp-exp .req{display:inline-block;font-size:12px;font-weight:800;padding:3px 10px;border-radius:20px;margin-left:6px;vertical-align:middle}
+.lp-exp .req{display:inline-block;font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:20px;margin-left:6px;vertical-align:middle}
 .req.on{background:#FFEDEC;color:#C8261C}.req.off{background:#ECEEF3;color:#4B5563}
-.lp-exp code{background:#F2F2F7;border-radius:6px;padding:1px 6px;font-size:13.5px;color:#1C2433}
+.lp-exp code{background:#F2F2F7;border-radius:6px;padding:1px 5px;font-size:12px;color:#1C2433}
 .lp-chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:24px}
-.lp-chips span{background:#fff;border:1px solid #E3E5EC;border-radius:10px;padding:6px 12px;font-size:14px;font-weight:700;color:#1C2433}
-@media (max-width:900px){.lp-exp{grid-template-columns:1fr}.lp-title h1{font-size:32px}}
+.lp-chips span{background:#fff;border:1px solid #E3E5EC;border-radius:8px;padding:4px 10px;font-size:12px;font-weight:700;color:#1C2433}
+@media (max-width:900px){.lp-exp{grid-template-columns:1fr}.lp-title h1{font-size:24px}}
 </style>
 """
 
@@ -1430,7 +1430,7 @@ def landing(s: dict | None = None) -> None:
         ]
         st.markdown("".join(f'<div class="lp-rule {c}"><span class="bd">{t}</span><p>{d}</p></div>'
                             for c, t, d in rules), unsafe_allow_html=True)
-        st.markdown('<p class="lp-lab" style="margin-top:26px">Fonctionnement</p>'
+        st.markdown('<p class="lp-lab" style="margin-top:18px">Fonctionnement</p>'
                     '<div class="lp-steps"><ol>'
                     "<li>Charge l'export <b>« Hier »</b> du jour (plusieurs jours possibles).</li>"
                     "<li>Ajoute l'export <b>« Cette semaine »</b> pour le cumul officiel.</li>"
@@ -1438,7 +1438,7 @@ def landing(s: dict | None = None) -> None:
                     "<li>Traite les actions, puis télécharge la synthèse HTML et l'historique mis à jour.</li>"
                     "</ol></div>", unsafe_allow_html=True)
 
-    st.markdown('<p class="lp-lab" style="margin-top:34px">Fichiers attendus</p>'
+    st.markdown('<p class="lp-lab" style="margin-top:22px">Fichiers attendus</p>'
                 '<div class="lp-exp">'
                 '<div class="lp-card"><h4>Export « Hier » <span class="req on">Obligatoire</span></h4>'
                 "<p>Power BI, type d'affichage <code>Hier</code>. La date des ventes est lue dans le nom "
