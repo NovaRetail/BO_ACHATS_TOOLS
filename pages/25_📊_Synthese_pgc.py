@@ -1351,28 +1351,108 @@ def sidebar() -> tuple:
     return day_files, week_file, hist_file, rec_file, s
 
 
-def landing() -> None:
-    st.markdown('<div class="alert-card"><b>📊 Synthèse PGC · version action</b><br>'
-                "Charge tes exports Power BI du matin : le module contrôle les données, chiffre chaque écart "
-                "(effet volume, effet taux, mix) et sort une liste d'actions avec responsable, échéance et "
-                "message prêt à envoyer.</div>", unsafe_allow_html=True)
-    c1, c2 = st.columns(2)
+LANDING_CSS = """
+<style>
+.lp-title{display:flex;align-items:center;gap:14px;margin:18px 0 4px}
+.lp-title h1{font-size:44px;font-weight:800;margin:0;padding:0;letter-spacing:-.5px;color:#1C2433}
+.lp-title .emo{font-size:40px}
+.lp-sub{color:#6B7280;font-size:17px;margin:0 0 26px;max-width:1100px;line-height:1.5}
+.lp-info{background:#F3F7FE;border:1px solid #E1EAFB;border-left:5px solid #2F6FEB;border-radius:18px;
+  padding:18px 24px;font-size:17px;line-height:1.6;color:#1C2433;margin-bottom:30px}
+.lp-info b.t{display:block;font-size:18px;margin-bottom:4px}
+.lp-lab{font-size:13px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#6B7280;margin:0 0 14px}
+.lp-card{background:#fff;border:1px solid #E7E9EF;border-radius:18px;padding:22px 26px;margin-bottom:16px}
+.lp-card h4{margin:0 0 10px;font-size:20px;font-weight:800;color:#1C2433;padding:0}
+.lp-card p{margin:0;font-size:15.5px;line-height:1.6;color:#3B4252}
+.lp-rule{border-radius:18px;padding:18px 24px;margin-bottom:14px;border:1px solid}
+.lp-rule .bd{display:inline-block;color:#fff;font-weight:800;font-size:15px;padding:6px 14px;border-radius:9px;margin-bottom:10px}
+.lp-rule p{margin:0;color:#6B7280;font-size:15.5px}
+.lp-rule p b{color:#1C2433}
+.r-navy{background:#F2F6FD;border-color:#D9E4F7}.r-navy .bd{background:#1F3A5F}
+.r-green{background:#F1FBF4;border-color:#D3EFDB}.r-green .bd{background:#1E5631}
+.r-violet{background:#F6F2FD;border-color:#E3D8F6}.r-violet .bd{background:#5B2C83}
+.r-red{background:#FEF3F2;border-color:#F8D7D3}.r-red .bd{background:#9B1C1C}
+.lp-steps{background:#F1FBF4;border:1px solid #D3EFDB;border-left:5px solid #34C759;border-radius:18px;
+  padding:18px 24px;font-size:16px;line-height:1.75;color:#1C2433}
+.lp-steps ol{margin:0;padding-left:20px}.lp-steps li::marker{font-weight:800}
+.lp-exp{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-bottom:26px}
+.lp-exp .lp-card{margin:0}
+.lp-exp .req{display:inline-block;font-size:12px;font-weight:800;padding:3px 10px;border-radius:20px;margin-left:6px;vertical-align:middle}
+.req.on{background:#FFEDEC;color:#C8261C}.req.off{background:#ECEEF3;color:#4B5563}
+.lp-exp code{background:#F2F2F7;border-radius:6px;padding:1px 6px;font-size:13.5px;color:#1C2433}
+.lp-chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:24px}
+.lp-chips span{background:#fff;border:1px solid #E3E5EC;border-radius:10px;padding:6px 12px;font-size:14px;font-weight:700;color:#1C2433}
+@media (max-width:900px){.lp-exp{grid-template-columns:1fr}.lp-title h1{font-size:32px}}
+</style>
+"""
+
+
+def landing(s: dict | None = None) -> None:
+    s = s or DEFAULT_SETTINGS
+    floor = _num(s["bulk_max_rate"] * 100, 0)
+    st.markdown(LANDING_CSS, unsafe_allow_html=True)
+    st.markdown(
+        '<div class="lp-title"><span class="emo">📊</span><h1>Synthèse PGC</h1></div>'
+        '<p class="lp-sub">Brief action du matin · contrôle des données · décomposition volume / taux / mix · '
+        'semaine à date et jour par jour · consignes prêtes à envoyer</p>'
+        '<div class="lp-info"><b class="t">ℹ️ À quoi sert ce module ?</b>'
+        "Transformer les exports Power BI du matin en <b>liste d'actions chiffrées</b> : chaque écart de marge est "
+        "expliqué (<b>effet volume</b>, <b>effet taux</b>, <b>effet mix</b>), priorisé par montant en jeu, attribué "
+        "à un responsable et accompagné d'un <b>message prêt à copier</b>. Aucune connexion externe : tout part des "
+        "fichiers chargés dans la barre latérale.</div>", unsafe_allow_html=True)
+
+    c1, c2 = st.columns([1.15, 1], gap="large")
     with c1:
-        st.markdown("#### Ce que contient le module")
-        st.markdown("- **Actions** : les décisions du jour, triées par urgence et par marge en jeu\n"
-                    "- **Analyse semaine** : cumul officiel, rayons avec décomposition Bennet, sites, matrice\n"
-                    "- **État du jour** : la synthèse de la veille\n"
-                    "- **Exports** : synthèse HTML pour mobile, historique CSV")
+        st.markdown('<p class="lp-lab">Contenu du module</p>', unsafe_allow_html=True)
+        cards = [
+            ("🎯 Actions", "Les décisions du jour, triées par urgence (aujourd'hui, cette semaine, à suivre) puis "
+                          "par marge en jeu. Responsable, échéance, étiquette « Nouveau » ou « Persistant » et "
+                          "consigne à copier pour chaque fiche."),
+            ("📅 Analyse semaine", "Cumul officiel de la semaine vs budget réel et N-1, PGC vs reste du magasin, "
+                                  "rayons avec décomposition Bennet, sites et matrice rayons × sites jour par jour."),
+            ("🗓️ État du jour", "La journée de la veille : urgences marge, ventes en gros, effet de base N-1, "
+                                "rayons et sites."),
+            ("🛡️ Contrôle des données", "Magasin absent ou à zéro, rayon manquant, jour non chargé, doublon, "
+                                       "écart entre l'export semaine et la somme des jours."),
+        ]
+        st.markdown("".join(f'<div class="lp-card"><h4>{t}</h4><p>{d}</p></div>' for t, d in cards),
+                    unsafe_allow_html=True)
     with c2:
-        st.markdown("#### Comment ça marche")
-        st.markdown("1. Charge l'export **« Hier »** du jour (plusieurs jours possibles)\n"
-                    "2. Ajoute l'export **« Cette semaine »** pour le cumul officiel\n"
-                    "3. Ajoute ton **historique CSV** pour garder les jours précédents\n"
-                    "4. Télécharge l'historique mis à jour en fin de session")
-    st.markdown("#### Colonnes attendues")
+        st.markdown('<p class="lp-lab">Règles clés</p>', unsafe_allow_html=True)
+        rules = [
+            ("r-navy", "Budget réel", "Écart calculé <b>hors Supeco</b> (non budgétés), affiché à côté de l'écart brut."),
+            ("r-green", "Vente en gros",
+             f"Panier ≥ <b>×{_num(s['bulk_basket_mult'], 1)}</b> le N-1 et marge < <b>{floor} %</b>."),
+            ("r-violet", "Persistance",
+             f"Perte de marge > <b>{_num(s['persist_k'], 0)} k</b> par jour, <b>2 jours de suite</b>."),
+            ("r-red", "Priorité « Aujourd'hui »",
+             f"Marge négative, ou effet taux ≥ <b>{_num(s['today_k'], 0)} k</b> sur la semaine."),
+        ]
+        st.markdown("".join(f'<div class="lp-rule {c}"><span class="bd">{t}</span><p>{d}</p></div>'
+                            for c, t, d in rules), unsafe_allow_html=True)
+        st.markdown('<p class="lp-lab" style="margin-top:26px">Fonctionnement</p>'
+                    '<div class="lp-steps"><ol>'
+                    "<li>Charge l'export <b>« Hier »</b> du jour (plusieurs jours possibles).</li>"
+                    "<li>Ajoute l'export <b>« Cette semaine »</b> pour le cumul officiel.</li>"
+                    "<li>Ajoute ton <b>historique CSV</b> pour garder les jours précédents.</li>"
+                    "<li>Traite les actions, puis télécharge la synthèse HTML et l'historique mis à jour.</li>"
+                    "</ol></div>", unsafe_allow_html=True)
+
+    st.markdown('<p class="lp-lab" style="margin-top:34px">Fichiers attendus</p>'
+                '<div class="lp-exp">'
+                '<div class="lp-card"><h4>Export « Hier » <span class="req on">Obligatoire</span></h4>'
+                "<p>Power BI, type d'affichage <code>Hier</code>. La date des ventes est lue dans le nom "
+                "du fichier (date d'export − 1 jour).</p></div>"
+                '<div class="lp-card"><h4>Export « Cette semaine » <span class="req off">Facultatif</span></h4>'
+                "<p>Type d'affichage <code>Cette Semaine</code>, du lundi à la veille. Le lundi, un export vide "
+                "déclenche la clôture de la semaine précédente.</p></div>"
+                '<div class="lp-card"><h4>Historique CSV <span class="req off">Facultatif</span></h4>'
+                "<p><code>historique_synthese_pgc.csv</code> téléchargé en fin de session : une ligne par jour, "
+                "rayon et site.</p></div></div>", unsafe_allow_html=True)
     cols = ["Département", "Rayon", "Site", "CA", "CA N-1", "Budget", "Marge", "Marge N-1",
             "Débit", "Débit N-1", "Volume", "Volume N-1"]
-    st.markdown("".join(f'<span class="col-required">{c}</span>' for c in cols), unsafe_allow_html=True)
+    st.markdown('<p class="lp-lab">Colonnes attendues</p><div class="lp-chips">'
+                + "".join(f"<span>{c}</span>" for c in cols) + "</div>", unsafe_allow_html=True)
     st.info("Charge au moins un export « Hier » dans la barre latérale pour démarrer.")
     st.stop()
 
@@ -1403,7 +1483,7 @@ def main() -> None:
     st.markdown(PAGE_CSS + f"<style>{CSS}</style>", unsafe_allow_html=True)
     day_files, week_file, hist_file, rec_file, s = sidebar()
     if not day_files and hist_file is None:
-        landing()
+        landing(s)
 
     # ── Read files
     errors, days, week = [], [], None
