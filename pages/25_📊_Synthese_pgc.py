@@ -354,6 +354,11 @@ def read_article_export(raw: pd.DataFrame, filename: str) -> ArticleExport:
 
 
 @st.cache_data(show_spinner=False)
+def _read_excel_cached(file_bytes: bytes) -> pd.DataFrame:
+    """Only the slow part (Excel parsing) is cached: a plain DataFrame is always serializable."""
+    return pd.read_excel(io.BytesIO(file_bytes))
+
+
 def classify_file(file_bytes: bytes, filename: str):
     """Detect the file type from its content. Returns (kind, payload)."""
     low = filename.lower()
@@ -377,7 +382,7 @@ def classify_file(file_bytes: bytes, filename: str):
                 return "unknown", str(exc)
         return "unknown", "CSV non reconnu (ni historique, ni destinataires)."
     try:
-        raw = pd.read_excel(io.BytesIO(file_bytes))
+        raw = _read_excel_cached(file_bytes).copy()
     except Exception as exc:  # noqa: BLE001
         return "unknown", f"Lecture impossible : {exc}"
     if "Article" in raw.columns:
