@@ -1212,6 +1212,46 @@ def _art_short(lib: str, n: int = 34) -> str:
     return lib if len(lib) <= n else lib[: n - 1] + "…"
 
 
+def _sev(t) -> str:
+    if t != t or t is None:
+        return "n"
+    return "s3" if t <= -2 else "s2" if t <= -1 else "s1" if t < 0 else "n"
+
+
+def art_item(lib: str, where: str, val_k: float, val_lbl: str, pill: str = "", sev: str = "n",
+             sub: str = "", promo: bool = False) -> dict:
+    """Structured article line (rendered as style A in cards, as text in messages)."""
+    return {"lib": lib, "where": where, "val": val_k, "val_lbl": val_lbl, "pill": pill, "sev": sev,
+            "sub": sub, "promo": bool(promo)}
+
+
+def item_txt(it) -> str:
+    if isinstance(it, str):
+        return it
+    return (f"{_art_short(it['lib'])} · {it['where']} : {it['val_lbl']}"
+            + (f" ({it['pill']})" if it["pill"] else "") + (" · promo" if it["promo"] else ""))
+
+
+def html_items(items: list) -> str:
+    """Style A: enriched rows with severity border, proportional bar and rate pill."""
+    if items and isinstance(items[0], str):
+        return "<ul>" + "".join(f"<li>{esc(x)}</li>" for x in items) + "</ul>"
+    mx = max((abs(it["val"]) for it in items), default=0) or 1
+    out = ""
+    for it in items:
+        w = abs(it["val"]) / mx * 100
+        sub = " · ".join(x for x in [it["where"], it["sub"], "promo" if it["promo"] else ""] if x)
+        out += (f'<div class="arow {it["sev"]}"><div class="an"><b>{esc(it["lib"])}</b><small>{esc(sub)}</small></div>'
+                f'<div class="ab"><div class="bar"><i style="width:{w:.0f}%"></i></div><span>{esc(it["val_lbl"])}</span></div>'
+                f'<div class="at">' + (f'<span class="pill2 {it["sev"]}">{esc(it["pill"])}</span>' if it["pill"] else "")
+                + "</div></div>")
+    return out
+
+
+def _rate_sub(t1) -> str:
+    return f"N-1 {fmt_rate(t1)}" if t1 == t1 and t1 is not None else "pas de vente N-1"
+
+
 def article_actions(av: ArticleView, s: dict, rec) -> list:
     acts = []
     dd = dfr(av.day)
@@ -1221,8 +1261,9 @@ def article_actions(av: ArticleView, s: dict, rec) -> list:
         w = g.iloc[0]
         rayons = [r for r in RAYON_ORDER if r in set(g.rayon)]
         owners = [("achat", r) for r in rayons]
-        arts = [f"{_art_short(x.lib)} · {site_name_only(x.site)} : {fmt_k(x.marge / 1000)} pour "
-                f"{fmt_k(x.ca / 1000, signed=False)} de CA (taux {fmt_rate(x.tm, 0)})" for _, x in g.head(6).iterrows()]
+        items = [art_item(x.lib, site_name_only(x.site), x.marge / 1000, fmt_k(x.marge / 1000), fmt_rate(x.tm, 0),
+                          _sev(x.tm), f"CA {fmt_k(x.ca / 1000, signed=False)} · {_rate_sub(x.tm_n1)}", x.promo)
+                 for _, x in g.head(6).iterrows()]
         by_r = "; ".join(f"{r} {len(g[g.rayon == r])}" for r in rayons)
         a = Action("prix", URG_TODAY, f"{len(g)} article{'s' if len(g) > 1 else ''} à prix anormal ({by_r})",
                    g.marge.sum() / 1000, f"marge du {dd}", f"Taux {_art_short(w.lib, 26)}",
@@ -1233,7 +1274,7 @@ def article_actions(av: ArticleView, s: dict, rec) -> list:
                    "Corriger aujourd'hui le prix de vente (ou le coût) des articles listés et vérifier le "
                    "paramétrage des promos concernées. Liste complète dans l'Excel articles.",
                    owners, "Aujourd'hui 12h")
-        a.articles, a.articles_label, a.scope = arts, f"Articles en cause · {dd}", "day"
+        a.articles, a.articles_label, a.scope = items, f"Articles en cause · {dd}", "day"
         per = []
         for r in rayons:
             gr = g[g.rayon == r].head(3)
@@ -1254,8 +1295,11 @@ def article_actions(av: ArticleView, s: dict, rec) -> list:
         promo_part = g.marge_promo.sum()
         promo_share = promo_part / total if total else 0
         n_lines = len(av.loss_lines[av.loss_lines.rayon == rayon])
-        arts = [f"{_art_short(x.lib)} ({x.n_sites} site{'s' if x.n_sites > 1 else ''}) : {fmt_k(x.marge / 1000)}"
-                + (" · promo" if x.ca_promo > 0 else "") for _, x in g.head(5).iterrows()]
+        items = [art_item(x.lib, x.sites if x.n_sites <= 2 else f"{x.n_sites} magasins", x.marge / 1000,
+                          fmt_k(x.marge / 1000), fmt_rate(x.marge / x.ca, 0) if x.ca else "",
+                          _sev(x.marge / x.ca if x.ca else float("nan")),
+                          f"CA {fmt_k(x.ca / 1000, signed=False)}", x.ca_promo > 0)
+                 for _, x in g.head(5).iterrows()]
         owners = [("achat", rayon)]
         urg = URG_TODAY if abs(total) >= s["today_k"] * 1000 else URG_WEEK
         a = Action("perte_art", urg, f"{rayon} : {len(g)} articles vendus à perte",
@@ -1268,10 +1312,10 @@ def article_actions(av: ArticleView, s: dict, rec) -> list:
                    "Revoir le prix de cession ou la participation fournisseur des promos listées, et corriger les "
                    "prix hors promo sous le coût.",
                    owners, "Aujourd'hui" if urg == URG_TODAY else "Cette semaine")
-        a.articles, a.articles_label, a.scope = arts, f"Principales pertes · {dd}", "day"
+        a.articles, a.articles_label, a.scope = items, f"Principales pertes · {dd}", "day"
         a.message = (f"{rec.mentions(owners)}, {rayon} : {len(g)} articles vendus à perte le {dd} "
                      f"({fmt_k(total / 1000)} de marge, dont {fmt_k(promo_part / 1000)} en promo). Priorités : "
-                     + "; ".join(arts[:3]) + ". Revois les prix promo et la participation fournisseur.")
+                     + "; ".join(item_txt(i) for i in items[:3]) + ". Revois les prix promo et la participation fournisseur.")
         a.tags = [("new", "Article")]
         acts.append(a)
 
@@ -1279,9 +1323,10 @@ def article_actions(av: ArticleView, s: dict, rec) -> list:
     if len(av.ruptures):
         r = av.ruptures
         owners = [("supply", "")]
-        arts = [f"{_art_short(x.lib)} · {site_name_only(x.site)} ({fmt_k(x.ca_ref / 1000, signed=False)}/jour, "
-                f"vendu dans {x.n_autres} autres magasins)" for _, x in r.head(8).iterrows()]
-        indic = r is not None and "N-1" in av.rupture_source
+        items = [art_item(x.lib, site_name_only(x.site), -x.ca_ref / 1000,
+                          f"{fmt_k(x.ca_ref / 1000, signed=False)}/jour", "0 vente", "s2",
+                          f"vendu dans {x.n_autres} autres magasins") for _, x in r.head(8).iterrows()]
+        indic = "N-1" in av.rupture_source
         a = Action("rupture", URG_WEEK if indic else URG_TODAY,
                    f"{len(r)} rupture{'s' if len(r) > 1 else ''} probable{'s' if len(r) > 1 else ''} "
                    f"sur {r.site.nunique()} magasin{'s' if r.site.nunique() > 1 else ''}",
@@ -1291,8 +1336,9 @@ def article_actions(av: ArticleView, s: dict, rec) -> list:
                    "Rupture de stock, article absent du rayon ou blocage de commande.",
                    "Vérifier le stock réel et le linéaire, relancer les commandes ou organiser un transfert.",
                    owners, "Aujourd'hui" if not indic else "Cette semaine")
-        a.articles, a.articles_label, a.scope = arts, f"Articles à 0 vente · {dd}", "day"
-        a.message = (f"{rec.mentions(owners)}, {len(r)} ruptures probables le {dd} : " + "; ".join(arts[:5])
+        a.articles, a.articles_label, a.scope = items, f"Articles à 0 vente · {dd}", "day"
+        a.message = (f"{rec.mentions(owners)}, {len(r)} ruptures probables le {dd} : "
+                     + "; ".join(item_txt(i) for i in items[:5])
                      + ". Vérifie le stock et le linéaire, et relance les commandes.")
         a.tags = [("data", "Indicatif · N-1")] if indic else [("new", "Article")]
         acts.append(a)
@@ -1300,7 +1346,7 @@ def article_actions(av: ArticleView, s: dict, rec) -> list:
 
 
 def attach_articles(acts: list, av: ArticleView) -> None:
-    """Attach the responsible articles to rayon × site actions (same analysis day or latest article day)."""
+    """Attach the responsible articles to rayon × site actions (latest article day)."""
     d = av.lines
     dd = dfr(av.day)
     rup = av.ruptures
@@ -1314,25 +1360,26 @@ def attach_articles(acts: list, av: ArticleView) -> None:
         items = []
         if a.kind == "perte":
             for _, x in sub[sub.marge < 0].sort_values("marge").head(5).iterrows():
-                items.append(f"{_art_short(x.lib)} · {site_name_only(x.site)} : {fmt_k(x.marge / 1000)}"
-                             + (" · promo" if x.promo else ""))
+                items.append(art_item(x.lib, site_name_only(x.site), x.marge / 1000, fmt_k(x.marge / 1000),
+                                      fmt_rate(x.tm, 0), _sev(x.tm), _rate_sub(x.tm_n1), x.promo))
         elif a.kind in ("taux", "taux_groupe"):
             for _, x in sub[sub.eff_taux < 0].sort_values("eff_taux").head(5).iterrows():
-                items.append(f"{_art_short(x.lib)} · {site_name_only(x.site)} : taux {fmt_rate(x.tm)} "
-                             f"(N-1 {fmt_rate(x.tm_n1)}), {fmt_k(x.eff_taux / 1000)}" + (" · promo" if x.promo else ""))
+                items.append(art_item(x.lib, site_name_only(x.site), x.eff_taux / 1000, fmt_k(x.eff_taux / 1000),
+                                      fmt_rate(x.tm), _sev(x.tm) if x.tm < 0 else "s1", _rate_sub(x.tm_n1), x.promo))
         elif a.kind == "gros":
             b = av.bulk[[(r, st_) in keys for r, st_ in zip(av.bulk.rayon, av.bulk.site)]]
             for _, x in b.head(5).iterrows():
-                items.append(f"{_art_short(x.lib)} · {site_name_only(x.site)} : {int(x.qte)} unités "
-                             f"(réf. {int(x.qte_ref)}), taux {fmt_rate(x.tm)}")
+                items.append(art_item(x.lib, site_name_only(x.site), -x.qte, f"{int(x.qte)} u.", fmt_rate(x.tm, 1),
+                                      _sev(x.tm) if x.tm < 0 else "s1", f"réf. {int(x.qte_ref)} u."))
         elif a.kind == "volume":
             rr = rup[[(r, st_) in keys for r, st_ in zip(rup.rayon, rup.site)]]
             for _, x in rr.head(5).iterrows():
-                items.append(f"{_art_short(x.lib)} · {site_name_only(x.site)} : 0 vente "
-                             f"(habituel {fmt_k(x.ca_ref / 1000, signed=False)}/jour)")
+                items.append(art_item(x.lib, site_name_only(x.site), -x.ca_ref / 1000,
+                                      f"{fmt_k(x.ca_ref / 1000, signed=False)}/jour", "0 vente", "s2",
+                                      f"vendu dans {x.n_autres} autres magasins"))
         if items:
             a.articles, a.articles_label = items, f"Articles en cause · {dd}"
-            a.message += " Articles : " + "; ".join(items[:3]) + "."
+            a.message += " Articles : " + "; ".join(item_txt(i) for i in items[:3]) + "."
 
 
 def article_issues(av: ArticleView, hist: pd.DataFrame, latest: date) -> list:
@@ -1450,6 +1497,31 @@ CSS = """
 .sp .arts{border:1px dashed #D5D9E2;border-radius:10px;padding:8px 12px;font-size:13px}
 .sp .arts b{font-size:11.5px;color:var(--muted);font-weight:800}
 .sp .arts ul{margin:4px 0 0;padding-left:18px}.sp .arts li{margin:2px 0}
+.sp .arow{display:grid;grid-template-columns:minmax(0,2.2fr) minmax(0,1.5fr) 96px;gap:12px;align-items:center;
+  padding:7px 10px;border-radius:10px;margin:5px 0;background:#FAFBFD;border-left:4px solid #E3E5EC}
+.sp .arow.s1{border-left-color:#FFC7C2}.sp .arow.s2{border-left-color:#FF7A70}.sp .arow.s3{border-left-color:#E5302A}
+.sp .arow .an b{display:block;font-size:13px;color:var(--ink);font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sp .arow .an small{display:block;color:var(--muted);font-size:11.5px}
+.sp .arow .ab{display:flex;align-items:center;gap:8px;font-weight:800;color:#D92D20;font-size:13px;white-space:nowrap}
+.sp .arow .bar{flex:1;height:7px;border-radius:5px;background:#EEF0F4;overflow:hidden;direction:rtl}
+.sp .arow .bar i{display:block;height:100%;background:linear-gradient(90deg,#FF3B30,#FF8A80);border-radius:5px}
+.sp .arow .at{text-align:right}
+.sp .pill2{display:inline-block;font-weight:800;font-size:12px;border-radius:20px;padding:2px 9px;white-space:nowrap}
+.sp .pill2.s3{background:#E5302A;color:#fff}.sp .pill2.s2{background:#FF7A70;color:#fff}
+.sp .pill2.s1{background:#FFD9D5;color:#9B1C1C}.sp .pill2.n{background:#ECEEF3;color:#4B5563}
+.sp .scs{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px;margin-bottom:6px}
+.sp .scard{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px;color:var(--ink)}
+.sp .sc-h{display:flex;gap:8px;align-items:center;font-size:14.5px}
+.sp .fchip{display:inline-block;font-size:11px;font-weight:800;border-radius:6px;padding:2px 7px;color:#fff}
+.sp .sc-k{display:flex;flex-direction:column;margin:8px 0}
+.sp .sc-k .big{font-size:24px;font-weight:800;color:#D92D20}.sp .sc-k .mut{font-size:12px;color:var(--muted)}
+.sp .scard ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.sp .scard li{display:grid;grid-template-columns:minmax(0,1fr) 56px 50px;gap:8px;align-items:center;font-size:12.5px}
+.sp .scard .ln{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sp .scard li b{text-align:right;color:#B42318}
+.sp .mb{height:6px;background:#EEF0F4;border-radius:4px;overflow:hidden;direction:rtl}
+.sp .mb i{display:block;height:100%;background:#FF3B30;border-radius:4px}
+.sp .more{margin:8px 0 0;font-size:12px;color:var(--muted)}
+@media (max-width:760px){.sp .arow{grid-template-columns:1fr 1fr}.sp .arow .at{text-align:left}}
 .sp .ac-body{margin:0;display:grid;grid-template-columns:1fr 1fr 1.3fr;gap:12px}
 .sp .ac-body dt{font-size:11.5px;font-weight:800;color:var(--muted);margin-bottom:2px}
 .sp .ac-body dd{margin:0;font-size:13.5px}
@@ -1523,8 +1595,7 @@ def html_action(a: Action, i: int, rec: Recipients, with_copy: bool = False) -> 
                  + '<span class="ar">→</span>'.join(pills) + "</div>")
     arts = ""
     if a.articles:
-        arts = (f'<div class="arts"><b>{esc(a.articles_label)}</b><ul>'
-                + "".join(f"<li>{esc(x)}</li>" for x in a.articles) + "</ul></div>")
+        arts = f'<div class="arts"><b>{esc(a.articles_label)}</b>{html_items(a.articles)}</div>'
     copy = ""
     if with_copy:
         copy = (f'<button type="button" class="copy" data-msg="{esc(a.message)}">Copier le message</button>')
@@ -1739,6 +1810,8 @@ html, body, [class*="css"], .stMarkdown, .stText {font-family:'Nunito',-apple-sy
 .sb-brand b{display:block;font-size:15px}.sb-brand small{color:#6B7280;font-size:12px}
 .alert-card{background:#EAF3FF;border:1px solid #CFE3FF;border-left:4px solid #007AFF;border-radius:14px;padding:14px 16px;margin-bottom:12px}
 .col-required{display:inline-block;background:#fff;border:1px solid #E3E5EC;border-radius:8px;padding:3px 8px;margin:3px;font-size:13px;font-weight:700}
+.bi-total{background:#F7F8FB;border:1px solid #E7E9EF;border-top:0;border-radius:0 0 10px 10px;padding:7px 12px;font-size:12.5px;font-weight:800;color:#1C2433;margin:-6px 0 14px}
+[data-testid="stDataFrame"]{border-radius:12px;overflow:hidden}
 div.stDownloadButton > button{background:#0A2540;color:#fff;border-radius:11px;font-weight:800;border:0}
 div.stDownloadButton > button:hover{background:#1D4E89;color:#fff}
 </style>
@@ -2133,20 +2206,112 @@ def main() -> None:
             render_articles(av, s)
 
 
-def _art_table(df: pd.DataFrame, cols: dict, pct: tuple = (), money: tuple = ()) -> None:
+FMT_COLORS = {"Supeco": "#5B2C83", "Hyper": "#1F3A5F", "Market": "#1E5631"}
+
+
+def html_site_cards(df: pd.DataFrame, max_cards: int = 12) -> str:
+    """Style C: one card per store (total loss, count, worst rate, top 3)."""
+    if df is None or df.empty:
+        return ""
+    cards = []
+    for site, g in df.groupby("site"):
+        cards.append((g.marge.sum(), site, g.sort_values("marge")))
+    cards.sort()
+    out = '<div class="scs">'
+    for tot, site, g in cards[:max_cards]:
+        f = site.split(" ")[0]
+        m2 = max(1.0, -g.marge.min())
+        items = "".join(
+            f'<li><span class="ln">{esc(_art_short(x.lib, 30))}</span><span class="mb"><i style="width:'
+            f'{min(100, -x.marge / m2 * 100):.0f}%"></i></span><b>{fmt_k(x.marge / 1000)}</b></li>'
+            for _, x in g.head(3).iterrows())
+        worst = f"< {MINUS}999 %" if g.tm.min() < -9.99 else fmt_rate(g.tm.min(), 0)
+        more = f'<p class="more">+ {len(g) - 3} autre{"s" if len(g) - 3 > 1 else ""}</p>' if len(g) > 3 else ""
+        out += (f'<div class="scard"><div class="sc-h"><span class="fchip" style="background:{FMT_COLORS.get(f, "#6B7280")}">'
+                f'{esc(f)}</span><b>{esc(site_name_only(site))}</b></div>'
+                f'<div class="sc-k"><span class="big">{fmt_k(tot / 1000)}</span><span class="mut">{len(g)} article'
+                f'{"s" if len(g) > 1 else ""} · pire taux {worst}</span></div><ul>{items}</ul>{more}</div>')
+    return out + "</div>"
+
+
+def _heat(v):
+    """Red heat for negative rates (value in %)."""
+    if v is None or v != v:
+        return ""
+    if v >= 0:
+        return "color:#1E8E3E"
+    a = min(1.0, abs(v) / 300)
+    bg = f"rgba(255,59,48,{0.10 + 0.55 * a:.2f})"
+    return f"background-color:{bg};color:{'#ffffff' if a > 0.6 else '#8A1C14'};font-weight:700"
+
+
+def bi_table(df: pd.DataFrame, kind: str, key: str) -> None:
+    """Style B: native sortable table with data bar, rate heat map and total line."""
     if df is None or df.empty:
         st.caption("Aucun article.")
         return
-    t = df[list(cols)].rename(columns=cols).copy()
-    for c in money:
-        if cols.get(c) in t.columns:
-            t[cols[c]] = t[cols[c]].map(lambda v: fmt_k(v / 1000, signed=False) if v >= 0 else fmt_k(v / 1000))
-    for c in pct:
-        if cols.get(c) in t.columns:
-            t[cols[c]] = t[cols[c]].map(fmt_rate)
-    if "site" in cols:
-        t[cols["site"]] = t[cols["site"]].map(site_name_only)
-    st.dataframe(t, hide_index=True, use_container_width=True)
+    t = pd.DataFrame({
+        "Article": df.lib.values,
+        "Rayon": df.rayon.values,
+        "Magasin": [f"{site_fmt(x)} · {site_name_only(x)}" for x in df.site],
+    })
+    cfg = {"Article": st.column_config.TextColumn(width="large")}
+    heat_cols = []
+    if kind in ("anomalies", "pertes"):
+        t["CA (k)"] = (df.ca / 1000).round(1).values
+        t["Perte (k)"] = (-df.marge / 1000).round(1).values
+        t["Taux %"] = (df.tm * 100).round(1).values
+        t["Taux N-1 %"] = (df.tm_n1 * 100).round(1).values
+        t["Qté"] = df.qte.values
+        t["Promo"] = ["Promo" if p else "" for p in df.promo]
+        mx = float(t["Perte (k)"].max() or 1)
+        cfg.update({
+            "CA (k)": st.column_config.NumberColumn(format="%.0f k"),
+            "Perte (k)": st.column_config.ProgressColumn("Perte de marge", format="−%.0f k", min_value=0.0, max_value=mx),
+            "Taux %": st.column_config.NumberColumn("Taux", format="%.0f %%"),
+            "Taux N-1 %": st.column_config.NumberColumn("Taux N-1", format="%.0f %%"),
+            "Qté": st.column_config.NumberColumn(format="%d"),
+        })
+        heat_cols = ["Taux %"]
+        total = f"Total · {len(t)} lignes · CA {fmt_k(df.ca.sum() / 1000, signed=False)} · marge {fmt_k(df.marge.sum() / 1000)}"
+    elif kind == "ruptures":
+        t["CA habituel (k)"] = (df.ca_ref / 1000).round(1).values
+        t["Qté habituelle"] = df.qte_ref.values
+        t["Autres magasins"] = df.n_autres.values
+        mx = float(t["CA habituel (k)"].max() or 1)
+        cfg.update({
+            "CA habituel (k)": st.column_config.ProgressColumn("CA habituel / jour", format="%.0f k", min_value=0.0, max_value=mx),
+            "Qté habituelle": st.column_config.NumberColumn(format="%d"),
+            "Autres magasins": st.column_config.NumberColumn("Vendu dans N autres magasins", format="%d"),
+        })
+        total = f"Total · {len(t)} ruptures · {fmt_k(df.ca_ref.sum() / 1000, signed=False)} de CA/jour à risque"
+    elif kind == "gros":
+        t["Qté"] = df.qte.values
+        t["Qté réf."] = df.qte_ref.values
+        t["CA (k)"] = (df.ca / 1000).round(1).values
+        t["Taux %"] = (df.tm * 100).round(1).values
+        mx = float(t["Qté"].max() or 1)
+        cfg.update({
+            "Qté": st.column_config.ProgressColumn("Quantité", format="%d", min_value=0.0, max_value=mx),
+            "Qté réf.": st.column_config.NumberColumn("Qté référence", format="%d"),
+            "CA (k)": st.column_config.NumberColumn(format="%.0f k"),
+            "Taux %": st.column_config.NumberColumn("Taux", format="%.1f %%"),
+        })
+        heat_cols = ["Taux %"]
+        total = f"Total · {len(t)} lignes · CA {fmt_k(df.ca.sum() / 1000, signed=False)}"
+    else:  # casse
+        t["Casse (k)"] = (-df.casse / 1000).round(1).values
+        t["Casse (qté)"] = (-df.casse_qte).values
+        mx = float(t["Casse (k)"].max() or 1)
+        cfg.update({
+            "Casse (k)": st.column_config.ProgressColumn("Casse (valeur)", format="%.1f k", min_value=0.0, max_value=mx),
+            "Casse (qté)": st.column_config.NumberColumn(format="%d"),
+        })
+        total = f"Total · {len(t)} lignes · {fmt_k(-df.casse.sum() / 1000, signed=False)} de casse"
+    data = t.style.map(_heat, subset=heat_cols) if heat_cols else t
+    st.dataframe(data, hide_index=True, use_container_width=True, column_config=cfg, key=key,
+                 height=min(38 * (len(t) + 1) + 4, 420))
+    st.markdown(f'<div class="bi-total">{esc(total)}</div>', unsafe_allow_html=True)
 
 
 def render_articles(av: ArticleView, s: dict) -> None:
@@ -2154,11 +2319,18 @@ def render_articles(av: ArticleView, s: dict) -> None:
     st.caption("N-1 article non iso-jour : seuls les taux de marge sont comparés au N-1, jamais les volumes. "
                "Périmètre : 12 magasins"
                + (f" (exclus : {', '.join(av.excluded_sites)})" if av.excluded_sites else "") + ".")
-    c1, c2 = st.columns(2)
+    c1, c2, c3, c4 = st.columns([1, 1, 1.3, 0.8])
     with c1:
         f_r = st.selectbox("Rayon", ["Tous"] + RAYON_ORDER, key="art_r")
     with c2:
         f_s = st.selectbox("Magasin", ["Tous"] + SITE_ORDER, key="art_s")
+    with c3:
+        pills = getattr(st, "pills", None)
+        opts = ["Tous", "Hyper", "Market", "Supeco"]
+        f_f = (pills("Format", opts, default="Tous", key="art_f") if pills
+               else st.radio("Format", opts, horizontal=True, key="art_f")) or "Tous"
+    with c4:
+        f_p = st.toggle("Promo seulement", key="art_p")
 
     def flt(df: pd.DataFrame) -> pd.DataFrame:
         if df is None or df.empty:
@@ -2168,53 +2340,59 @@ def render_articles(av: ArticleView, s: dict) -> None:
             out = out[out.rayon == f_r]
         if f_s != "Tous" and "site" in out.columns:
             out = out[out.site == f_s]
+        if f_f != "Tous" and "site" in out.columns:
+            out = out[out.site.str.startswith(f_f)]
+        if f_p and "promo" in out.columns:
+            out = out[out.promo]
         return out
 
     pt = av.promo_tot
-    ll = flt(av.loss_lines)
-    rp = flt(av.ruptures)
+    an, ll, rp = flt(av.anomalies), flt(av.loss_lines), flt(av.ruptures)
     sp(kpi_html([
         ("b", "€", "CA article du jour", fmt_m(pt["ca"]), "", "", f"Poids promo {fmt_pct(pt['poids'], 1, signed=False)}"),
         ("v", "%", "Taux promo", fmt_rate(pt["tm_promo"]), f"N-1 {fmt_rate(pt['tm_promo_n1'])}",
          "pos" if pt["tm_promo"] >= pt["tm_promo_n1"] else "neg", f"Marge promo {fmt_k(pt['marge_promo'] / 1000)}"),
         ("v", "%", "Taux hors promo", fmt_rate(pt["tm_hp"]), f"N-1 {fmt_rate(pt['tm_hp_n1'])}",
          "pos" if pt["tm_hp"] >= pt["tm_hp_n1"] else "neg", ""),
-        ("b", "!", "Lignes à perte", f"{len(ll)}", fmt_k(ll.marge.sum() / 1000) if len(ll) else "", "neg",
+        ("b", "!", "Lignes à perte", f"{len(an) + len(ll)}",
+         fmt_k((an.marge.sum() + ll.marge.sum()) / 1000) if len(an) + len(ll) else "", "neg",
          f"{len(rp)} rupture{'s' if len(rp) > 1 else ''} probable{'s' if len(rp) > 1 else ''}"),
     ]))
+
+    # Style C — where it burns
+    burn = pd.concat([an, ll]) if (an is not None and ll is not None) else ll
+    if burn is not None and len(burn):
+        st.markdown("##### Où ça brûle · pertes de marge par magasin")
+        sp(html_site_cards(burn))
 
     st.markdown("##### Promo et hors promo par rayon")
     pr = av.promo.copy()
     if len(pr):
         show = pd.DataFrame({
-            "Rayon": pr.rayon,
-            "CA": [fmt_m(v) for v in pr.ca],
-            "Poids promo": [fmt_pct(_rate(a, b), 1, signed=False) for a, b in zip(pr.ca_promo, pr.ca)],
-            "Taux promo": [fmt_rate(_rate(a, b)) for a, b in zip(pr.marge_promo, pr.ca_promo)],
-            "Taux promo N-1": [fmt_rate(_rate(a, b)) for a, b in zip(pr.marge_promo_n1, pr.ca_promo_n1)],
-            "Taux hors promo": [fmt_rate(_rate(a, b)) for a, b in zip(pr.marge_hp, pr.ca_hp)],
-            "Taux hors promo N-1": [fmt_rate(_rate(a, b)) for a, b in zip(pr.marge_hp_n1, pr.ca_hp_n1)],
-            "Marge promo": [fmt_k(v / 1000) for v in pr.marge_promo],
+            "Rayon": pr.rayon, "CA (k)": (pr.ca / 1000).round(0),
+            "Poids promo %": [round(_rate(a, b) * 100, 1) for a, b in zip(pr.ca_promo, pr.ca)],
+            "Taux promo %": [round(_rate(a, b) * 100, 1) for a, b in zip(pr.marge_promo, pr.ca_promo)],
+            "Taux promo N-1 %": [round(_rate(a, b) * 100, 1) for a, b in zip(pr.marge_promo_n1, pr.ca_promo_n1)],
+            "Taux hors promo %": [round(_rate(a, b) * 100, 1) for a, b in zip(pr.marge_hp, pr.ca_hp)],
+            "Taux hors promo N-1 %": [round(_rate(a, b) * 100, 1) for a, b in zip(pr.marge_hp_n1, pr.ca_hp_n1)],
+            "Marge promo (k)": (pr.marge_promo / 1000).round(0),
         })
-        st.dataframe(show, hide_index=True, use_container_width=True)
+        pc = {c: st.column_config.NumberColumn(c.replace(" %", ""), format="%.1f %%") for c in show.columns if c.endswith("%")}
+        pc.update({"CA (k)": st.column_config.NumberColumn(format="%.0f k"),
+                   "Marge promo (k)": st.column_config.NumberColumn(format="%.0f k")})
+        st.dataframe(show.style.map(_heat, subset=["Taux promo %"]), hide_index=True, use_container_width=True,
+                     column_config=pc, key="t_promo")
 
     st.markdown(f"##### Anomalies de prix (taux < {fmt_rate(s['price_anomaly_rate'], 0)})")
-    _art_table(flt(av.anomalies), {"rayon": "Rayon", "lib": "Article", "site": "Magasin", "ca": "CA",
-                                   "marge": "Marge", "tm": "Taux", "tm_n1": "Taux N-1", "qte": "Qté"},
-               pct=("tm", "tm_n1"), money=("ca", "marge"))
+    bi_table(an, "anomalies", "t_an")
     st.markdown("##### Articles vendus à perte")
-    _art_table(ll, {"rayon": "Rayon", "lib": "Article", "site": "Magasin", "ca": "CA", "marge": "Marge",
-                    "tm": "Taux", "tm_n1": "Taux N-1", "ca_promo": "CA promo"},
-               pct=("tm", "tm_n1"), money=("ca", "marge", "ca_promo"))
+    bi_table(ll, "pertes", "t_ll")
     st.markdown(f"##### Ruptures probables · référence : {av.rupture_source}")
-    _art_table(rp, {"rayon": "Rayon", "lib": "Article", "site": "Magasin", "ca_ref": "CA habituel",
-                    "qte_ref": "Qté habituelle", "n_autres": "Vendu dans N autres magasins"}, money=("ca_ref",))
+    bi_table(rp, "ruptures", "t_rp")
     st.markdown("##### Ventes en gros confirmées")
-    _art_table(flt(av.bulk), {"rayon": "Rayon", "lib": "Article", "site": "Magasin", "qte": "Qté",
-                              "qte_ref": "Qté réf.", "ca": "CA", "tm": "Taux"}, pct=("tm",), money=("ca",))
+    bi_table(flt(av.bulk), "gros", "t_gb")
     st.markdown("##### Casse (information)")
-    _art_table(flt(av.casse), {"rayon": "Rayon", "lib": "Article", "site": "Magasin", "casse": "Casse (valeur)",
-                               "casse_qte": "Casse (qté)"}, money=("casse",))
+    bi_table(flt(av.casse), "casse", "t_cs")
 
 
 def render_week(ref: pd.DataFrame, wt: dict, hors: dict, hist: pd.DataFrame, wref: WeekRef | None, s: dict) -> None:
