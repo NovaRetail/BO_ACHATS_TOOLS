@@ -68,6 +68,13 @@ DEFAULT_SETTINGS = {
     "traffic_drop": 0.25,        # tickets < -25 % => traffic action
     "ticket_stable": 0.10,       # |tickets| <= 10 % => "tickets stables"
     "bulk_floor_rate": 0.05,     # floor quoted in B2B message
+    # article export
+    "price_anomaly_rate": -0.50,  # margin rate below => price anomaly
+    "article_min_loss_k": 10.0,   # min loss (k) for a price anomaly
+    "rupture_min_ca_k": 20.0,     # usual daily CA (k) to watch a stock-out
+    "rupture_other_sites": 3,     # still sold in at least N other stores
+    "bulk_qty_mult": 3.0,         # article qty >= x * reference qty
+    "bulk_min_qty": 20.0,
 }
 
 URG_TODAY, URG_WEEK, URG_FOLLOW = 0, 1, 2
@@ -192,9 +199,9 @@ def parse_export_ts(filename: str) -> datetime | None:
     return datetime.strptime(f"{m.group(1)} {m.group(2)}{m.group(3)}{m.group(4)}", "%Y-%m-%d %H%M%S")
 
 
-def read_export(file_bytes: bytes, filename: str) -> ExportFile:
+def read_export(file_bytes: bytes, filename: str, raw: pd.DataFrame | None = None) -> ExportFile:
     try:
-        raw = pd.read_excel(io.BytesIO(file_bytes))
+        raw = raw if raw is not None else pd.read_excel(io.BytesIO(file_bytes))
     except Exception as exc:  # noqa: BLE001
         return ExportFile(filename, "unknown", None, "", pd.DataFrame(), {}, {}, error=f"Lecture impossible : {exc}")
 
@@ -274,6 +281,112 @@ def assign_dates(ef: ExportFile, manual_export_date: date | None = None) -> None
         else:
             ef.week_start = exp_d - timedelta(days=exp_d.weekday())   # Monday of export week
             ef.week_end = exp_d - timedelta(days=1)                   # "today" excluded
+
+
+# ─── Article export (article × site, one day, N-1 NOT iso-day) ────────────────
+
+ART_RAYON_KEYS = [("BOISSON", "Boisson"), ("EPICERIE", "Épicerie"), ("ÉPICERIE", "Épicerie"),
+                  ("PARFUMERIE", "Parfumerie-Hygiène"), ("DROGUERIE", "Droguerie")]
+ART_COLS = {
+    "CA": "ca", "CA N-1": "ca_n1", "Marge": "marge",
+    "CA Promo": "ca_promo", "CA Promo N-1": "ca_promo_n1", "Marge Promo": "marge_promo",
+    "Marge Promo N-1": "marge_promo_n1", "CA Hors Promo": "ca_hp", "CA Hors Promo N-1": "ca_hp_n1",
+    "Marge Hors Promo": "marge_hp", "Marge Hors Promo N-1": "marge_hp_n1",
+    "Qté Vente": "qte", "Qté Vente N-1": "qte_n1", "Casse (Valeur)": "casse", "Casse (Qté)": "casse_qte",
+}
+
+
+@dataclass
+class ArticleExport:
+    name: str
+    day: date | None
+    lines: pd.DataFrame
+    excluded_sites: list = field(default_factory=list)
+    error: str | None = None
+
+
+def _map_rayon(r) -> str | None:
+    up = str(r).upper()
+    for k, v in ART_RAYON_KEYS:
+        if k in up:
+            return v
+    return None
+
+
+def _footer(raw: pd.DataFrame) -> str:
+    first_col = raw.columns[0]
+    for v in raw[first_col].astype(str).tolist()[::-1]:
+        if v.startswith("Filtres appliqués"):
+            return v
+    return ""
+
+
+def read_article_export(raw: pd.DataFrame, filename: str) -> ArticleExport:
+    footer = _footer(raw)
+    m = re.search(r"Date est le ou après le (\d{2}/\d{2}/\d{4})", footer) or re.search(r"(\d{2}/\d{2}/\d{4})", footer)
+    day = datetime.strptime(m.group(1), "%d/%m/%Y").date() if m else None
+    if day is None:
+        ts = parse_export_ts(filename)
+        day = (ts.date() - timedelta(days=1)) if ts else None
+    site_col = "Site nom long" if "Site nom long" in raw.columns else "Site"
+    missing = [c for c in ["Rayon", "Article", site_col, "CA", "Marge"] if c not in raw.columns]
+    if missing:
+        return ArticleExport(filename, day, pd.DataFrame(), error=f"Colonnes manquantes : {', '.join(missing)}")
+    L = raw[raw["Article"].notna() & raw[site_col].notna()
+            & (raw[site_col].astype(str).str.strip() != "Total")].copy()
+    out = pd.DataFrame({
+        "rayon": L["Rayon"].map(_map_rayon).values,
+        "site": L[site_col].map(short_site).values,
+        "article": L["Article"].astype(str).str.strip().values,
+    })
+    parts = out["article"].str.split(" - ", n=1, expand=True)
+    out["code"] = parts[0].str.strip()
+    out["lib"] = (parts[1] if parts.shape[1] > 1 else parts[0]).fillna(out["article"]).str.strip()
+    for src, dst in ART_COLS.items():
+        out[dst] = pd.to_numeric(L[src], errors="coerce").fillna(0.0).values if src in L.columns else 0.0
+    # Marge N-1 is not exported as such: rebuilt from promo + non-promo N-1 margins
+    out["marge_n1"] = out["marge_hp_n1"] + out["marge_promo_n1"]
+    out = out[out["rayon"].notna()]
+    excluded = sorted(set(out["site"]) - set(SITE_ORDER))
+    out = out[out["site"].isin(SITE_ORDER)].reset_index(drop=True)
+    out["fmt"] = out["site"].map(lambda x: x.split(" ")[0])
+    return ArticleExport(filename, day, out, excluded)
+
+
+@st.cache_data(show_spinner=False)
+def classify_file(file_bytes: bytes, filename: str):
+    """Detect the file type from its content. Returns (kind, payload)."""
+    low = filename.lower()
+    if low.endswith(".csv"):
+        head = None
+        for enc in ("utf-8-sig", "cp1252", "latin-1"):
+            try:
+                head = pd.read_csv(io.BytesIO(file_bytes), sep=None, engine="python", encoding=enc, nrows=5)
+                break
+            except Exception:  # noqa: BLE001
+                continue
+        if head is None:
+            return "unknown", "CSV illisible."
+        cols = {c.strip().lower() for c in head.columns}
+        if {"type", "cle", "nom"} <= cols:
+            return "recipients", pd.read_csv(io.BytesIO(file_bytes), sep=None, engine="python", encoding="utf-8-sig")
+        if {"date", "level"} <= cols:
+            try:
+                return "history", load_history(file_bytes)
+            except ValueError as exc:
+                return "unknown", str(exc)
+        return "unknown", "CSV non reconnu (ni historique, ni destinataires)."
+    try:
+        raw = pd.read_excel(io.BytesIO(file_bytes))
+    except Exception as exc:  # noqa: BLE001
+        return "unknown", f"Lecture impossible : {exc}"
+    if "Article" in raw.columns:
+        ae = read_article_export(raw, filename)
+        return ("unknown", ae.error) if ae.error else ("article", ae)
+    ef = read_export(file_bytes, filename, raw=raw)
+    if ef.error:
+        return "unknown", ef.error
+    return ef.kind, ef
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -637,6 +750,9 @@ class Action:
     message: str = ""
     tags: list = field(default_factory=list)   # [(cls, label)]
     lines: list = field(default_factory=list)  # [(rayon, site)]
+    articles: list = field(default_factory=list)
+    articles_label: str = ""
+    scope: str = "week"                        # "week" (rayon export) | "day" (article export)
 
     @property
     def filters(self) -> set:
@@ -969,7 +1085,7 @@ def what_works(ref: pd.DataFrame) -> list[str]:
     return out
 
 
-def copil_message(wt: dict, hors: dict, supeco_dM: float, acts: list[Action]) -> str:
+def copil_message(wt: dict, hors: dict, supeco_dM: float, acts: list[Action], av=None) -> str:
     hp = safe_div(hors.get("ca", 0), hors.get("ca_n1", 0)) - 1 if hors else float("nan")
     parts = [f"Semaine à date : PGC {fmt_pct(wt['ca_var'])} vs N-1"
              + (f" (reste du magasin {fmt_pct(hp)})" if hp == hp else "")
@@ -978,11 +1094,304 @@ def copil_message(wt: dict, hors: dict, supeco_dM: float, acts: list[Action]) ->
     if wt["dM"] < 0 and supeco_dM < 0 and abs(supeco_dM) >= abs(wt["dM"]) * 0.6:
         m += f", portée par les Supeco ({fmt_k(supeco_dM / 1000)})"
     parts.append(m + ".")
+    if av is not None and av.promo_tot.get("ca_promo"):
+        pt = av.promo_tot
+        if pt["tm_promo"] == pt["tm_promo"] and pt["tm_promo"] < pt["tm_promo_n1"] - 0.02:
+            parts.append(f"Le {dfr(av.day)}, les promos sortent à {fmt_rate(pt['tm_promo'])} de marge "
+                         f"(N-1 {fmt_rate(pt['tm_promo_n1'])}), le hors promo à {fmt_rate(pt['tm_hp'])}.")
     today = [a for a in acts if a.urgency == URG_TODAY]
     if today:
         parts.append(f"{len(today)} décision{'s' if len(today) > 1 else ''} aujourd'hui : "
                      + " ; ".join(a.title for a in today[:4]) + ".")
     return " ".join(parts)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# ENGINE — articles (N-1 article is NOT iso-day: only rates are compared to N-1)
+# ════════════════════════════════════════════════════════════════════════════
+
+@dataclass
+class ArticleView:
+    day: date
+    lines: pd.DataFrame
+    prev_day: date | None
+    anomalies: pd.DataFrame
+    loss_lines: pd.DataFrame
+    losses: pd.DataFrame
+    ruptures: pd.DataFrame
+    rupture_source: str
+    bulk: pd.DataFrame
+    casse: pd.DataFrame
+    promo: pd.DataFrame
+    promo_tot: dict
+    excluded_sites: list
+
+
+def _rate(m, c):
+    return m / c if c > 0 else float("nan")
+
+
+def analyze_articles(today: ArticleExport, prev: ArticleExport | None, s: dict) -> ArticleView:
+    d = today.lines.copy()
+    d["tm"] = [_rate(m, c) for m, c in zip(d.marge, d.ca)]
+    d["tm_n1"] = [_rate(m, c) for m, c in zip(d.marge_n1, d.ca_n1)]
+    # rate effect on today's sales (N-1 volumes are not comparable, N-1 rates are)
+    d["eff_taux"] = [((t - t1) * c) if (t == t and t1 == t1) else 0.0 for t, t1, c in zip(d.tm, d.tm_n1, d.ca)]
+    d["promo"] = d.ca_promo > 0
+
+    min_loss = s["article_min_loss_k"] * 1000
+    anomalies = d[(d.ca > 0) & (d.tm < s["price_anomaly_rate"]) & (d.marge <= -min_loss)].sort_values("marge")
+    loss_lines = d[(d.ca > 0) & (d.marge < 0) & (~d.index.isin(anomalies.index))].sort_values("marge")
+    if len(loss_lines):
+        losses = (loss_lines.groupby(["rayon", "code", "lib"])
+                  .agg(n_sites=("site", "nunique"), sites=("site", lambda x: ", ".join(sorted(site_name_only(v) for v in set(x)))),
+                       ca=("ca", "sum"), marge=("marge", "sum"),
+                       marge_promo=("marge_promo", lambda x: x[x < 0].sum()), ca_promo=("ca_promo", "sum"))
+                  .reset_index().sort_values("marge"))
+    else:
+        losses = pd.DataFrame(columns=["rayon", "code", "lib", "n_sites", "sites", "ca", "marge", "marge_promo", "ca_promo"])
+
+    # Ruptures: sold at this site on the reference day, 0 today, still sold in >= N other sites today
+    selling_today = d[d.qte > 0].groupby("code")["site"].apply(set).to_dict()
+    today_qty = d.set_index(["code", "site"])["qte"].to_dict()
+    rows = []
+    if prev is not None and len(prev.lines):
+        src = f"veille ({dfr(prev.day)})" if prev.day else "veille"
+        ref = prev.lines[(prev.lines.qte > 0) & (prev.lines.ca >= s["rupture_min_ca_k"] * 1000)]
+        for _, x in ref.iterrows():
+            if today_qty.get((x.code, x.site), 0) > 0:
+                continue
+            others = selling_today.get(x.code, set()) - {x.site}
+            if len(others) >= s["rupture_other_sites"]:
+                rows.append({"rayon": x.rayon, "code": x.code, "lib": x.lib, "site": x.site, "ca_ref": x.ca,
+                             "qte_ref": x.qte, "n_autres": len(others)})
+    else:
+        src = "N-1 (indicatif, non iso-jour)"
+        ref = d[(d.qte <= 0) & (d.ca_n1 >= s["rupture_min_ca_k"] * 1000 * 2.5)]
+        for _, x in ref.iterrows():
+            others = selling_today.get(x.code, set()) - {x.site}
+            if len(others) >= s["rupture_other_sites"]:
+                rows.append({"rayon": x.rayon, "code": x.code, "lib": x.lib, "site": x.site, "ca_ref": x.ca_n1,
+                             "qte_ref": x.qte_n1, "n_autres": len(others)})
+    ruptures = pd.DataFrame(rows, columns=["rayon", "code", "lib", "site", "ca_ref", "qte_ref", "n_autres"]) \
+        .sort_values("ca_ref", ascending=False)
+
+    # Bulk sales confirmed at article level (quantity spike + low margin)
+    if prev is not None and len(prev.lines):
+        qref = prev.lines.set_index(["code", "site"])["qte"].to_dict()
+        d["qte_ref"] = [qref.get((c, st_), 0.0) for c, st_ in zip(d.code, d.site)]
+    else:
+        d["qte_ref"] = d.qte_n1
+    bulk = d[(d.ca > 0) & (d.qte >= s["bulk_min_qty"])
+             & (d.qte >= s["bulk_qty_mult"] * d.qte_ref.clip(lower=1)) & (d.tm < s["bulk_max_rate"])] \
+        .sort_values("ca", ascending=False)
+
+    casse = d[d.casse < 0].sort_values("casse").head(20)
+
+    pr = d.groupby("rayon")[["ca", "ca_promo", "marge_promo", "ca_promo_n1", "marge_promo_n1",
+                             "ca_hp", "marge_hp", "ca_hp_n1", "marge_hp_n1", "marge", "marge_n1", "ca_n1"]].sum()
+    pr = pr.reindex([r for r in RAYON_ORDER if r in pr.index])
+    tot = pr.sum()
+    promo_tot = {
+        "ca": tot.ca, "marge": tot.marge, "ca_promo": tot.ca_promo, "poids": _rate(tot.ca_promo, tot.ca),
+        "tm_promo": _rate(tot.marge_promo, tot.ca_promo), "tm_promo_n1": _rate(tot.marge_promo_n1, tot.ca_promo_n1),
+        "tm_hp": _rate(tot.marge_hp, tot.ca_hp), "tm_hp_n1": _rate(tot.marge_hp_n1, tot.ca_hp_n1),
+        "tm": _rate(tot.marge, tot.ca), "tm_n1": _rate(tot.marge_n1, tot.ca_n1),
+        "marge_promo": tot.marge_promo,
+    }
+    return ArticleView(today.day, d, prev.day if prev else None, anomalies, loss_lines, losses, ruptures, src,
+                       bulk, casse, pr.reset_index(), promo_tot, today.excluded_sites)
+
+
+def _art_short(lib: str, n: int = 34) -> str:
+    return lib if len(lib) <= n else lib[: n - 1] + "…"
+
+
+def article_actions(av: ArticleView, s: dict, rec) -> list:
+    acts = []
+    dd = dfr(av.day)
+    # Price anomalies (rate < -50 %) — one action, routed to the buyers concerned
+    g = av.anomalies
+    if len(g):
+        w = g.iloc[0]
+        rayons = [r for r in RAYON_ORDER if r in set(g.rayon)]
+        owners = [("achat", r) for r in rayons]
+        arts = [f"{_art_short(x.lib)} · {site_name_only(x.site)} : {fmt_k(x.marge / 1000)} pour "
+                f"{fmt_k(x.ca / 1000, signed=False)} de CA (taux {fmt_rate(x.tm, 0)})" for _, x in g.head(6).iterrows()]
+        by_r = "; ".join(f"{r} {len(g[g.rayon == r])}" for r in rayons)
+        a = Action("prix", URG_TODAY, f"{len(g)} article{'s' if len(g) > 1 else ''} à prix anormal ({by_r})",
+                   g.marge.sum() / 1000, f"marge du {dd}", f"Taux {_art_short(w.lib, 26)}",
+                   ([f"N-1 {fmt_rate(w.tm_n1)}"] if w.tm_n1 == w.tm_n1 else []) + [f"{dd} {fmt_rate(w.tm, 0)}"],
+                   f"Taux de marge sous {fmt_rate(s['price_anomaly_rate'], 0)} : le prix de vente est très en "
+                   f"dessous du coût, sur {g.site.nunique()} magasin{'s' if g.site.nunique() > 1 else ''}.",
+                   "Erreur de prix promo, de fiche article ou de coût chargé.",
+                   "Corriger aujourd'hui le prix de vente (ou le coût) des articles listés et vérifier le "
+                   "paramétrage des promos concernées. Liste complète dans l'Excel articles.",
+                   owners, "Aujourd'hui 12h")
+        a.articles, a.articles_label, a.scope = arts, f"Articles en cause · {dd}", "day"
+        per = []
+        for r in rayons:
+            gr = g[g.rayon == r].head(3)
+            per.append(f"{r} : " + ", ".join(f"{_art_short(x.lib, 28)} {site_name_only(x.site)} ({fmt_rate(x.tm, 0)})"
+                                            for _, x in gr.iterrows()))
+        a.message = (f"{rec.mentions(owners)}, {len(g)} articles à prix anormal le {dd} "
+                     f"({fmt_k(g.marge.sum() / 1000)} de marge). " + " | ".join(per)
+                     + ". Corrige les prix (ou les coûts) avant 12h, liste complète dans l'Excel articles.")
+        a.tags = [("new", "Article")]
+        acts.append(a)
+
+    # Articles sold at a loss — one action per rayon
+    mat = s["materiality_k"] * 1000
+    for rayon, g in av.losses.groupby("rayon"):
+        total = g.marge.sum()
+        if abs(total) < mat:
+            continue
+        promo_part = g.marge_promo.sum()
+        promo_share = promo_part / total if total else 0
+        n_lines = len(av.loss_lines[av.loss_lines.rayon == rayon])
+        arts = [f"{_art_short(x.lib)} ({x.n_sites} site{'s' if x.n_sites > 1 else ''}) : {fmt_k(x.marge / 1000)}"
+                + (" · promo" if x.ca_promo > 0 else "") for _, x in g.head(5).iterrows()]
+        owners = [("achat", rayon)]
+        urg = URG_TODAY if abs(total) >= s["today_k"] * 1000 else URG_WEEK
+        a = Action("perte_art", urg, f"{rayon} : {len(g)} articles vendus à perte",
+                   total / 1000, f"marge du {dd}", "Part promo de la perte",
+                   [f"{fmt_pct(promo_share, 0, signed=False)} promo", f"{fmt_pct(1 - promo_share, 0, signed=False)} hors promo"],
+                   f"{n_lines} lignes article × magasin à marge négative le {dd}, dont {fmt_k(promo_part / 1000)} en promo.",
+                   "Prix promo sous le coût : participation fournisseur non intégrée ou prix promo mal paramétré."
+                   if promo_share >= 0.6 else
+                   "Prix de vente sous le coût d'achat : hausse fournisseur non répercutée ou erreur de prix.",
+                   "Revoir le prix de cession ou la participation fournisseur des promos listées, et corriger les "
+                   "prix hors promo sous le coût.",
+                   owners, "Aujourd'hui" if urg == URG_TODAY else "Cette semaine")
+        a.articles, a.articles_label, a.scope = arts, f"Principales pertes · {dd}", "day"
+        a.message = (f"{rec.mentions(owners)}, {rayon} : {len(g)} articles vendus à perte le {dd} "
+                     f"({fmt_k(total / 1000)} de marge, dont {fmt_k(promo_part / 1000)} en promo). Priorités : "
+                     + "; ".join(arts[:3]) + ". Revois les prix promo et la participation fournisseur.")
+        a.tags = [("new", "Article")]
+        acts.append(a)
+
+    # Probable stock-outs — one action for Supply
+    if len(av.ruptures):
+        r = av.ruptures
+        owners = [("supply", "")]
+        arts = [f"{_art_short(x.lib)} · {site_name_only(x.site)} ({fmt_k(x.ca_ref / 1000, signed=False)}/jour, "
+                f"vendu dans {x.n_autres} autres magasins)" for _, x in r.head(8).iterrows()]
+        indic = r is not None and "N-1" in av.rupture_source
+        a = Action("rupture", URG_WEEK if indic else URG_TODAY,
+                   f"{len(r)} rupture{'s' if len(r) > 1 else ''} probable{'s' if len(r) > 1 else ''} "
+                   f"sur {r.site.nunique()} magasin{'s' if r.site.nunique() > 1 else ''}",
+                   -r.ca_ref.sum() / 1000, "CA/jour à risque", "Référence", [av.rupture_source],
+                   f"Articles vendus d'habitude dans ces magasins, à 0 vente le {dd}, alors qu'ils se vendent dans "
+                   f"au moins {s['rupture_other_sites']} autres magasins.",
+                   "Rupture de stock, article absent du rayon ou blocage de commande.",
+                   "Vérifier le stock réel et le linéaire, relancer les commandes ou organiser un transfert.",
+                   owners, "Aujourd'hui" if not indic else "Cette semaine")
+        a.articles, a.articles_label, a.scope = arts, f"Articles à 0 vente · {dd}", "day"
+        a.message = (f"{rec.mentions(owners)}, {len(r)} ruptures probables le {dd} : " + "; ".join(arts[:5])
+                     + ". Vérifie le stock et le linéaire, et relance les commandes.")
+        a.tags = [("data", "Indicatif · N-1")] if indic else [("new", "Article")]
+        acts.append(a)
+    return acts
+
+
+def attach_articles(acts: list, av: ArticleView) -> None:
+    """Attach the responsible articles to rayon × site actions (same analysis day or latest article day)."""
+    d = av.lines
+    dd = dfr(av.day)
+    rup = av.ruptures
+    for a in acts:
+        if not a.lines or a.kind not in ("perte", "gros", "taux", "taux_groupe", "volume"):
+            continue
+        keys = set(a.lines)
+        sub = d[[(r, st_) in keys for r, st_ in zip(d.rayon, d.site)]]
+        if sub.empty:
+            continue
+        items = []
+        if a.kind == "perte":
+            for _, x in sub[sub.marge < 0].sort_values("marge").head(5).iterrows():
+                items.append(f"{_art_short(x.lib)} · {site_name_only(x.site)} : {fmt_k(x.marge / 1000)}"
+                             + (" · promo" if x.promo else ""))
+        elif a.kind in ("taux", "taux_groupe"):
+            for _, x in sub[sub.eff_taux < 0].sort_values("eff_taux").head(5).iterrows():
+                items.append(f"{_art_short(x.lib)} · {site_name_only(x.site)} : taux {fmt_rate(x.tm)} "
+                             f"(N-1 {fmt_rate(x.tm_n1)}), {fmt_k(x.eff_taux / 1000)}" + (" · promo" if x.promo else ""))
+        elif a.kind == "gros":
+            b = av.bulk[[(r, st_) in keys for r, st_ in zip(av.bulk.rayon, av.bulk.site)]]
+            for _, x in b.head(5).iterrows():
+                items.append(f"{_art_short(x.lib)} · {site_name_only(x.site)} : {int(x.qte)} unités "
+                             f"(réf. {int(x.qte_ref)}), taux {fmt_rate(x.tm)}")
+        elif a.kind == "volume":
+            rr = rup[[(r, st_) in keys for r, st_ in zip(rup.rayon, rup.site)]]
+            for _, x in rr.head(5).iterrows():
+                items.append(f"{_art_short(x.lib)} · {site_name_only(x.site)} : 0 vente "
+                             f"(habituel {fmt_k(x.ca_ref / 1000, signed=False)}/jour)")
+        if items:
+            a.articles, a.articles_label = items, f"Articles en cause · {dd}"
+            a.message += " Articles : " + "; ".join(items[:3]) + "."
+
+
+def article_issues(av: ArticleView, hist: pd.DataFrame, latest: date) -> list:
+    out = []
+    if av.day and av.day != latest:
+        out.append(Issue("g", "Export article", f"Export article du {dfr(av.day)}, export rayon du {dfr(latest)}",
+                         f"Les articles cités dans les fiches sont ceux du {dfr(av.day)}."))
+    det = hist[(hist.level == "detail") & (hist.date == (av.day.isoformat() if av.day else ""))]
+    if len(det):
+        a = av.lines.groupby("site").ca.sum()
+        r = det.groupby("site").ca.sum()
+        for site in r.index:
+            if r[site] > 0 and abs(a.get(site, 0) - r[site]) / r[site] > 0.02:
+                out.append(Issue("o", "Article ≠ rayon", f"{site} · {dfr(av.day)}",
+                                 f"CA article {fmt_m(a.get(site, 0))} contre {fmt_m(r[site])} dans l'export rayon."))
+    return out
+
+
+def articles_excel(av: ArticleView) -> bytes:
+    """One sheet per rayon (buyer) + one sheet for Supply. Values only, no formulas."""
+    buf = io.BytesIO()
+
+    def rows_for(rayon: str | None) -> pd.DataFrame:
+        parts = []
+        an = av.anomalies if rayon is None else av.anomalies[av.anomalies.rayon == rayon]
+        for _, x in an.iterrows():
+            parts.append(["Anomalie de prix", x.rayon, x.code, x.lib, x.site, x.ca, x.marge, x.tm, x.tm_n1, x.qte,
+                          "Promo" if x.promo else "Hors promo"])
+        ll = av.loss_lines if rayon is None else av.loss_lines[av.loss_lines.rayon == rayon]
+        for _, x in ll.iterrows():
+            parts.append(["Vendu à perte", x.rayon, x.code, x.lib, x.site, x.ca, x.marge, x.tm, x.tm_n1, x.qte,
+                          "Promo" if x.promo else "Hors promo"])
+        bb = av.bulk if rayon is None else av.bulk[av.bulk.rayon == rayon]
+        for _, x in bb.iterrows():
+            parts.append(["Vente en gros", x.rayon, x.code, x.lib, x.site, x.ca, x.marge, x.tm, x.tm_n1, x.qte,
+                          f"Qté réf. {int(x.qte_ref)}"])
+        cols = ["Type", "Rayon", "Code", "Article", "Magasin", "CA", "Marge", "Taux", "Taux N-1", "Qté", "Détail"]
+        return pd.DataFrame(parts, columns=cols)
+
+    with pd.ExcelWriter(buf, engine="openpyxl") as xw:
+        for r in RAYON_ORDER:
+            df = rows_for(r)
+            if len(df):
+                df.to_excel(xw, sheet_name=r[:31], index=False)
+        rp = av.ruptures.rename(columns={"rayon": "Rayon", "code": "Code", "lib": "Article", "site": "Magasin",
+                                         "ca_ref": "CA habituel", "qte_ref": "Qté habituelle",
+                                         "n_autres": "Vendu dans N autres magasins"})
+        rp.to_excel(xw, sheet_name="Supply - Ruptures", index=False)
+        cs = av.casse[["rayon", "code", "lib", "site", "casse", "casse_qte"]].rename(
+            columns={"rayon": "Rayon", "code": "Code", "lib": "Article", "site": "Magasin",
+                     "casse": "Casse (valeur)", "casse_qte": "Casse (qté)"})
+        cs.to_excel(xw, sheet_name="Casse (info)", index=False)
+        for ws in xw.book.worksheets:
+            for col in ws.columns:
+                width = max(len(str(c.value)) if c.value is not None else 0 for c in col[:200])
+                ws.column_dimensions[col[0].column_letter].width = min(max(10, width + 2), 48)
+            for row in ws.iter_rows(min_row=2):
+                for c in row:
+                    hdr = ws.cell(1, c.column).value
+                    if hdr in ("Taux", "Taux N-1") and isinstance(c.value, (int, float)):
+                        c.number_format = "0.0%"
+                    elif hdr in ("CA", "Marge", "CA habituel", "Casse (valeur)") and isinstance(c.value, (int, float)):
+                        c.number_format = "#,##0"
+    return buf.getvalue()
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -1033,6 +1442,9 @@ CSS = """
 .sp .trail .st.hot{background:var(--redbg);border-color:#FFD2CE;color:#B42318}
 .sp .ac.u2 .trail .st.hot{background:#ECEEF3;border-color:var(--line);color:var(--ink)}
 .sp .trail .ar{color:#9AA3B2}
+.sp .arts{border:1px dashed #D5D9E2;border-radius:10px;padding:8px 12px;font-size:13px}
+.sp .arts b{font-size:11.5px;color:var(--muted);font-weight:800}
+.sp .arts ul{margin:4px 0 0;padding-left:18px}.sp .arts li{margin:2px 0}
 .sp .ac-body{margin:0;display:grid;grid-template-columns:1fr 1fr 1.3fr;gap:12px}
 .sp .ac-body dt{font-size:11.5px;font-weight:800;color:var(--muted);margin-bottom:2px}
 .sp .ac-body dd{margin:0;font-size:13.5px}
@@ -1104,13 +1516,17 @@ def html_action(a: Action, i: int, rec: Recipients, with_copy: bool = False) -> 
             pills.append(f'<span class="{cls}">{esc(v)}</span>')
         trail = (f'<div class="trail"><span class="tl">{esc(a.trail_label)}</span>'
                  + '<span class="ar">→</span>'.join(pills) + "</div>")
+    arts = ""
+    if a.articles:
+        arts = (f'<div class="arts"><b>{esc(a.articles_label)}</b><ul>'
+                + "".join(f"<li>{esc(x)}</li>" for x in a.articles) + "</ul></div>")
     copy = ""
     if with_copy:
         copy = (f'<button type="button" class="copy" data-msg="{esc(a.message)}">Copier le message</button>')
     return f"""
 <article class="ac u{a.urgency}" data-owner="{' '.join(sorted(a.filters))}">
   <div class="ac-top"><div class="ac-h"><span class="num">{i}</span><div><h3>{esc(a.title)}</h3><div class="tags">{tags}</div></div></div>{stake}</div>
-  {trail}
+  {trail}{arts}
   <dl class="ac-body">
     <div><dt>Constat</dt><dd>{esc(a.fact)}</dd></div>
     <div><dt>Cause probable</dt><dd>{esc(a.cause)}</dd></div>
@@ -1123,7 +1539,8 @@ def html_action(a: Action, i: int, rec: Recipients, with_copy: bool = False) -> 
 def html_brief(acts: list[Action], day_date: date | None, week_lab: str, n_pers: int, n_res: int,
                n_dq: int) -> str:
     cnt = {u: sum(1 for a in acts if a.urgency == u) for u in URG_LABELS}
-    stake = sum(a.stake_k for a in acts if a.stake_k is not None and a.stake_k < 0)
+    stake = sum(a.stake_k for a in acts if a.stake_k is not None and a.stake_k < 0
+                and a.scope == "week" and a.kind != "rupture")
     title_d = f"{weekday_fr(day_date + timedelta(days=1))} {dfr(day_date + timedelta(days=1))}" if day_date else ""
     chips = [f'<span class="chip">{esc(week_lab)}</span>']
     if n_pers:
@@ -1144,7 +1561,7 @@ def html_brief(acts: list[Action], day_date: date | None, week_lab: str, n_pers:
 </header>"""
 
 
-def html_kline(wt: dict, hors: dict, dt: dict | None) -> str:
+def html_kline(wt: dict, hors: dict, dt: dict | None, av=None) -> str:
     hp = safe_div(hors.get("ca", 0), hors.get("ca_n1", 0)) - 1 if hors else float("nan")
     items = [f"CA semaine {fmt_m(wt['ca'])} · {fmt_pct(wt['ca_var'])} vs N-1"]
     if hp == hp:
@@ -1153,6 +1570,11 @@ def html_kline(wt: dict, hors: dict, dt: dict | None) -> str:
     items.append(f"Marge semaine <b class='{'pos' if wt['dM'] >= 0 else ''}'>{fmt_k(wt['dM'] / 1000)}</b>")
     if dt:
         items.append(f"Hier : budget réel <b>{fmt_pct(dt['bgt_real'])}</b>")
+    if av is not None and av.promo_tot.get("ca_promo"):
+        pt = av.promo_tot
+        cls = "pos" if pt["tm_promo"] >= pt["tm_promo_n1"] else ""
+        items.append(f"Promo {dfr(av.day)} : taux <b class='{cls}'>{fmt_rate(pt['tm_promo'])}</b> "
+                     f"(N-1 {fmt_rate(pt['tm_promo_n1'])})")
     return '<div class="kline">' + "".join(f"<span>{x}</span>" for x in items) + "</div>"
 
 
@@ -1226,7 +1648,7 @@ def export_html(brief: str, kline: str, dq: str, acts: list[Action], rec: Recipi
         ga = [a for a in acts if a.urgency == u]
         if not ga:
             continue
-        st_ = sum(a.stake_k for a in ga if a.stake_k is not None)
+        st_ = sum(a.stake_k for a in ga if a.stake_k is not None and a.kind != "rupture")
         col = {0: "var(--red)", 1: "var(--orange)", 2: "#8E96A8"}[u]
         groups += (f'<p class="grp"><i style="background:{col}"></i>{URG_LABELS[u]}'
                    + (f" · {fmt_k(st_)} en jeu" if st_ else "") + "</p>")
@@ -1323,12 +1745,10 @@ def sidebar() -> tuple:
         st.markdown('<div class="sb-brand"><div class="logo">SB</div><div><b>SmartBuyer Hub</b>'
                     '<small>Achats PGC · Carrefour CI</small></div></div>', unsafe_allow_html=True)
         st.markdown("### Import fichiers")
-        day_files = st.file_uploader("Exports « Hier »", type=["xlsx"], accept_multiple_files=True, key="day_files")
-        week_file = st.file_uploader("Export « Semaine à date » (facultatif)", type=["xlsx"], key="week_file")
-        hist_file = st.file_uploader("Historique CSV (facultatif)", type=["csv"], key="hist_file")
-        with st.expander("Destinataires (facultatif)"):
-            rec_file = st.file_uploader("destinataires_pgc.csv", type=["csv"], key="rec_file",
-                                        help="Colonnes : type (rayon / site / fonction), cle, nom.")
+        files = st.file_uploader(
+            "Dépose tous tes fichiers", type=["xlsx", "csv"], accept_multiple_files=True, key="all_files",
+            help="Exports « Hier », « Cette semaine », export article, historique CSV, destinataires : "
+                 "le module reconnaît chaque type tout seul.")
         with st.expander("Réglages des seuils"):
             s = dict(DEFAULT_SETTINGS)
             s["bulk_basket_mult"] = st.number_input("Vente en gros : panier N ≥ × panier N-1", 1.2, 10.0,
@@ -1337,9 +1757,9 @@ def sidebar() -> tuple:
                                                  DEFAULT_SETTINGS["bulk_max_rate"] * 100, 0.5) / 100
             s["bulk_floor_rate"] = st.number_input("Plancher de marge B2B cité dans les consignes (%)", 0.0, 30.0,
                                                    DEFAULT_SETTINGS["bulk_floor_rate"] * 100, 0.5) / 100
-            s["materiality_k"] = st.number_input("Seuil de matérialité d'une action (k FCFA / semaine)", 0.0, 1000.0,
+            s["materiality_k"] = st.number_input("Seuil de matérialité d'une action (k FCFA)", 0.0, 1000.0,
                                                  DEFAULT_SETTINGS["materiality_k"], 5.0)
-            s["today_k"] = st.number_input("Seuil « Aujourd'hui » sur l'effet taux (k FCFA)", 0.0, 5000.0,
+            s["today_k"] = st.number_input("Seuil « Aujourd'hui » (k FCFA)", 0.0, 5000.0,
                                            DEFAULT_SETTINGS["today_k"], 10.0)
             s["persist_k"] = st.number_input("Persistance : perte de marge par jour (k FCFA)", 0.0, 500.0,
                                              DEFAULT_SETTINGS["persist_k"], 5.0)
@@ -1347,8 +1767,48 @@ def sidebar() -> tuple:
                                                 DEFAULT_SETTINGS["traffic_drop"] * 100, 5.0) / 100
             s["max_week_actions"] = int(st.number_input("Nombre maximum d'actions « Cette semaine »", 1, 30,
                                                         DEFAULT_SETTINGS["max_week_actions"], 1))
+            st.markdown("**Articles**")
+            s["price_anomaly_rate"] = st.number_input("Anomalie de prix : taux de marge < (%)", -500.0, 0.0,
+                                                      DEFAULT_SETTINGS["price_anomaly_rate"] * 100, 5.0) / 100
+            s["article_min_loss_k"] = st.number_input("Anomalie de prix : perte minimale (k FCFA)", 0.0, 500.0,
+                                                      DEFAULT_SETTINGS["article_min_loss_k"], 1.0)
+            s["rupture_min_ca_k"] = st.number_input("Rupture : CA habituel minimum (k FCFA / jour)", 0.0, 1000.0,
+                                                    DEFAULT_SETTINGS["rupture_min_ca_k"], 5.0)
+            s["rupture_other_sites"] = int(st.number_input("Rupture : vendu dans au moins N autres magasins", 1, 11,
+                                                           DEFAULT_SETTINGS["rupture_other_sites"], 1))
+            s["bulk_qty_mult"] = st.number_input("Vente en gros article : quantité ≥ × référence", 1.5, 20.0,
+                                                 DEFAULT_SETTINGS["bulk_qty_mult"], 0.5)
+            s["bulk_min_qty"] = st.number_input("Vente en gros article : quantité minimale", 1.0, 1000.0,
+                                                DEFAULT_SETTINGS["bulk_min_qty"], 5.0)
         st.caption("Module 25 · Synthèse PGC — calculs Python, exports sans formule.")
-    return day_files, week_file, hist_file, rec_file, s
+    return files or [], s
+
+
+KIND_LABEL = {"day": ("Hier", "#007AFF"), "week": ("Semaine", "#6A5ACD"), "article": ("Article", "#1E8E3E"),
+              "history": ("Historique", "#0A2540"), "recipients": ("Destinataires", "#6B7280"),
+              "unknown": ("Non reconnu", "#FF3B30")}
+
+
+def sidebar_recap(recog: list, dates: list, wref, av) -> None:
+    with st.sidebar:
+        st.markdown("---")
+        st.markdown("**Fichiers reconnus**")
+        html_rows = ""
+        for name, kind, detail in recog:
+            lab, col = KIND_LABEL[kind]
+            html_rows += (f'<div style="display:flex;gap:8px;align-items:flex-start;margin:4px 0;font-size:12.5px">'
+                          f'<span style="background:{col};color:#fff;border-radius:6px;padding:1px 7px;font-weight:800;'
+                          f'font-size:11px;white-space:nowrap">{lab}</span><span>{esc(name)}'
+                          + (f'<br><span style="color:#6B7280">{esc(detail)}</span>' if detail else "") + "</span></div>")
+        st.markdown(html_rows, unsafe_allow_html=True)
+        if dates:
+            st.markdown(f"**Jours rayon :** {', '.join(dfr(date.fromisoformat(d)) for d in dates[-10:])}")
+        if wref:
+            st.markdown(f"**{wref.label}**")
+        if av:
+            st.markdown(f"**Articles :** {weekday_fr(av.day)} {dfr(av.day)}"
+                        + (f" (réf. ruptures : {dfr(av.prev_day)})" if av.prev_day else ""))
+
 
 
 LANDING_CSS = """
@@ -1375,7 +1835,7 @@ LANDING_CSS = """
 .lp-steps{background:#F1FBF4;border:1px solid #D3EFDB;border-left:5px solid #34C759;border-radius:18px;
   padding:12px 18px;font-size:13.5px;line-height:1.65;color:#1C2433}
 .lp-steps ol{margin:0;padding-left:20px}.lp-steps li::marker{font-weight:800}
-.lp-exp{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:18px}
+.lp-exp{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:18px}
 .lp-exp .lp-card{margin:0}
 .lp-exp .req{display:inline-block;font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:20px;margin-left:6px;vertical-align:middle}
 .req.on{background:#FFEDEC;color:#C8261C}.req.off{background:#ECEEF3;color:#4B5563}
@@ -1412,8 +1872,10 @@ def landing(s: dict | None = None) -> None:
                                   "rayons avec décomposition Bennet, sites et matrice rayons × sites jour par jour."),
             ("🗓️ État du jour", "La journée de la veille : urgences marge, ventes en gros, effet de base N-1, "
                                 "rayons et sites."),
+            ("🔎 Articles", "Avec l'export article : anomalies de prix, articles vendus à perte (promo / hors promo), "
+                           "ruptures probables, ventes en gros confirmées, casse. Export Excel par acheteur."),
             ("🛡️ Contrôle des données", "Magasin absent ou à zéro, rayon manquant, jour non chargé, doublon, "
-                                       "écart entre l'export semaine et la somme des jours."),
+                                       "écart entre l'export semaine et la somme des jours, article ≠ rayon."),
         ]
         st.markdown("".join(f'<div class="lp-card"><h4>{t}</h4><p>{d}</p></div>' for t, d in cards),
                     unsafe_allow_html=True)
@@ -1426,16 +1888,20 @@ def landing(s: dict | None = None) -> None:
             ("r-violet", "Persistance",
              f"Perte de marge > <b>{_num(s['persist_k'], 0)} k</b> par jour, <b>2 jours de suite</b>."),
             ("r-red", "Priorité « Aujourd'hui »",
-             f"Marge négative, ou effet taux ≥ <b>{_num(s['today_k'], 0)} k</b> sur la semaine."),
+             f"Marge négative, anomalie de prix (taux < <b>{fmt_rate(s['price_anomaly_rate'], 0)}</b>), "
+             f"ou effet taux ≥ <b>{_num(s['today_k'], 0)} k</b>."),
+            ("r-navy", "N-1 article",
+             "Pas iso-jour : seuls les <b>taux de marge</b> sont comparés au N-1, jamais les volumes."),
         ]
         st.markdown("".join(f'<div class="lp-rule {c}"><span class="bd">{t}</span><p>{d}</p></div>'
                             for c, t, d in rules), unsafe_allow_html=True)
         st.markdown('<p class="lp-lab" style="margin-top:18px">Fonctionnement</p>'
                     '<div class="lp-steps"><ol>'
-                    "<li>Charge l'export <b>« Hier »</b> du jour (plusieurs jours possibles).</li>"
-                    "<li>Ajoute l'export <b>« Cette semaine »</b> pour le cumul officiel.</li>"
-                    "<li>Ajoute ton <b>historique CSV</b> pour garder les jours précédents.</li>"
-                    "<li>Traite les actions, puis télécharge la synthèse HTML et l'historique mis à jour.</li>"
+                    "<li>Glisse <b>tous tes fichiers</b> dans la zone de dépôt : le module reconnaît chaque type.</li>"
+                    "<li>Au minimum l'export <b>« Hier »</b> ; ajoute <b>« Cette semaine »</b>, l'<b>export article</b> "
+                    "et ton <b>historique CSV</b> quand tu les as.</li>"
+                    "<li>Traite les actions dans l'ordre : aujourd'hui, cette semaine, à suivre.</li>"
+                    "<li>Télécharge la synthèse HTML, l'Excel articles par acheteur et l'historique mis à jour.</li>"
                     "</ol></div>", unsafe_allow_html=True)
 
     st.markdown('<p class="lp-lab" style="margin-top:22px">Fichiers attendus</p>'
@@ -1446,6 +1912,9 @@ def landing(s: dict | None = None) -> None:
                 '<div class="lp-card"><h4>Export « Cette semaine » <span class="req off">Facultatif</span></h4>'
                 "<p>Type d'affichage <code>Cette Semaine</code>, du lundi à la veille. Le lundi, un export vide "
                 "déclenche la clôture de la semaine précédente.</p></div>"
+                '<div class="lp-card"><h4>Export article <span class="req off">Facultatif</span></h4>'
+                "<p>Article × magasin sur un jour, date lue dans les filtres. Charge aussi celui de la veille "
+                "pour fiabiliser les ruptures.</p></div>"
                 '<div class="lp-card"><h4>Historique CSV <span class="req off">Facultatif</span></h4>'
                 "<p><code>historique_synthese_pgc.csv</code> téléchargé en fin de session : une ligne par jour, "
                 "rayon et site.</p></div></div>", unsafe_allow_html=True)
@@ -1453,7 +1922,7 @@ def landing(s: dict | None = None) -> None:
             "Débit", "Débit N-1", "Volume", "Volume N-1"]
     st.markdown('<p class="lp-lab">Colonnes attendues</p><div class="lp-chips">'
                 + "".join(f"<span>{c}</span>" for c in cols) + "</div>", unsafe_allow_html=True)
-    st.info("Charge au moins un export « Hier » dans la barre latérale pour démarrer.")
+    st.info("Glisse tes fichiers dans la zone de dépôt de la barre latérale pour démarrer.")
     st.stop()
 
 
@@ -1481,56 +1950,59 @@ def sp(html_str: str) -> None:
 def main() -> None:
     st.set_page_config(page_title="Synthèse PGC", page_icon="📊", layout="wide")
     st.markdown(PAGE_CSS + f"<style>{CSS}</style>", unsafe_allow_html=True)
-    day_files, week_file, hist_file, rec_file, s = sidebar()
-    if not day_files and hist_file is None:
-        landing(s)
+    files, s = sidebar()
 
-    # ── Read files
-    errors, days, week = [], [], None
-    for f in day_files or []:
-        ef = read_export(f.getvalue(), f.name)
-        if ef.error:
-            errors.append(f"{f.name} : {ef.error}")
-            continue
-        if ef.kind == "week":
-            week = ef
-            continue
-        if ef.export_ts is None:
-            man = st.sidebar.date_input(f"Date d'export de {f.name}", key=f"d_{f.name}")
-            assign_dates(ef, man)
+    # ── Read & classify every dropped file
+    recog, days, week, history, rec_df, arts, errors = [], [], None, None, None, [], []
+    for f in files:
+        kind, obj = classify_file(f.getvalue(), f.name)
+        if kind in ("day", "week"):
+            ef = obj
+            if ef.export_ts is None:
+                man = st.sidebar.date_input(f"Date d'export de {f.name}", key=f"d_{f.name}")
+                assign_dates(ef, man)
+            else:
+                assign_dates(ef)
+            if kind == "day":
+                days.append(ef)
+                recog.append((f.name, kind, f"ventes du {dfr(ef.sales_date)}" if ef.sales_date else ""))
+            else:
+                if week is None or (ef.export_ts and week.export_ts and ef.export_ts > week.export_ts):
+                    week = ef
+                recog.append((f.name, kind, f"{dfr(ef.week_start)} → {dfr(ef.week_end)}" if ef.week_start else ""))
+        elif kind == "article":
+            if obj.day is None:
+                man = st.sidebar.date_input(f"Date des ventes de {f.name}", key=f"a_{f.name}")
+                obj.day = man
+            arts.append(obj)
+            recog.append((f.name, kind, f"ventes du {dfr(obj.day)} · {len(obj.lines):,} lignes".replace(",", " ")))
+        elif kind == "history":
+            history = obj if history is None else pd.concat([history, obj], ignore_index=True)
+            recog.append((f.name, kind, f"{obj.date.nunique()} jours"))
+        elif kind == "recipients":
+            rec_df = obj
+            recog.append((f.name, kind, f"{len(obj)} contacts"))
         else:
-            assign_dates(ef)
-        days.append(ef)
-    if week_file is not None:
-        ef = read_export(week_file.getvalue(), week_file.name)
-        if ef.error:
-            errors.append(f"{week_file.name} : {ef.error}")
-        elif ef.kind != "week":
-            errors.append(f"{week_file.name} : ce n'est pas un export « Cette Semaine » ({ef.display_type}).")
-        else:
-            week = ef
-    if week is not None:
-        if week.export_ts is None:
-            man = st.sidebar.date_input(f"Date d'export de {week.name}", key="d_week")
-            assign_dates(week, man)
-        else:
-            assign_dates(week)
+            errors.append(f"{f.name} : {obj}")
+            recog.append((f.name, "unknown", str(obj)[:80]))
+
+    if not days and history is None:
+        if files:
+            for e in errors:
+                st.error(e)
+            if arts or week is not None:
+                st.warning("Ajoute au moins un export rayon « Hier » (ou ton historique CSV) : c'est la base de la synthèse.")
+        sidebar_recap(recog, [], None, None)
+        landing(s)
     for e in errors:
         st.error(e)
-
-    history = None
-    if hist_file is not None:
-        try:
-            history = load_history(hist_file.getvalue())
-        except ValueError as exc:
-            st.error(str(exc))
 
     hist, merge_issues = merge_history(history, days)
     if hist.empty or not len(hist[hist.level == "detail"]):
         st.warning("Aucune journée exploitable.")
         st.stop()
 
-    rec = Recipients(load_recipients(rec_file))
+    rec = Recipients(rec_df if rec_df is not None else load_recipients(None))
     q_issues, incomplete = quality_checks(hist, week, s)
     issues = merge_issues + q_issues
     det = hist[hist.level == "detail"]
@@ -1538,38 +2010,51 @@ def main() -> None:
     latest = date.fromisoformat(dates[-1])
     wref = build_week_ref(hist, week, latest, issues)
 
-    # Sidebar recap
-    with st.sidebar:
-        st.markdown("---")
-        st.markdown(f"**Jours chargés :** {', '.join(dfr(date.fromisoformat(d)) for d in dates[-10:])}")
-        if wref:
-            st.markdown(f"**{wref.label}**")
+    # Articles: latest day = analysis, previous day (if loaded) = reference for stock-outs
+    av = None
+    if arts:
+        arts = sorted([a for a in arts if a.day], key=lambda a: a.day)
+        uniq = {a.day: a for a in arts}                       # last file wins per day
+        days_a = sorted(uniq)
+        today_a = uniq[days_a[-1]]
+        prev_a = uniq[days_a[-2]] if len(days_a) > 1 else None
+        av = analyze_articles(today_a, prev_a, s)
+        issues += article_issues(av, hist, latest)
+    sidebar_recap(recog, dates, wref, av)
 
     day_lines = analyze_lines(det[det.date == dates[-1]], s)
     day_tot = totals(day_lines)
-    # exclude incomplete days/sites from week reconstruction? (week export is official)
     ref = analyze_lines(wref.lines, s) if wref else day_lines
     wt = totals(ref)
     hors = wref.hors_pgc if wref else {}
     stk = streaks(hist, incomplete, s)
     acts = build_actions(ref, day_lines, latest, stk, issues, s, rec,
                          traffic_streak=traffic_streaks(hist, incomplete, s))
+    if av is not None:
+        attach_articles(acts, av)
+        acts = article_actions(av, s, rec) + acts
+        acts.sort(key=lambda a: (a.urgency if a.urgency >= 0 else 9,
+                                 a.stake_k if (a.stake_k is not None and a.kind != "rupture") else 0))
+        for a in [a for a in acts if a.urgency == URG_WEEK][int(s.get("max_week_actions", 6)):]:
+            a.urgency = -1
     main_acts = [a for a in acts if a.urgency >= 0]
     sec_acts = [a for a in acts if a.urgency < 0]
     since = since_yesterday(hist, incomplete, s)
     works = what_works(ref)
     supeco_dM = ref[ref.fmt == "Supeco"].dM.sum()
-    copil = copil_message(wt, hors, supeco_dM, main_acts)
+    copil = copil_message(wt, hors, supeco_dM, main_acts, av)
     n_pers = sum(1 for a in main_acts if any(c in ("pers", "agg") for c, _ in a.tags))
     n_res = sum(1 for k, _ in since if k == "res")
     n_dq = sum(1 for i in issues if i.level in ("r", "o"))
 
     brief = html_brief(main_acts, latest, wref.label if wref else "", n_pers, n_res, n_dq)
-    kline = html_kline(wt, hors, day_tot)
+    kline = html_kline(wt, hors, day_tot, av)
     dq = html_dq(issues)
     sp(brief)
 
-    t_act, t_sem, t_day = st.tabs(["Actions", "Analyse semaine", "État du jour"])
+    tab_names = ["Actions", "Analyse semaine", "État du jour"] + (["Articles"] if av is not None else [])
+    tabs = st.tabs(tab_names)
+    t_act, t_sem, t_day = tabs[0], tabs[1], tabs[2]
 
     # ── Actions
     with t_act:
@@ -1589,10 +2074,10 @@ def main() -> None:
             ga = [a for a in shown if a.urgency == u]
             if not ga:
                 continue
-            st_ = sum(a.stake_k for a in ga if a.stake_k is not None)
+            st_ = sum(a.stake_k for a in ga if a.stake_k is not None and a.kind != "rupture")
             col = {0: "var(--red)", 1: "var(--orange)", 2: "#8E96A8"}[u]
             sp(f'<p class="grp"><i style="background:{col}"></i>{URG_LABELS[u]}'
-               + (f" · {fmt_k(st_)} en jeu" if st_ else "") + "</p>")
+               + (f" · {fmt_k(st_)} de marge en jeu" if st_ else "") + "</p>")
             for a in ga:
                 sp(html_action(a, num[id(a)], rec))
                 with st.expander("✉️ Message à copier"):
@@ -1613,29 +2098,118 @@ def main() -> None:
         with st.expander("📋 Toutes les consignes, par destinataire"):
             by_person: dict = {}
             for a in shown:
-                key = rec.mentions(a.owners)
-                by_person.setdefault(key, []).append(a.message)
+                by_person.setdefault(rec.mentions(a.owners), []).append(a.message)
             txt = f"Synthèse PGC – consignes du {dfr(latest + timedelta(days=1))}\n\n" + "\n\n".join(
                 "\n".join(f"{i}. {m}" for i, m in enumerate(msgs, 1)) for msgs in by_person.values())
             code_block(txt)
 
-        d1, d2 = st.columns(2)
         stamp = (latest + timedelta(days=1)).isoformat()
-        with d1:
-            st.download_button("⬇️ Télécharger la synthèse (HTML)",
+        cols = st.columns(3 if av is not None else 2)
+        with cols[0]:
+            st.download_button("⬇️ Synthèse (HTML)",
                                export_html(brief, kline, dq, acts, rec, since, works, copil).encode("utf-8"),
                                f"synthese_pgc_{stamp}.html", "text/html", use_container_width=True)
-        with d2:
-            st.download_button("⬇️ Télécharger l'historique (CSV)", history_csv(hist),
+        with cols[1]:
+            st.download_button("⬇️ Historique (CSV)", history_csv(hist),
                                "historique_synthese_pgc.csv", "text/csv", use_container_width=True)
+        if av is not None:
+            with cols[2]:
+                st.download_button("⬇️ Articles par acheteur (Excel)", articles_excel(av),
+                                   f"articles_pgc_{av.day.isoformat()}.xlsx",
+                                   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                   use_container_width=True)
 
-    # ── Weekly analysis
     with t_sem:
         render_week(ref, wt, hors, hist, wref, s)
-
-    # ── Day
     with t_day:
-        render_day(day_lines, day_tot, latest, hist, s)
+        render_day(day_lines, day_tot, latest, hist, s, av)
+    if av is not None:
+        with tabs[3]:
+            render_articles(av, s)
+
+
+def _art_table(df: pd.DataFrame, cols: dict, pct: tuple = (), money: tuple = ()) -> None:
+    if df is None or df.empty:
+        st.caption("Aucun article.")
+        return
+    t = df[list(cols)].rename(columns=cols).copy()
+    for c in money:
+        if cols.get(c) in t.columns:
+            t[cols[c]] = t[cols[c]].map(lambda v: fmt_k(v / 1000, signed=False) if v >= 0 else fmt_k(v / 1000))
+    for c in pct:
+        if cols.get(c) in t.columns:
+            t[cols[c]] = t[cols[c]].map(fmt_rate)
+    if "site" in cols:
+        t[cols["site"]] = t[cols["site"]].map(site_name_only)
+    st.dataframe(t, hide_index=True, use_container_width=True)
+
+
+def render_articles(av: ArticleView, s: dict) -> None:
+    st.markdown(f"#### Articles · {weekday_fr(av.day)} {dfr(av.day)}")
+    st.caption("N-1 article non iso-jour : seuls les taux de marge sont comparés au N-1, jamais les volumes. "
+               "Périmètre : 12 magasins"
+               + (f" (exclus : {', '.join(av.excluded_sites)})" if av.excluded_sites else "") + ".")
+    c1, c2 = st.columns(2)
+    with c1:
+        f_r = st.selectbox("Rayon", ["Tous"] + RAYON_ORDER, key="art_r")
+    with c2:
+        f_s = st.selectbox("Magasin", ["Tous"] + SITE_ORDER, key="art_s")
+
+    def flt(df: pd.DataFrame) -> pd.DataFrame:
+        if df is None or df.empty:
+            return df
+        out = df
+        if f_r != "Tous" and "rayon" in out.columns:
+            out = out[out.rayon == f_r]
+        if f_s != "Tous" and "site" in out.columns:
+            out = out[out.site == f_s]
+        return out
+
+    pt = av.promo_tot
+    ll = flt(av.loss_lines)
+    rp = flt(av.ruptures)
+    sp(kpi_html([
+        ("b", "€", "CA article du jour", fmt_m(pt["ca"]), "", "", f"Poids promo {fmt_pct(pt['poids'], 1, signed=False)}"),
+        ("v", "%", "Taux promo", fmt_rate(pt["tm_promo"]), f"N-1 {fmt_rate(pt['tm_promo_n1'])}",
+         "pos" if pt["tm_promo"] >= pt["tm_promo_n1"] else "neg", f"Marge promo {fmt_k(pt['marge_promo'] / 1000)}"),
+        ("v", "%", "Taux hors promo", fmt_rate(pt["tm_hp"]), f"N-1 {fmt_rate(pt['tm_hp_n1'])}",
+         "pos" if pt["tm_hp"] >= pt["tm_hp_n1"] else "neg", ""),
+        ("b", "!", "Lignes à perte", f"{len(ll)}", fmt_k(ll.marge.sum() / 1000) if len(ll) else "", "neg",
+         f"{len(rp)} rupture{'s' if len(rp) > 1 else ''} probable{'s' if len(rp) > 1 else ''}"),
+    ]))
+
+    st.markdown("##### Promo et hors promo par rayon")
+    pr = av.promo.copy()
+    if len(pr):
+        show = pd.DataFrame({
+            "Rayon": pr.rayon,
+            "CA": [fmt_m(v) for v in pr.ca],
+            "Poids promo": [fmt_pct(_rate(a, b), 1, signed=False) for a, b in zip(pr.ca_promo, pr.ca)],
+            "Taux promo": [fmt_rate(_rate(a, b)) for a, b in zip(pr.marge_promo, pr.ca_promo)],
+            "Taux promo N-1": [fmt_rate(_rate(a, b)) for a, b in zip(pr.marge_promo_n1, pr.ca_promo_n1)],
+            "Taux hors promo": [fmt_rate(_rate(a, b)) for a, b in zip(pr.marge_hp, pr.ca_hp)],
+            "Taux hors promo N-1": [fmt_rate(_rate(a, b)) for a, b in zip(pr.marge_hp_n1, pr.ca_hp_n1)],
+            "Marge promo": [fmt_k(v / 1000) for v in pr.marge_promo],
+        })
+        st.dataframe(show, hide_index=True, use_container_width=True)
+
+    st.markdown(f"##### Anomalies de prix (taux < {fmt_rate(s['price_anomaly_rate'], 0)})")
+    _art_table(flt(av.anomalies), {"rayon": "Rayon", "lib": "Article", "site": "Magasin", "ca": "CA",
+                                   "marge": "Marge", "tm": "Taux", "tm_n1": "Taux N-1", "qte": "Qté"},
+               pct=("tm", "tm_n1"), money=("ca", "marge"))
+    st.markdown("##### Articles vendus à perte")
+    _art_table(ll, {"rayon": "Rayon", "lib": "Article", "site": "Magasin", "ca": "CA", "marge": "Marge",
+                    "tm": "Taux", "tm_n1": "Taux N-1", "ca_promo": "CA promo"},
+               pct=("tm", "tm_n1"), money=("ca", "marge", "ca_promo"))
+    st.markdown(f"##### Ruptures probables · référence : {av.rupture_source}")
+    _art_table(rp, {"rayon": "Rayon", "lib": "Article", "site": "Magasin", "ca_ref": "CA habituel",
+                    "qte_ref": "Qté habituelle", "n_autres": "Vendu dans N autres magasins"}, money=("ca_ref",))
+    st.markdown("##### Ventes en gros confirmées")
+    _art_table(flt(av.bulk), {"rayon": "Rayon", "lib": "Article", "site": "Magasin", "qte": "Qté",
+                              "qte_ref": "Qté réf.", "ca": "CA", "tm": "Taux"}, pct=("tm",), money=("ca",))
+    st.markdown("##### Casse (information)")
+    _art_table(flt(av.casse), {"rayon": "Rayon", "lib": "Article", "site": "Magasin", "casse": "Casse (valeur)",
+                               "casse_qte": "Casse (qté)"}, money=("casse",))
 
 
 def render_week(ref: pd.DataFrame, wt: dict, hors: dict, hist: pd.DataFrame, wref: WeekRef | None, s: dict) -> None:
@@ -1760,7 +2334,7 @@ def render_week(ref: pd.DataFrame, wt: dict, hors: dict, hist: pd.DataFrame, wre
     sp(html_matrix(hist))
 
 
-def render_day(day_lines: pd.DataFrame, dt: dict, latest: date, hist: pd.DataFrame, s: dict) -> None:
+def render_day(day_lines: pd.DataFrame, dt: dict, latest: date, hist: pd.DataFrame, s: dict, av=None) -> None:
     st.markdown(f"#### {weekday_fr(latest).capitalize()} {dfr(latest)}")
     urg = day_lines[(day_lines.marge < 0) & (day_lines.ca > 0)]
     low = day_lines[(day_lines.tm < 0.05) & (day_lines.ca > 0) & (day_lines.tm_n1 > 0.10)]
@@ -1793,6 +2367,11 @@ def render_day(day_lines: pd.DataFrame, dt: dict, latest: date, hist: pd.DataFra
     if len(base):
         expl.append(f"Effet de base N-1 : {fmt_m(base.ca_n1.sum())} de ventes en gros en N-1 ("
                     + ", ".join(f"{x.rayon} {site_name_only(x.site)}" for _, x in base.iterrows()) + ").")
+    if av is not None and av.day == latest and av.promo_tot.get("ca_promo"):
+        pt = av.promo_tot
+        expl.append(f"Promo : {fmt_pct(pt['poids'], 0, signed=False)} du CA à {fmt_rate(pt['tm_promo'])} de marge "
+                    f"(N-1 {fmt_rate(pt['tm_promo_n1'])}), hors promo à {fmt_rate(pt['tm_hp'])} "
+                    f"(N-1 {fmt_rate(pt['tm_hp_n1'])}).")
     if expl:
         sp('<div class="note"><b>Ce qui explique la journée.</b> ' + " ".join(esc(e) for e in expl) + "</div>")
     br = bennet_group(day_lines, "rayon").set_index("rayon").reindex(RAYON_ORDER).dropna(how="all")
