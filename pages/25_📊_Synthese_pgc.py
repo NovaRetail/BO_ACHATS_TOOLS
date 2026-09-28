@@ -660,8 +660,8 @@ def build_week_ref(hist: pd.DataFrame, week: ExportFile | None, latest: date | N
                 return wr
         elif week.monday:
             # Monday export with content => previous full week (checked against history in quality_checks)
-            issues.append(Issue("i", "Export du lundi", "L'export semaine du lundi contient la semaine précédente",
-                                "Il est utilisé comme clôture officielle de la semaine précédente."))
+            issues.append(Issue("g", "Clôture S-1", f"Export semaine du lundi : semaine du {dfr(week.week_start)} au {dfr(week.week_end)}",
+                                "Semaine précédente complète, utilisée comme clôture officielle."))
             wr = WeekRef(f"Semaine clôturée · {dfr(week.week_start)} → {dfr(week.week_end)}", "export",
                          week.week_start, week.week_end, week.detail.copy(), week.hors_pgc)
             return wr
@@ -1988,8 +1988,8 @@ def landing(s: dict | None = None) -> None:
                 "<p>Power BI, type d'affichage <code>Hier</code>. La date des ventes est lue dans le nom "
                 "du fichier (date d'export − 1 jour).</p></div>"
                 '<div class="lp-card"><h4>Export « Cette semaine » <span class="req off">Facultatif</span></h4>'
-                "<p>Type d'affichage <code>Cette Semaine</code>, du lundi à la veille. Le lundi, un export vide "
-                "déclenche la clôture de la semaine précédente.</p></div>"
+                "<p>Type d'affichage <code>Cette Semaine</code>, du lundi à la veille. Le lundi, il contient la "
+                "semaine précédente complète : elle sert de clôture officielle.</p></div>"
                 '<div class="lp-card"><h4>Export article <span class="req off">Facultatif</span></h4>'
                 "<p>Article × magasin sur un jour, date lue dans les filtres. Charge aussi celui de la veille "
                 "pour fiabiliser les ruptures.</p></div>"
