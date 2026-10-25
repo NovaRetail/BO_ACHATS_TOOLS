@@ -1,0 +1,3 @@
+# Masque PowerPoint de l'entreprise : jamais dans le dépôt public
+revue_codir/assets/*.pptx
+__pycache__/

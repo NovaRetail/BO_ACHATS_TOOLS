@@ -33,6 +33,7 @@ META = {
     "17": ("Reporting Sous-Familles","Alertes marge Sous-Famille × Site · 3 paliers",    "#FF9500", "reporting"),
     "18": ("Reporting Vente CA",     "Détection CA / Flop · 4 critères C1–C4 · scoring",  "#FF3B30", "reporting"),
     "19": ("Reporting Promo",        "Poids promo · taux marge · dépendance",            "#34C759", "reporting"),
+    "26": ("Revue CODIR",            "Rapport DG hebdo · entonnoir Vs N-1 · masque PPT", "#24235C", "reporting"),
 }
 
 # ordre + libellés des rubriques (celles non vides s'affichent)
