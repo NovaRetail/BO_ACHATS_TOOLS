@@ -13,32 +13,37 @@ st.set_page_config(page_title="NovaRetail Solutions", page_icon="🛍️", layou
 # ════════════════════════════════════════════════════════════════════════════
 PAGES_DIR = Path("pages")
 
-# num : (nom affiché, description, couleur, section)
+# num : (nom affiché, description, couleur, rubrique) — l'ordre ci-dessous est l'ordre d'affichage
 META = {
-    "05": ("Suivi Implantation",     "Taux T1 · alertes article × site · cessions",       "#1A7A3A", "assort"),
-    "06": ("Marges Négatives",       "Flop 100 · matrice rayon × magasin · casse",        "#FF3B30", "perf"),
-    "07": ("OTIF",                   "Fill Rate · On Time · watchlist GOLD/SILVER",       "#1A7A3A", "fourn"),
-    "12": ("Bascule XD",             "DL → Cross-Docking · plan lissage",                 "#5E35B1", "fourn"),
-    "15": ("COPIL Hebdo",            "COPIL exécutif · Destructeurs / Performeurs",       "#C0392B", "reporting"),
-    "16": ("Reporting Ventes",       "Reporting COPIL · 1 onglet par rayon",              "#007AFF", "reporting"),
-    "17": ("Reporting Sous-Familles","Alertes marge Sous-Famille × Site · 3 paliers",     "#FF9500", "reporting"),
-    "18": ("Reporting Vente CA",     "Détection CA / Flop · 4 critères C1–C4 · scoring",  "#FF3B30", "reporting"),
-    "19": ("Reporting Promo",        "Poids promo · taux marge · dépendance",             "#34C759", "reporting"),
-    "21": ("COPIL Journalier PGC",   "Points chauds du jour · export J-1 optionnel",      "#C0392B", "reporting"),
-    "22": ("Suivi Rayon vs Pays",    "Rayon vs tendance pays · magasins à regarder",      "#007AFF", "perf"),
-    "23": ("Cockpit Promo",          "Disponibilité et marge des offres promo",           "#FF9500", "perf"),
-    "24": ("PGC Radar",              "Réel vs Budget vs N-1 · alertes à traiter",         "#5E35B1", "perf"),
-    "25": ("Synthèse PGC",           "Synthèse quotidienne orientée action",              "#007AFF", "reporting"),
-    "26": ("Revue CODIR",            "Rapport DG hebdo · entonnoir Vs N-1 · masque PPT",  "#24235C", "reporting"),
+    # Rituels de pilotage
+    "26": ("Revue CODIR",             "Rapport hebdo à la DG · entonnoir Vs N-1 · PowerPoint",  "#24235C", "pilotage"),
+    "15": ("COPIL Hebdo",             "En maintenance · destructeurs et performeurs",          "#8E8E93", "pilotage"),
+    "21": ("COPIL Journalier PGC",    "Points chauds du jour · comparaison avec la veille",    "#C0392B", "pilotage"),
+    "25": ("Synthèse PGC",            "Synthèse quotidienne · actions à mener",                "#007AFF", "pilotage"),
+    # Ventes et marge
+    "24": ("PGC Radar",               "Réel vs Budget vs N-1 · alertes à traiter",             "#5E35B1", "ventes"),
+    "16": ("Reporting Ventes",        "Reporting COPIL · un onglet par rayon",                 "#007AFF", "ventes"),
+    "18": ("Reporting Vente CA",      "CA en recul · 4 critères de détection · scoring",       "#FF3B30", "ventes"),
+    "17": ("Reporting Sous-Familles", "Alertes marge sous-famille × magasin · 3 paliers",      "#FF9500", "ventes"),
+    "22": ("Suivi Rayon vs Pays",     "Rayon vs tendance pays · magasins à regarder",          "#007AFF", "ventes"),
+    "06": ("Marges Négatives",        "Flop 100 · matrice rayon × magasin",                    "#FF3B30", "ventes"),
+    # Promo
+    "23": ("Cockpit Promo",           "Disponibilité et marge des offres promo",               "#FF9500", "promo"),
+    "19": ("Reporting Promo",         "Poids promo · taux de marge · dépendance",              "#34C759", "promo"),
+    # Assortiment et fournisseurs
+    "05": ("Suivi Implantation",      "Taux T1 · alertes article × magasin · cessions",        "#1A7A3A", "assort"),
+    "07": ("OTIF",                    "Taux de service · ponctualité · watchlist GOLD/SILVER", "#1A7A3A", "assort"),
+    "12": ("Bascule XD",              "Livraison directe → cross-docking · plan de lissage",   "#5E35B1", "assort"),
 }
+ORDER = list(META)
 
 # ordre + libellés des rubriques (celles non vides s'affichent)
 SECTIONS = [
-    ("reporting", "📊 Reporting & COPIL"),
-    ("perf",      "📈 Performance commerciale"),
-    ("assort",    "🏪 Assortiment & stock"),
-    ("fourn",     "🚚 Fournisseurs & organisation"),
-    ("autres",    "🧩 Autres modules"),
+    ("pilotage", "📋 Rituels de pilotage"),
+    ("ventes",   "📊 Ventes et marge"),
+    ("promo",    "🎯 Promo"),
+    ("assort",   "🏪 Assortiment et fournisseurs"),
+    ("autres",   "🧩 Autres modules"),
 ]
 
 DEFAULT_COLOR = "#48484A"
@@ -68,7 +73,8 @@ PAGES = discover_pages()
 
 
 def pages_of(section_key):
-    return [m for m in PAGES if m["section"] == section_key]
+    group = [m for m in PAGES if m["section"] == section_key]
+    return sorted(group, key=lambda m: ORDER.index(m["num"]) if m["num"] in ORDER else 99)
 
 
 # ── STYLE ────────────────────────────────────────────────────────────────────
@@ -100,22 +106,14 @@ header[data-testid="stHeader"] { display: none !important; }
 /* libellés de rubrique dans la sidebar */
 .side-group { font-size: 10px; font-weight: 700; color: #8E8E93; text-transform: uppercase; letter-spacing: .06em; margin: 14px 0 4px; }
 
-/* Carte récap autour du st.page_link */
-.mod-wrap {
-    border-radius: 12px; overflow: hidden; margin-bottom: 8px;
-    border: 0.5px solid #E5E5EA; border-left-width: 3px; background: #FFFFFF;
-    height: 100%;
+/* Cartes de modules : st.container(border=True) */
+[data-testid="stMain"] [data-testid="stVerticalBlockBorderWrapper"] {
+    background: #FFFFFF; border-radius: 12px !important; border: 0.5px solid #E5E5EA !important;
+    padding: 2px 4px 6px !important;
 }
-.mod-wrap [data-testid="stPageLink"] {
-    background: transparent !important; border: none !important;
-    border-radius: 0 !important; display: block !important; width: 100% !important;
-}
-.mod-wrap [data-testid="stPageLink"]:hover { background: #F9F9FB !important; }
-.mod-wrap [data-testid="stPageLink"] p {
-    font-size: 13px !important; font-weight: 500 !important; color: #1C1C1E !important;
-    padding: 12px 14px !important; margin: 0 !important;
-    white-space: pre-line !important; line-height: 1.5 !important;
-}
+.mod-bar  { height: 3px; width: 34px; border-radius: 2px; margin: 6px 0 2px 10px; }
+.mod-desc { font-size: 12px; color: #8E8E93; margin: -6px 0 2px 10px; line-height: 1.4; min-height: 34px; }
+[data-testid="stMain"] [data-testid="stPageLink"] p { font-size: 14px !important; font-weight: 600 !important; color: #1C1C1E !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -124,7 +122,7 @@ with st.sidebar:
     st.markdown("""
 <div style='margin-bottom:8px;padding-bottom:16px;border-bottom:0.5px solid #E5E5EA'>
   <div style='font-size:17px;font-weight:700;color:#1C1C1E;letter-spacing:-0.02em'>NovaRetail Solutions</div>
-  <div style='font-size:11px;color:#8E8E93;margin-top:2px'>Hub analytique · Équipe Achats CI</div>
+  <div style='font-size:11px;color:#8E8E93;margin-top:2px'>Hub analytique · Achats Carrefour CI</div>
 </div>""", unsafe_allow_html=True)
 
     for sec_key, sec_label in SECTIONS:
@@ -137,24 +135,26 @@ with st.sidebar:
 
 # ── EN-TÊTE ──────────────────────────────────────────────────────────────────
 st.markdown("<div class='page-title'>NovaRetail Solutions</div>", unsafe_allow_html=True)
-st.markdown("<div class='page-caption'>Plateforme analytique · Équipe Achats Carrefour CI</div>", unsafe_allow_html=True)
+st.markdown("<div class='page-caption'>Plateforme analytique · Achats et category management · Carrefour Côte d\'Ivoire</div>", unsafe_allow_html=True)
 
 # ── KPIs (compteur de modules automatique) ───────────────────────────────────
 k1, k2, k3, k4, k5 = st.columns(5)
 for col, val, label in [
-    (k1, str(len(PAGES)), "Modules actifs"), (k2, "4", "Rayons couverts"),
-    (k3, "12", "Sites réseau"),              (k4, "v2.5", "Version"),
-    (k5, "Mai 2026", "Dernière période"),
+    (k1, str(len(PAGES)), "Modules actifs"),
+    (k2, str(sum(1 for k, _ in SECTIONS if pages_of(k))), "Rubriques"),
+    (k3, "3", "Secteurs couverts"),
+    (k4, "12", "Magasins"),
+    (k5, "v2.5", "Version"),
 ]:
     col.markdown(f'<div class="kpi-bar"><div class="kpi-bar-val">{val}</div><div class="kpi-bar-label">{label}</div></div>', unsafe_allow_html=True)
 
 # ── BLOC PRINCIPAL : récap de toutes les apps ────────────────────────────────
 def mod_card(m):
-    st.markdown(f"<div class='mod-wrap' style='border-left-color:{m['color']}'>", unsafe_allow_html=True)
-    titre = f"{m['emoji']}  {m['name']}  ›"
-    label = f"{titre}\n{m['desc']}" if m["desc"] else titre
-    st.page_link(m["path"], label=label)
-    st.markdown("</div>", unsafe_allow_html=True)
+    with st.container(border=True):
+        st.markdown(f"<div class='mod-bar' style='background:{m['color']}'></div>", unsafe_allow_html=True)
+        st.page_link(m["path"], label=f"{m['emoji']}  {m['name']}  ›")
+        st.markdown(f"<div class='mod-desc'>{m['desc'] or '&nbsp;'}</div>", unsafe_allow_html=True)
+
 
 for sec_key, sec_label in SECTIONS:
     group = pages_of(sec_key)
