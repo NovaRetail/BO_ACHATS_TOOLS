@@ -199,7 +199,7 @@ def prepare(found: dict) -> dict:
     checks = []
     caA, caB = fam['CA'].sum(), ds['CA'].sum()
     ecart = abs(caA - caB) / caB if caB else 1
-    checks.append(('CA export A = CA export B', ecart <= TOLERANCE, f'{fm(caA)} M contre {fm(caB)} M (écart {ecart * 100:.3f} %)'))
+    checks.append(('CA export A = CA export B', ecart <= TOLERANCE, f'{fm(caA)} M contre {fm(caB)} M (écart {fnum(ecart * 100, 3)} %)'))
     tks = st['T'].sum()
     checks.append(('Tickets des sites = tickets du réseau', abs(tks - T) <= max(1, T * TOLERANCE), f'{fnum(tks, 0)} contre {fnum(T, 0)}'))
     checks.append(('12 magasins dans chaque export', fam['Site'].nunique() == 12 and st['Site'].nunique() == 12,
