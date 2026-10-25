@@ -15,33 +15,24 @@ PAGES_DIR = Path("pages")
 
 # num : (nom affiché, description, couleur, rubrique) — l'ordre ci-dessous est l'ordre d'affichage
 META = {
-    # Rituels de pilotage
+    # Pilotage
     "26": ("Revue CODIR",             "Rapport hebdo à la DG · entonnoir Vs N-1 · PowerPoint",  "#24235C", "pilotage"),
-    "15": ("COPIL Hebdo",             "En maintenance · destructeurs et performeurs",          "#8E8E93", "pilotage"),
-    "21": ("COPIL Journalier PGC",    "Points chauds du jour · comparaison avec la veille",    "#C0392B", "pilotage"),
-    "25": ("Synthèse PGC",            "Synthèse quotidienne · actions à mener",                "#007AFF", "pilotage"),
+    "24": ("PGC Radar",               "Réel vs Budget vs N-1 · alertes à traiter",             "#5E35B1", "pilotage"),
     # Ventes et marge
-    "24": ("PGC Radar",               "Réel vs Budget vs N-1 · alertes à traiter",             "#5E35B1", "ventes"),
-    "16": ("Reporting Ventes",        "Reporting COPIL · un onglet par rayon",                 "#007AFF", "ventes"),
     "18": ("Reporting Vente CA",      "CA en recul · 4 critères de détection · scoring",       "#FF3B30", "ventes"),
     "17": ("Reporting Sous-Familles", "Alertes marge sous-famille × magasin · 3 paliers",      "#FF9500", "ventes"),
     "22": ("Suivi Rayon vs Pays",     "Rayon vs tendance pays · magasins à regarder",          "#007AFF", "ventes"),
     "06": ("Marges Négatives",        "Flop 100 · matrice rayon × magasin",                    "#FF3B30", "ventes"),
-    # Promo
-    "23": ("Cockpit Promo",           "Disponibilité et marge des offres promo",               "#FF9500", "promo"),
-    "19": ("Reporting Promo",         "Poids promo · taux de marge · dépendance",              "#34C759", "promo"),
     # Assortiment et fournisseurs
     "05": ("Suivi Implantation",      "Taux T1 · alertes article × magasin · cessions",        "#1A7A3A", "assort"),
     "07": ("OTIF",                    "Taux de service · ponctualité · watchlist GOLD/SILVER", "#1A7A3A", "assort"),
-    "12": ("Bascule XD",              "Livraison directe → cross-docking · plan de lissage",   "#5E35B1", "assort"),
 }
 ORDER = list(META)
 
 # ordre + libellés des rubriques (celles non vides s'affichent)
 SECTIONS = [
-    ("pilotage", "📋 Rituels de pilotage"),
+    ("pilotage", "📋 Pilotage"),
     ("ventes",   "📊 Ventes et marge"),
-    ("promo",    "🎯 Promo"),
     ("assort",   "🏪 Assortiment et fournisseurs"),
     ("autres",   "🧩 Autres modules"),
 ]
