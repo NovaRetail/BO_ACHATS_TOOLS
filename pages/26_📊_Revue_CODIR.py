@@ -2,7 +2,7 @@
 
 Entrées : exports Power BI A (famille × site), B (rayon × site), C (site) ; classeurs « Causes et actions » complétés.
 Sorties : classeur des chefs de groupe (valeurs, sans formule) et rapport PowerPoint 5 pages + annexe sur le masque.
-Calculs : package revue_codir/ (engine, excel_cdg, ppt_report).
+Calculs : package modules/revue_codir/ (engine, excel_cdg, ppt_report).
 """
 from __future__ import annotations
 
@@ -20,13 +20,13 @@ import streamlit as st
 
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from revue_codir import engine as E  # noqa: E402
-from revue_codir import excel_cdg as X  # noqa: E402
-from revue_codir import ppt_report as P  # noqa: E402
+from modules.revue_codir import engine as E  # noqa: E402
+from modules.revue_codir import excel_cdg as X  # noqa: E402
+from modules.revue_codir import ppt_report as P  # noqa: E402
 
 warnings.filterwarnings('ignore')
 ROOT = Path(__file__).resolve().parent.parent
-MASQUE = ROOT / 'revue_codir' / 'assets' / 'masque_cfao_consumer.pptx'  # non versionné (dépôt public)
+MASQUE = ROOT / 'modules' / 'revue_codir' / 'assets' / 'masque_cfao_consumer.pptx'  # non versionné (dépôt public)
 
 st.set_page_config(page_title='Revue de performance', page_icon='📊', layout='wide')
 

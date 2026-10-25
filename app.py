@@ -15,25 +15,21 @@ PAGES_DIR = Path("pages")
 
 # num : (nom affiché, description, couleur, section)
 META = {
-    "01": ("Scoring ABC",            "Classification articles · 5 règles de reco",       "#007AFF", "perf"),
-    "02": ("Ventes PBI",             "Comparaison hebdo CA / Marge · 2 périodes",        "#5E35B1", "perf"),
-    "03": ("Détention Top CA",       "GOLD / SILVER · IM / LO · articles permanents",    "#B45309", "assort"),
-    "04": ("Performance Promo",      "Poids promo · taux marge · dépendance",            "#FF9500", "perf"),
-    "05": ("Suivi Implantation",     "Taux T1 · alertes article × site · cessions",      "#1A7A3A", "assort"),
-    "06": ("Marges Négatives",       "Flop 100 · matrice rayon × magasin · casse",       "#FF3B30", "perf"),
-    "07": ("OTIF",                   "Fill Rate · On Time · watchlist GOLD/SILVER",      "#1A7A3A", "fourn"),
-    "08": ("Ruptures OOS",           "Commander ou céder · seuil paramétrable",          "#B45309", "assort"),
-    "09": ("Tasks Tracker",          "Kanban équipe · Google Sheets",                    "#48484A", "fourn"),
-    "10": ("Perf Hebdo",             "Top CA · Flop marges · Top casse par rayon",       "#5E35B1", "perf"),
-    "11": ("Rentabilité",            "Cockpit direction · score santé · vs N-1",         "#C0392B", "perf"),
-    "12": ("Bascule XD",             "DL → Cross-Docking · plan lissage",                "#5E35B1", "fourn"),
-    "13": ("Fidélité Cagnotte",      "Budget cagnotte · poids % programme",              "#007AFF", "assort"),
-    "15": ("COPIL Hebdo",            "COPIL exécutif · Destructeurs / Performeurs",      "#C0392B", "reporting"),
-    "16": ("Reporting Ventes",       "Reporting COPIL · 1 onglet par rayon",             "#007AFF", "reporting"),
-    "17": ("Reporting Sous-Familles","Alertes marge Sous-Famille × Site · 3 paliers",    "#FF9500", "reporting"),
+    "05": ("Suivi Implantation",     "Taux T1 · alertes article × site · cessions",       "#1A7A3A", "assort"),
+    "06": ("Marges Négatives",       "Flop 100 · matrice rayon × magasin · casse",        "#FF3B30", "perf"),
+    "07": ("OTIF",                   "Fill Rate · On Time · watchlist GOLD/SILVER",       "#1A7A3A", "fourn"),
+    "12": ("Bascule XD",             "DL → Cross-Docking · plan lissage",                 "#5E35B1", "fourn"),
+    "15": ("COPIL Hebdo",            "COPIL exécutif · Destructeurs / Performeurs",       "#C0392B", "reporting"),
+    "16": ("Reporting Ventes",       "Reporting COPIL · 1 onglet par rayon",              "#007AFF", "reporting"),
+    "17": ("Reporting Sous-Familles","Alertes marge Sous-Famille × Site · 3 paliers",     "#FF9500", "reporting"),
     "18": ("Reporting Vente CA",     "Détection CA / Flop · 4 critères C1–C4 · scoring",  "#FF3B30", "reporting"),
-    "19": ("Reporting Promo",        "Poids promo · taux marge · dépendance",            "#34C759", "reporting"),
-    "26": ("Revue CODIR",            "Rapport DG hebdo · entonnoir Vs N-1 · masque PPT", "#24235C", "reporting"),
+    "19": ("Reporting Promo",        "Poids promo · taux marge · dépendance",             "#34C759", "reporting"),
+    "21": ("COPIL Journalier PGC",   "Points chauds du jour · export J-1 optionnel",      "#C0392B", "reporting"),
+    "22": ("Suivi Rayon vs Pays",    "Rayon vs tendance pays · magasins à regarder",      "#007AFF", "perf"),
+    "23": ("Cockpit Promo",          "Disponibilité et marge des offres promo",           "#FF9500", "perf"),
+    "24": ("PGC Radar",              "Réel vs Budget vs N-1 · alertes à traiter",         "#5E35B1", "perf"),
+    "25": ("Synthèse PGC",           "Synthèse quotidienne orientée action",              "#007AFF", "reporting"),
+    "26": ("Revue CODIR",            "Rapport DG hebdo · entonnoir Vs N-1 · masque PPT",  "#24235C", "reporting"),
 }
 
 # ordre + libellés des rubriques (celles non vides s'affichent)
@@ -147,7 +143,7 @@ st.markdown("<div class='page-caption'>Plateforme analytique · Équipe Achats C
 k1, k2, k3, k4, k5 = st.columns(5)
 for col, val, label in [
     (k1, str(len(PAGES)), "Modules actifs"), (k2, "4", "Rayons couverts"),
-    (k3, "13", "Sites réseau"),              (k4, "v2.4", "Version"),
+    (k3, "12", "Sites réseau"),              (k4, "v2.5", "Version"),
     (k5, "Mai 2026", "Dernière période"),
 ]:
     col.markdown(f'<div class="kpi-bar"><div class="kpi-bar-val">{val}</div><div class="kpi-bar-label">{label}</div></div>', unsafe_allow_html=True)
@@ -176,6 +172,6 @@ for sec_key, sec_label in SECTIONS:
 st.markdown("---")
 st.markdown(
     f'<div style="text-align:center;color:#C7C7CC;font-size:11px;padding:8px 0">'
-    f'NovaRetail Solutions · v2.4 · {len(PAGES)} modules · Carrefour Côte d\'Ivoire</div>',
+    f'NovaRetail Solutions · v2.5 · {len(PAGES)} modules · Carrefour Côte d\'Ivoire</div>',
     unsafe_allow_html=True,
 )

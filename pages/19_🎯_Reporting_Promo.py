@@ -22,7 +22,7 @@ dans le rapport de contrôle, sans jamais empêcher la consultation des données
 
 import streamlit as st
 import pandas as pd
-import utils_promo as up
+from core import utils_promo as up
 
 st.set_page_config(page_title="Reporting Promo · SmartBuyer", page_icon="🎯", layout="wide", initial_sidebar_state="expanded")
 
