@@ -1,0 +1,11 @@
+# Masque PowerPoint de l'entreprise : jamais dans le dépôt
+modules/revue_codir/assets/*.pptx
+
+# Exports de données : jamais dans le dépôt
+*.xlsx
+*.xls
+
+# Python et secrets
+__pycache__/
+.streamlit/secrets.toml
+.venv/
