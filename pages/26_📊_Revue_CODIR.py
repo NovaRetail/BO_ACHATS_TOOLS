@@ -92,6 +92,17 @@ def export_card(k):
         Repère : {x['repere']}.</div></div>""")
 
 
+def help_text(k):
+    """Infobulle de l'emplacement : toutes les colonnes nécessaires, axes et mesures, puis filtres."""
+    x = EXPORTS[k]
+    cols = E.REQUIRED[k]
+    return (f"**{x['titre']}**  \n{x['role']}\n\n"
+            f"**Colonnes nécessaires ({len(cols)})**  \n"
+            + '  \n'.join(f"• {c}" + (' (axe en lignes)' if c in x['lignes'] else '') for c in cols)
+            + "\n\n**Filtres**  \n" + '  \n'.join(f"• {a} : {b}" for a, b in x['filtres'])
+            + f"\n\n**Repère** : {x['repere']}.")
+
+
 def slot_status(k, f):
     """Contrôle immédiat du fichier déposé dans l'emplacement k."""
     try:
@@ -120,7 +131,7 @@ T.sidebar_label('1 · Les 3 exports Power BI')
 files, oks = {}, {}
 with st.sidebar:
     for k, lab in [('A', 'Export A · Famille × Magasin'), ('B', 'Export B · Rayon × Magasin'), ('C', 'Export C · Magasin')]:
-        f = st.file_uploader(lab, type=['xlsx'], key=f'exp_{k}', help=EXPORTS[k]['role'])
+        f = st.file_uploader(lab, type=['xlsx'], key=f'exp_{k}', help=help_text(k))
         if f:
             files[k] = f
             oks[k] = slot_status(k, f)

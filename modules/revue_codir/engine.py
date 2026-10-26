@@ -378,10 +378,11 @@ def _texts(R):
     sect = R['sect']
     t = {}
     tk, pan = g['tk'], g['pan']
+    up = g['dM'] >= 0
     if tk >= 0 and pan < 0:
-        drv = 'le panier annule le trafic'
+        drv = 'le trafic compense un panier en baisse' if up else 'le panier annule le trafic'
     elif tk < 0 and pan >= 0:
-        drv = 'le trafic recule, le panier résiste'
+        drv = 'le panier compense un trafic en baisse' if up else 'le trafic recule, le panier résiste'
     elif tk < 0 and pan < 0:
         drv = 'trafic et panier en baisse'
     else:
@@ -389,10 +390,10 @@ def _texts(R):
     t['p2_title'] = (f"marge {fdm(g['dM'])} M FCFA, {drv}")
     order = sorted(SECTEUR_ORDER, key=lambda s: sect[s]['dM'])
     worst, best = order[0], order[-1]
+    art = lambda x: f"le {x}"
     if sect[best]['dM'] > 0 and sect[worst]['dM'] < 0:
-        t['p3_title'] = f"le {best} compense, le {worst} pèse" if best != 'Non-alimentaire' else f"le Non-alimentaire compense, le {worst} pèse"
-        if worst == 'Non-alimentaire':
-            t['p3_title'] = f"le {best} compense, le Non-alimentaire pèse"
+        verbe = 'compense' if g['dM'] < 0 else 'porte la hausse'
+        t['p3_title'] = f"{art(best)} {verbe}, {art(worst)} pèse"
     elif sect[worst]['dM'] >= 0:
         t['p3_title'] = 'les trois secteurs progressent'
     else:

@@ -1,7 +1,8 @@
 """Rapport PowerPoint à la Direction Générale, généré sur le masque de l'entreprise.
 
-build_report(R, masque_path, out) : 5 pages principales + annexe (A1 à A4).
-Les chiffres viennent tous de `R` (engine.compute) ; les « Causes et actions » de engine.merge_comments.
+build_report(R, masque, out) : 5 pages principales + annexe (A1 à A4).
+Mise en page « exécutive » : un message par page (titre), gros chiffres, graphiques natifs modifiables,
+un encadré « À retenir », beaucoup d'air. Tous les chiffres viennent de `R` (engine.compute).
 """
 from __future__ import annotations
 
@@ -10,7 +11,7 @@ import copy
 from pptx import Presentation
 from pptx.chart.data import CategoryChartData
 from pptx.dml.color import RGBColor
-from pptx.enum.chart import XL_CHART_TYPE, XL_LABEL_POSITION
+from pptx.enum.chart import XL_CHART_TYPE, XL_LABEL_POSITION, XL_TICK_LABEL_POSITION
 from pptx.enum.shapes import MSO_SHAPE
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.oxml.ns import qn
@@ -18,16 +19,26 @@ from pptx.util import Inches, Pt
 
 from . import engine as E
 
-NAVY, ORANGE, INK, MUTE = '24235C', 'F19F39', '1E2140', '6B7090'
-NEG, POS, SMALL, GREY, LIGHT = 'C0392B', '1E8449', 'B5B9CC', 'ECEDF2', 'F3F4F8'
-TNEG, TPOS = 'B3261E', '1B7A45'
+# ------------------------------------------------------------------ charte
+NAVY, ORANGE = '24235C', 'F19F39'
+INK, MUTE, LINE, SOFT, PAPER = '1E2140', '6B7090', 'DADDE6', 'F4F5F8', 'FFFFFF'
+NEG, POS, SMALL = 'C0392B', '1E8449', 'B5B9CC'
+NEG_T, POS_T = 'B3261E', '1B7A45'
+NEG_BG, POS_BG = 'FBEAE8', 'E7F4EC'
+N1_BAR = '9FB0D6'
+X0, W = 0.61, 12.1           # marge gauche et largeur utile
+Y0 = 1.5                     # haut de la zone de contenu (sous le bandeau du masque)
 
 
 def rgb(h):
     return RGBColor.from_string(h)
 
 
-# ------------------------------------------------------------------ outils de mise en page
+def sc(v, small=False):
+    return MUTE if small else (NEG_T if v < 0 else POS_T)
+
+
+# ------------------------------------------------------------------ outils
 def _drop_all_slides(prs):
     sld = prs.slides._sldIdLst
     for s in list(sld):
@@ -36,51 +47,31 @@ def _drop_all_slides(prs):
 
 
 def _layout(prs, name):
-    for l in prs.slide_layouts:
-        if l.name == name:
-            return l
+    for lay in prs.slide_layouts:
+        if lay.name == name:
+            return lay
     raise KeyError(name)
 
 
 def _clone_footer(slide, layout, footer_text):
     """Recopie le pied de page et le numéro de page du masque (python-pptx ne les crée pas)."""
     for ph in layout.placeholders:
-        t = ph.placeholder_format.type
-        if t is None:
-            continue
-        name = str(t)
+        name = str(ph.placeholder_format.type)
         if 'FOOTER' in name or 'SLIDE_NUMBER' in name:
-            el = copy.deepcopy(ph._element)
-            slide.shapes._spTree.append(el)
+            slide.shapes._spTree.append(copy.deepcopy(ph._element))
             if 'FOOTER' in name:
-                sp = slide.shapes[-1]
-                tf = sp.text_frame
-                tf.text = footer_text
+                slide.shapes[-1].text_frame.text = footer_text
 
 
-def _title(slide, light, bold):
-    t = slide.shapes.title
-    tf = t.text_frame
-    tf.clear()
-    p = tf.paragraphs[0]
-    r1 = p.add_run()
-    r1.text = (light + ' : ').upper() if light else ''
-    r1.font.bold = False
-    r2 = p.add_run()
-    r2.text = bold.upper()
-    r2.font.bold = True
-    size = 26 if len(r1.text + r2.text) <= 48 else 22
-    r1.font.size = r2.font.size = Pt(size)
-
-
-def tb(slide, x, y, w, h, runs, size=11, color=INK, bold=False, align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP, italic=False, wrap=True, spacing=None):
-    """runs : texte simple, ou liste de paragraphes, chaque paragraphe = liste de (texte, {options})."""
+def tb(slide, x, y, w, h, runs, size=12, color=INK, bold=False, align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP,
+       italic=False, spacing=None, line=None):
+    """runs : texte simple, ou liste de paragraphes = listes de (texte, {options})."""
     box = slide.shapes.add_textbox(Inches(x), Inches(y), Inches(w), Inches(h))
     tf = box.text_frame
-    tf.word_wrap = wrap
+    tf.word_wrap = True
     tf.vertical_anchor = anchor
-    tf.margin_left = tf.margin_right = Inches(0.04)
-    tf.margin_top = tf.margin_bottom = Inches(0.02)
+    tf.margin_left = tf.margin_right = Inches(0.02)
+    tf.margin_top = tf.margin_bottom = Inches(0.01)
     if isinstance(runs, str):
         runs = [[(runs, {})]]
     for i, para in enumerate(runs):
@@ -88,6 +79,8 @@ def tb(slide, x, y, w, h, runs, size=11, color=INK, bold=False, align=PP_ALIGN.L
         p.alignment = align
         if spacing:
             p.space_after = Pt(spacing)
+        if line:
+            p.line_spacing = line
         for text, o in para:
             r = p.add_run()
             r.text = text
@@ -99,7 +92,7 @@ def tb(slide, x, y, w, h, runs, size=11, color=INK, bold=False, align=PP_ALIGN.L
     return box
 
 
-def rect(slide, x, y, w, h, fill, line=None, shape=MSO_SHAPE.RECTANGLE):
+def rect(slide, x, y, w, h, fill, line=None, shape=MSO_SHAPE.RECTANGLE, radius=None):
     s = slide.shapes.add_shape(shape, Inches(x), Inches(y), Inches(w), Inches(h))
     s.fill.solid()
     s.fill.fore_color.rgb = rgb(fill)
@@ -109,194 +102,275 @@ def rect(slide, x, y, w, h, fill, line=None, shape=MSO_SHAPE.RECTANGLE):
     else:
         s.line.fill.background()
     s.shadow.inherit = False
+    if radius is not None and shape == MSO_SHAPE.ROUNDED_RECTANGLE:
+        s.adjustments[0] = radius
     return s
 
 
-def label_caps(slide, x, y, w, text, color=NAVY, size=9.5):
-    return tb(slide, x, y, w, 0.25, [[(text.upper(), {'bold': True, 'color': color, 'size': size})]])
+def hline(slide, x, y, w, color=LINE, weight=0.75):
+    ln = slide.shapes.add_connector(1, Inches(x), Inches(y), Inches(x + w), Inches(y))
+    ln.line.color.rgb = rgb(color)
+    ln.line.width = Pt(weight)
+    return ln
 
 
-def table(slide, x, y, w, rows, col_w, header, size=10, row_h=0.3, aligns=None, fills=None, colors=None, bolds=None):
+def eyebrow(slide, x, y, w, text, color=MUTE):
+    """Petit sur-titre en capitales, avec un trait orange."""
+    rect(slide, x, y + 0.07, 0.22, 0.04, ORANGE)
+    tb(slide, x + 0.3, y, w - 0.3, 0.22, [[(text.upper(), {'bold': True, 'size': 9.5, 'color': color})]])
+
+
+def pill(slide, x, y, text, v, small=False, w=None, size=11):
+    w = w or (0.3 + 0.1 * len(text))
+    fill = SOFT if small else (NEG_BG if v < 0 else POS_BG)
+    s = rect(slide, x, y, w, 0.3, fill, shape=MSO_SHAPE.ROUNDED_RECTANGLE, radius=0.5)
+    tf = s.text_frame
+    tf.margin_left = tf.margin_right = Inches(0.04)
+    tf.margin_top = tf.margin_bottom = 0
+    p = tf.paragraphs[0]
+    p.alignment = PP_ALIGN.CENTER
+    r = p.add_run()
+    r.text = text
+    r.font.size = Pt(size)
+    r.font.bold = True
+    r.font.color.rgb = rgb(sc(v, small))
+    return s
+
+
+def takeaway(slide, x, y, w, h, text, label='À retenir'):
+    """Encadré de conclusion : fond bleu nuit, libellé orange."""
+    rect(slide, x, y, w, h, NAVY)
+    tb(slide, x + 0.25, y, w - 0.5, h, [[(label.upper() + '   ', {'bold': True, 'size': 10, 'color': ORANGE}),
+                                         (text, {'size': 12.5, 'color': 'FFFFFF', 'bold': True})]], anchor=MSO_ANCHOR.MIDDLE)
+
+
+def table(slide, x, y, w, rows, col_w, header, size=11, row_h=0.42, aligns=None, colors=None, bolds=None, fills=None):
+    """Tableau épuré : en-tête bleu nuit, lignes blanches séparées d'un filet."""
     nr, nc = len(rows) + 1, len(header)
     gt = slide.shapes.add_table(nr, nc, Inches(x), Inches(y), Inches(w), Inches(row_h * nr))
     tbl = gt.table
     tblPr = tbl._tbl.tblPr
     for attr in ('bandRow', 'firstRow'):
         tblPr.set(attr, '0')
-    style = tblPr.find(qn('a:tableStyleId'))
-    if style is not None:
-        style.text = '{2D5ABB26-0587-4C30-8999-92F81FD0307C}'  # aucun style
+    st = tblPr.find(qn('a:tableStyleId'))
+    if st is not None:
+        st.text = '{2D5ABB26-0587-4C30-8999-92F81FD0307C}'
     for j, cw in enumerate(col_w):
         tbl.columns[j].width = Inches(cw)
     aligns = aligns or (['l'] + ['r'] * (nc - 1))
 
-    def cell(i, j, text, fill, color, bold, italic=False):
+    def cell(i, j, text, fill, color, bold, sz):
         c = tbl.cell(i, j)
         c.fill.solid()
         c.fill.fore_color.rgb = rgb(fill)
-        c.margin_left = c.margin_right = Inches(0.06)
-        c.margin_top = c.margin_bottom = Inches(0.02)
+        c.margin_left = c.margin_right = Inches(0.08)
+        c.margin_top = c.margin_bottom = Inches(0.03)
         c.vertical_anchor = MSO_ANCHOR.MIDDLE
-        tf = c.text_frame
-        tf.word_wrap = True
-        p = tf.paragraphs[0]
+        tcPr = c._tc.get_or_add_tcPr()
+        for edge in ('a:lnL', 'a:lnR', 'a:lnT', 'a:lnB'):
+            ln = tcPr.find(qn(edge))
+            if ln is not None:
+                tcPr.remove(ln)
+        for edge, show in (('a:lnL', False), ('a:lnR', False), ('a:lnT', False), ('a:lnB', i > 0)):
+            ln = tcPr.makeelement(qn(edge), {'w': '9525' if show else '0'})
+            if show:
+                sf = ln.makeelement(qn('a:solidFill'), {})
+                clr = sf.makeelement(qn('a:srgbClr'), {'val': LINE})
+                sf.append(clr)
+                ln.append(sf)
+            else:
+                ln.append(ln.makeelement(qn('a:noFill'), {}))
+            tcPr.append(ln)
+        p = c.text_frame.paragraphs[0]
         p.alignment = {'l': PP_ALIGN.LEFT, 'r': PP_ALIGN.RIGHT, 'c': PP_ALIGN.CENTER}[aligns[j]]
         r = p.add_run()
         r.text = text
-        r.font.size = Pt(size)
+        r.font.size = Pt(sz)
         r.font.bold = bold
-        r.font.italic = italic
         r.font.color.rgb = rgb(color)
 
-    for j, h in enumerate(header):
-        cell(0, j, h, ORANGE, 'FFFFFF', True, True)
+    for j, hd in enumerate(header):
+        cell(0, j, hd.upper(), NAVY, 'FFFFFF', True, size - 2)
     for i, row in enumerate(rows, start=1):
         for j, v in enumerate(row):
-            fill = (fills[i - 1][j] if fills and fills[i - 1][j] else (GREY if i % 2 == 1 else 'FFFFFF'))
+            fill = fills[i - 1][j] if fills and fills[i - 1][j] else PAPER
             col = colors[i - 1][j] if colors and colors[i - 1][j] else INK
             b = bolds[i - 1][j] if bolds else (j == 0)
-            cell(i, j, v, fill, col, b)
+            cell(i, j, v, fill, col, b, size)
     for i in range(nr):
         tbl.rows[i].height = Inches(row_h)
     return gt
 
 
-def sign_color(v, small=False):
-    if small:
-        return MUTE
-    return TNEG if v < 0 else TPOS
+def bar_chart(slide, x, y, w, h, cats, vals, size=11, label_fmt='+#,##0.0;-#,##0.0;0.0'):
+    """Barres horizontales natives (modifiables), vert si positif, rouge si négatif, gris si non significatif."""
+    cd = CategoryChartData()
+    cd.categories = cats
+    cd.add_series('Écart de marge (M FCFA)', [v / 1e6 for v in vals])
+    gf = slide.shapes.add_chart(XL_CHART_TYPE.BAR_CLUSTERED, Inches(x), Inches(y), Inches(w), Inches(h), cd)
+    ch = gf.chart
+    ch.has_legend = False
+    ch.has_title = False
+    ch.font.size = Pt(size)
+    ch.font.color.rgb = rgb(INK)
+    va, ca = ch.value_axis, ch.category_axis
+    va.visible = False
+    va.has_major_gridlines = False
+    lim = max(abs(v) for v in vals) / 1e6 * 1.25
+    va.minimum_scale, va.maximum_scale = -lim, lim
+    ca.reverse_order = True
+    ca.tick_label_position = XL_TICK_LABEL_POSITION.LOW
+    ca.format.line.color.rgb = rgb(LINE)
+    ca.has_major_gridlines = False
+    ca.tick_labels.font.size = Pt(size)
+    plot = ch.plots[0]
+    plot.gap_width = 70
+    plot.vary_by_categories = False
+    plot.has_data_labels = True
+    dl = plot.data_labels
+    dl.number_format = label_fmt
+    dl.number_format_is_linked = False
+    dl.position = XL_LABEL_POSITION.OUTSIDE_END
+    dl.font.size = Pt(size)
+    dl.font.bold = True
+    ser = plot.series[0]
+    ser.invert_if_negative = False
+    for i, v in enumerate(vals):
+        pt = ser.points[i]
+        pt.format.fill.solid()
+        pt.format.fill.fore_color.rgb = rgb(SMALL if abs(v) < E.SEUIL_SIGNIF else (NEG if v < 0 else POS))
+        d = pt.data_label
+        d.has_text_frame = True
+        d.text_frame.text = E.fdm(v)
+        d.position = XL_LABEL_POSITION.OUTSIDE_END
+        r = d.text_frame.paragraphs[0].runs[0]
+        r.font.size = Pt(size)
+        r.font.bold = True
+        r.font.color.rgb = rgb(sc(v, abs(v) < E.SEUIL_SIGNIF))
+    return gf
 
 
 def heat(v):
-    """Couleur de fond et de texte pour un écart de marge (FCFA)."""
     if abs(v) < E.SEUIL_SIGNIF:
-        return GREY, MUTE
+        return SOFT, MUTE
     t = min(abs(v) / 5e6, 1)
     base = (192, 57, 43) if v < 0 else (30, 132, 73)
-    a = 0.18 + 0.67 * t
-    mix = tuple(int(255 + (c - 255) * a) for c in base)
-    fill = '%02X%02X%02X' % mix
-    return fill, ('FFFFFF' if abs(v) > 3e6 else ('8E1F17' if v < 0 else '145A32'))
-
-
-def diverging_rows(slide, x, y, w, rows, vmax, name_w=2.2, val_w=0.65, row_h=0.42, size=10.5, sub_size=8.5):
-    """rows : [{'n','why','v'}] ; barres horizontales de part et d'autre de zéro (dessinées en formes)."""
-    bar_w = w - name_w - val_w
-    zero = x + name_w + bar_w / 2
-    for i, r in enumerate(rows):
-        yy = y + i * row_h
-        tb(slide, x, yy, name_w, row_h, [[(r['n'], {'bold': True, 'size': size})], [(r['why'], {'size': sub_size, 'color': MUTE})]], anchor=MSO_ANCHOR.MIDDLE)
-        v = r['v']
-        L = abs(v) / vmax * (bar_w / 2 - 0.05)
-        small = abs(v) < E.SEUIL_SIGNIF
-        col = SMALL if small else (NEG if v < 0 else POS)
-        if L > 0.01:
-            rect(slide, zero - L if v < 0 else zero, yy + row_h * 0.3, L, row_h * 0.4, col)
-        tb(slide, x + name_w + bar_w, yy, val_w, row_h, [[(E.fdm(v), {'bold': True, 'color': sign_color(v, small), 'size': size})]],
-           align=PP_ALIGN.RIGHT, anchor=MSO_ANCHOR.MIDDLE)
-    ln = slide.shapes.add_connector(1, Inches(zero), Inches(y), Inches(zero), Inches(y + row_h * len(rows)))
-    ln.line.color.rgb = rgb('9AA0BC')
-    ln.line.width = Pt(0.75)
+    a = 0.12 + 0.6 * t
+    fill = '%02X%02X%02X' % tuple(int(255 + (c - 255) * a) for c in base)
+    return fill, ('FFFFFF' if t > 0.7 else (NEG_T if v < 0 else POS_T))
 
 
 # ------------------------------------------------------------------ pages
-def _cover(prs, R):
-    lay = _layout(prs, '14_Couverture')
-    s = prs.slides.add_slide(lay)
-    t = s.shapes.title.text_frame
-    t.clear()
-    p = t.paragraphs[0]
-    r = p.add_run()
-    r.text = 'REVUE DE PERFORMANCE '
-    r.font.bold = False
-    r = p.add_run()
-    r.text = 'COMMERCIALE'
-    r.font.bold = True
-    m = R['meta']
-    box = tb(s, 0.94, 4.78, 7.6, 0.36, [[(f"Semaine {m['week']} · {m['periode']} · Rapport à la Direction Générale", {'italic': True, 'color': NAVY, 'size': 13})]],
-             anchor=MSO_ANCHOR.MIDDLE)
-    box.fill.solid()
-    box.fill.fore_color.rgb = rgb('FFFFFF')
-    box.text_frame.auto_size = None
-    tb(s, 0.94, 5.3, 6.0, 0.6, [[(f"Données au lundi {m['data_date']:%d/%m/%Y}, 08:00 · Vs N-1 · Préparé par : Category management · Validé par : [nom]",
-                                   {'size': 10, 'color': 'C5C8E0'})], [('Confidentiel · usage interne', {'size': 10, 'color': 'C5C8E0'})]])
-    return s
+def _title(slide, light, bold):
+    tf = slide.shapes.title.text_frame
+    tf.clear()
+    p = tf.paragraphs[0]
+    r1 = p.add_run()
+    r1.text = (light + ' : ').upper() if light else ''
+    r1.font.bold = False
+    r2 = p.add_run()
+    r2.text = bold.upper()
+    r2.font.bold = True
+    size = 26 if len(r1.text + r2.text) <= 46 else 22
+    r1.font.size = r2.font.size = Pt(size)
 
 
-def _content(prs, R, light, bold, footer):
+def _content(prs, light, bold, footer, R):
     lay = _layout(prs, 'Titre seul')
     s = prs.slides.add_slide(lay)
     _title(s, light, bold)
     _clone_footer(s, lay, footer)
+    if R.get('demo'):
+        tb(s, 9.9, 1.25, 2.8, 0.22, [[('DONNÉES FICTIVES · DÉMONSTRATION', {'bold': True, 'size': 8.5, 'color': ORANGE})]], align=PP_ALIGN.RIGHT)
     return s
+
+
+def _cover(prs, R):
+    s = prs.slides.add_slide(_layout(prs, '14_Couverture'))
+    tf = s.shapes.title.text_frame
+    tf.clear()
+    p = tf.paragraphs[0]
+    for txt, b in (('REVUE DE PERFORMANCE ', False), ('COMMERCIALE', True)):
+        r = p.add_run()
+        r.text = txt
+        r.font.bold = b
+    m = R['meta']
+    box = tb(s, 0.94, 4.78, 7.4, 0.38, [[(f"Semaine {m['week']} · {m['periode']}", {'italic': True, 'color': NAVY, 'size': 14, 'bold': True})]],
+             anchor=MSO_ANCHOR.MIDDLE)
+    box.fill.solid()
+    box.fill.fore_color.rgb = rgb('FFFFFF')
+    meta = [[('Rapport à la Direction Générale · Vs N-1 · M FCFA HT', {'size': 11, 'color': 'FFFFFF', 'bold': True})],
+            [(f"Données au lundi {m['data_date']:%d/%m/%Y}, 08:00 · Préparé par : Category management · Validé par : [nom]", {'size': 10, 'color': 'C5C8E0'})],
+            [('Confidentiel · usage interne', {'size': 10, 'color': 'C5C8E0'})]]
+    if R.get('demo'):
+        meta.append([('Données fictives · démonstration', {'size': 11, 'color': ORANGE, 'bold': True})])
+    tb(s, 0.94, 5.3, 6.2, 1.2, meta, spacing=2)
 
 
 def _p2(prs, R, ftr):
     g, t = R['global'], R['texts']
-    s = _content(prs, R, 'Synthèse', t['p2_title'], ftr)
-    K = [("Chiffre d'affaires", f"{E.fm(g['CA'])} M", g['ca'], E.fpct(g['ca']), f"{E.fm(g['CA1'])} M"),
-         ('Marge', f"{E.fm(g['M'])} M", g['dM'], f"{E.fdm(g['dM'])} M", f"{E.fm(g['M1'])} M"),
-         ('Taux de marge', f"{E.fnum(g['t'] * 100)} %", g['dt'], E.fpt(g['dt']), f"{E.fnum(g['t1'] * 100)} %"),
-         ('Trafic (tickets)', E.fnum(g['T'], 0), g['tk'], E.fpct(g['tk']), E.fnum(g['T1'], 0)),
-         ('Panier moyen', f"{E.fnum(g['panier'], 0)} FCFA", g['pan'], E.fpct(g['pan']), f"{E.fnum(g['panier1'], 0)} FCFA")]
-    x0, w, gap = 0.61, 2.34, 0.1
-    for i, (lab, v, d, ds, n1) in enumerate(K):
-        x = x0 + i * (w + gap)
-        rect(s, x, 1.45, w, 1.1, LIGHT)
-        rect(s, x, 2.5, w, 0.05, NEG if d < 0 else POS)
-        tb(s, x + 0.08, 1.5, w - 0.16, 0.25, [[(lab.upper(), {'bold': True, 'size': 9, 'color': '4E5370'})]])
-        tb(s, x + 0.08, 1.72, w - 0.16, 0.4, [[(v, {'bold': True, 'size': 19, 'color': NAVY})]])
-        tb(s, x + 0.08, 2.12, w - 0.16, 0.36, [[(('▼ ' if d < 0 else '▲ ') + ds, {'bold': True, 'size': 11, 'color': sign_color(d)}),
-                                                 (f'   N-1 : {n1}', {'size': 9, 'color': MUTE})]])
-    # où en est-on / pourquoi
-    label_caps(s, 0.61, 2.8, 5.9, 'Où en est-on, pourquoi')
-    paras = []
-    for f_ in t['faits']:
-        head, _, rest = f_.partition(':') if f_.startswith('Pourquoi') or f_.startswith('Secteurs') else ('', '', f_)
-        if head:
-            paras.append([('●  ', {'color': ORANGE, 'size': 10}), (head + ' :', {'bold': True}), (rest, {})])
-        else:
-            paras.append([('●  ', {'color': ORANGE, 'size': 10}), (f_, {'bold': True})])
-    paras.append([('●  ', {'color': ORANGE, 'size': 10}), (t['taux'], {})])
-    tb(s, 0.61, 3.1, 5.9, 2.6, paras, size=12, spacing=7)
-    # ce que l'on fait
-    label_caps(s, 6.85, 2.8, 5.85, "Ce que l'on fait")
-    flops = []
-    for sct in E.SECTEUR_ORDER:
-        for f_ in R['familles'][sct]['flop'][:3]:
-            flops.append((sct, f_))
-    flops = sorted(flops, key=lambda x: x[1]['dM'])[:3]
-    yy = 3.12
-    for sct, f_ in flops:
+    s = _content(prs, 'Synthèse', t['p2_title'], ftr, R)
+    # 5 indicateurs : gros chiffres, écart en pastille, N-1 en petit
+    K = [("Chiffre d'affaires", E.fm(g['CA']), 'M FCFA', g['ca'], E.fpct(g['ca']), f"N-1 {E.fm(g['CA1'])}"),
+         ('Marge', E.fm(g['M']), 'M FCFA', g['dM'], f"{E.fdm(g['dM'])} M", f"N-1 {E.fm(g['M1'])}"),
+         ('Taux de marge', E.fnum(g['t'] * 100), '%', g['dt'], E.fpt(g['dt']), f"N-1 {E.fnum(g['t1'] * 100)} %"),
+         ('Trafic', E.fnum(g['T'], 0), 'tickets', g['tk'], E.fpct(g['tk']), f"N-1 {E.fnum(g['T1'], 0)}"),
+         ('Panier moyen', E.fnum(g['panier'], 0), 'FCFA', g['pan'], E.fpct(g['pan']), f"N-1 {E.fnum(g['panier1'], 0)}")]
+    cw, gap = 2.26, 0.2
+    for i, (lab, v, u, d, ds, n1) in enumerate(K):
+        x = X0 + i * (cw + gap)
+        tb(s, x, Y0, cw, 0.24, [[(lab.upper(), {'bold': True, 'size': 9.5, 'color': MUTE})]])
+        tb(s, x, Y0 + 0.26, cw, 0.62, [[(v, {'bold': True, 'size': 30, 'color': NAVY}), ('  ' + u, {'size': 11, 'color': MUTE})]])
+        pill(s, x, Y0 + 0.98, ('▼ ' if d < 0 else '▲ ') + ds, d)
+        tb(s, x + 1.2, Y0 + 1.0, cw - 1.2, 0.28, [[(n1, {'size': 9.5, 'color': MUTE})]], align=PP_ALIGN.RIGHT)
+    hline(s, X0, Y0 + 1.5, W)
+    # ce qu'il faut retenir
+    yb = Y0 + 1.75
+    eyebrow(s, X0, yb, 5.9, 'Ce qu’il faut retenir')
+    pts = t['faits'] + [t['taux']]
+    for i, txt in enumerate(pts[:4]):
+        yy = yb + 0.4 + i * 0.66
+        c = rect(s, X0, yy + 0.02, 0.34, 0.34, NAVY, shape=MSO_SHAPE.OVAL)
+        tf = c.text_frame
+        tf.margin_left = tf.margin_right = tf.margin_top = tf.margin_bottom = 0
+        p = tf.paragraphs[0]
+        p.alignment = PP_ALIGN.CENTER
+        r = p.add_run()
+        r.text = str(i + 1)
+        r.font.size = Pt(11)
+        r.font.bold = True
+        r.font.color.rgb = rgb('FFFFFF')
+        head, sep, rest = txt.partition(' : ')
+        runs = [(head + ' : ', {'bold': True}), (rest, {})] if sep and len(head) < 30 else [(txt, {})]
+        tb(s, X0 + 0.5, yy, 5.5, 0.62, [runs], size=12.5, anchor=MSO_ANCHOR.MIDDLE)
+    # priorités de la semaine
+    xr = 6.95
+    eyebrow(s, xr, yb, 5.75, 'Priorités de la semaine')
+    flops = sorted([(sc_, f_) for sc_ in E.SECTEUR_ORDER for f_ in R['familles'][sc_]['flop'][:3]], key=lambda x: x[1]['dM'])[:3]
+    for i, (sct, f_) in enumerate(flops):
+        yy = yb + 0.4 + i * 0.72
         c = f_.get('cdg', {})
+        rect(s, xr, yy, 5.76, 0.62, SOFT)
+        rect(s, xr, yy, 0.06, 0.62, NEG if f_['dM'] < 0 else POS)
         act = c.get('Action') or f"En attente : présenté en séance par {E.CHEFS[sct]}"
-        who = c.get('Responsable') or E.CHEFS[sct]
-        tb(s, 6.85, yy, 4.4, 0.55, [[(f"{f_['label']} · {E.fdm(f_['dM'])} M", {'bold': True, 'size': 11})],
-                                     [(act, {'size': 9.5, 'italic': not c.get('Action'), 'color': INK if c.get('Action') else MUTE})]])
-        tb(s, 11.25, yy, 1.45, 0.55, [[(who, {'size': 9, 'color': MUTE})]], align=PP_ALIGN.RIGHT)
-        ln = s.shapes.add_connector(1, Inches(6.85), Inches(yy + 0.6), Inches(12.7), Inches(yy + 0.6))
-        ln.line.color.rgb = rgb(GREY)
-        yy += 0.66
+        tb(s, xr + 0.2, yy + 0.04, 4.3, 0.56, [[(f_['label'], {'bold': True, 'size': 12}), (f"  ·  {sct}", {'size': 10, 'color': MUTE})],
+                                                [(act, {'size': 10, 'italic': not c.get('Action'), 'color': INK if c.get('Action') else MUTE})]])
+        tb(s, xr + 4.5, yy, 1.15, 0.62, [[(f"{E.fdm(f_['dM'])} M", {'bold': True, 'size': 14, 'color': sc(f_['dM'])})]],
+           align=PP_ALIGN.RIGHT, anchor=MSO_ANCHOR.MIDDLE)
     decs = [f_ for sct in E.SECTEUR_ORDER for f_ in R['familles'][sct]['flop'] if f_.get('cdg', {}).get('Décision DG', '').lower() == 'oui']
-    box = rect(s, 6.85, 5.18, 5.85, 0.55, NAVY)
-    dtxt = (f"{len(decs)} décision(s) demandée(s) : " + ', '.join(f_['label'] for f_ in decs[:3]) + ' (page 5).') if decs else 'Aucune décision demandée cette semaine (page 5).'
-    tb(s, 6.95, 5.2, 5.7, 0.5, [[('De quoi avons-nous besoin : ', {'bold': True, 'color': ORANGE, 'size': 9.5}), (dtxt, {'color': 'FFFFFF', 'size': 9.5})]],
-       anchor=MSO_ANCHOR.MIDDLE)
-    # contexte
-    rect(s, 0.61, 5.95, 12.1, 0.85, LIGHT)
-    rect(s, 0.61, 5.95, 0.05, 0.85, ORANGE)
-    verif = ', '.join(f"{k} ({v})" for k, v in E.SITES_A_VERIFIER.items())
-    tb(s, 0.75, 5.99, 11.9, 0.8, [[('Contexte : ', {'bold': True}), (f"{t['contexte']}. ", {}),
-                                    ('Périmètre : ', {'bold': True}), (f"12 magasins ouverts en N-1 ; Ex-Supeco convertis en Market : " + ', '.join(f"{n.replace('Market ', '')} {d[:5]}" for n, d in E.CONVERSIONS) + '. ', {}),
-                                    ('À vérifier : ', {'bold': True, 'color': '8A4B00'}), (verif + '. ', {}),
-                                    ('Référence : ', {'bold': True}), ('Vs N-1 uniquement, budget suivi au reporting mensuel.', {})]], size=10)
+    dtxt = (f"{len(decs)} décision(s) attendue(s) en page 5 : " + ', '.join(f_['label'] for f_ in decs[:3])) if decs else 'Aucune décision demandée à la Direction cette semaine.'
+    tb(s, xr, yb + 2.6, 5.76, 0.3, [[('Décisions DG  ', {'bold': True, 'size': 10.5, 'color': NAVY}), (dtxt, {'size': 10.5})]])
+    # contexte en une ligne
+    ctx = (f"Contexte : {t['contexte']} · Ex-Supeco convertis : " + ', '.join(f"{n.replace('Market ', '')} {d[:5]}" for n, d in E.CONVERSIONS)
+           + ' · À vérifier : ' + ', '.join(E.SITES_A_VERIFIER) + ' · Vs N-1 uniquement, budget au reporting mensuel.')
+    tb(s, X0, 6.62, W, 0.3, [[(ctx, {'size': 9, 'color': MUTE})]])
 
 
 def _p3(prs, R, ftr):
-    s = _content(prs, R, 'Marge', R['texts']['p3_title'], ftr)
-    label_caps(s, 0.61, 1.45, 6.2, 'Passage de la marge N-1 → N (M FCFA)')
-    g = R['global']
-    steps = [('Marge N-1', g['M1'], 'tot')] + [(sct if sct != 'Non-alimentaire' else 'Non-alim.', R['sect'][sct]['dM'], 'd') for sct in E.SECTEUR_ORDER] + [('Marge N', g['M'], 'tot')]
+    g, t = R['global'], R['texts']
+    s = _content(prs, 'Marge', t['p3_title'], ftr, R)
+    eyebrow(s, X0, Y0, 6.6, 'Passage de la marge N-1 → N (M FCFA)')
+    steps = [('Marge N-1', g['M1'], 'tot')] + [('Non-alim.' if x == 'Non-alimentaire' else x, R['sect'][x]['dM'], 'd') for x in E.SECTEUR_ORDER] + [('Marge N', g['M'], 'tot')]
     cats, base, up, cols, labels = [], [], [], [], []
     cur = g['M1']
     for n, v, k in steps:
@@ -304,30 +378,32 @@ def _p3(prs, R, ftr):
         if k == 'tot':
             base.append(0)
             up.append(v / 1e6)
-            cols.append('758CC0' if n == 'Marge N-1' else NAVY)
+            cols.append(N1_BAR if n == 'Marge N-1' else NAVY)
             labels.append(E.fm(v))
         else:
-            lo = min(cur, cur + v)
-            base.append(lo / 1e6)
+            base.append(min(cur, cur + v) / 1e6)
             up.append(abs(v) / 1e6)
-            cols.append(NEG if v < 0 else POS)
+            cols.append(SMALL if abs(v) < E.SEUIL_SIGNIF else (NEG if v < 0 else POS))
             labels.append(E.fdm(v))
             cur += v
     cd = CategoryChartData()
     cd.categories = cats
     cd.add_series('base', base)
     cd.add_series('valeur', up)
-    gf = s.shapes.add_chart(XL_CHART_TYPE.COLUMN_STACKED, Inches(0.61), Inches(1.75), Inches(6.2), Inches(4.9), cd)
+    gf = s.shapes.add_chart(XL_CHART_TYPE.COLUMN_STACKED, Inches(X0), Inches(Y0 + 0.35), Inches(6.6), Inches(3.95), cd)
     ch = gf.chart
     ch.has_legend = False
-    lo_axis = min(g['M1'], g['M'], *(c for c in [g['M1'] + sum(R['sect'][x]['dM'] for x in E.SECTEUR_ORDER[:i]) for i in range(4)])) / 1e6
-    ch.value_axis.minimum_scale = int(lo_axis * 0.95 // 5 * 5)
-    ch.value_axis.has_major_gridlines = False
+    ch.has_title = False
+    ch.font.size = Pt(11)
+    lows = [b for b in base if b > 0] + [g['M1'] / 1e6, g['M'] / 1e6]
+    ch.value_axis.minimum_scale = int(min(lows) * 0.95 // 5 * 5)
     ch.value_axis.visible = False
-    ch.category_axis.tick_labels.font.size = Pt(10)
-    ch.category_axis.format.line.color.rgb = rgb('9AA0BC')
+    ch.value_axis.has_major_gridlines = False
+    ch.category_axis.format.line.color.rgb = rgb(LINE)
+    ch.category_axis.tick_labels.font.size = Pt(11)
+    ch.category_axis.tick_labels.font.color.rgb = rgb(MUTE)
     plot = ch.plots[0]
-    plot.gap_width = 60
+    plot.gap_width = 55
     sb, sv = plot.series
     sb.format.fill.background()
     for i, c in enumerate(cols):
@@ -337,136 +413,141 @@ def _p3(prs, R, ftr):
         dl = pt.data_label
         dl.has_text_frame = True
         dl.text_frame.text = labels[i]
-        dl.position = XL_LABEL_POSITION.INSIDE_END if i in (0, len(cols) - 1) else XL_LABEL_POSITION.CENTER
+        dl.position = XL_LABEL_POSITION.INSIDE_END
         r = dl.text_frame.paragraphs[0].runs[0]
-        r.font.size = Pt(11)
+        r.font.size = Pt(12)
         r.font.bold = True
-        r.font.color.rgb = rgb('FFFFFF')
-    tb(s, 0.61, 6.6, 6.2, 0.3, [[(f"≈ Axe tronqué à {ch.value_axis.minimum_scale:.0f} M FCFA pour rendre les écarts visibles", {'size': 9, 'color': MUTE, 'italic': True})]])
+        r.font.color.rgb = rgb('FFFFFF' if c not in (SMALL,) else INK)
+    tb(s, X0, Y0 + 4.32, 6.6, 0.25, [[(f"≈ Axe tronqué à {ch.value_axis.minimum_scale:.0f} M FCFA", {'size': 9, 'color': MUTE, 'italic': True})]])
     # heatmap
-    label_caps(s, 7.1, 1.45, 5.6, 'Écart de marge secteur × format (M FCFA)')
-    hdr = ['Secteur'] + E.FORMAT_ORDER + ['Total']
+    xr = 7.55
+    eyebrow(s, xr, Y0, 5.15, 'Où se joue l’écart · secteur × format (M FCFA)')
+    hdr = ['', 'Hyper', 'Market', 'Ex-Sup.', 'Supeco', 'Total']
     rows, fills, colors, bolds = [], [], [], []
     for sct in E.SECTEUR_ORDER + ['Total']:
-        vals = [R['mtx'][sct][f] for f in E.FORMAT_ORDER] if sct != 'Total' else [R['fmt'][f]['dM'] for f in E.FORMAT_ORDER]
-        tot = R['sect'][sct]['dM'] if sct != 'Total' else g['dM']
-        vals.append(tot)
-        rows.append([sct if sct != 'Non-alimentaire' else 'Non-alim.'] + [E.fdm(v) for v in vals])
+        vals = [R['mtx'][sct][f] for f in E.FORMAT_ORDER] + [R['sect'][sct]['dM']] if sct != 'Total' else [R['fmt'][f]['dM'] for f in E.FORMAT_ORDER] + [g['dM']]
+        rows.append(['Non-alim.' if sct == 'Non-alimentaire' else sct] + [E.fdm(v) for v in vals])
         hs = [heat(v) for v in vals]
         fills.append([None] + [h[0] for h in hs])
         colors.append([None] + [h[1] for h in hs])
-        bolds.append([sct == 'Total'] + [True] * len(vals))
-    table(s, 7.1, 1.8, 5.6, rows, [1.25, 0.87, 0.87, 0.87, 0.87, 0.87], hdr, size=11, row_h=0.5, fills=fills, colors=colors, bolds=bolds)
-    tb(s, 7.1, 4.4, 5.6, 0.5, [[('Gris : écart inférieur à 0,5 M FCFA, non significatif. Ex-Supeco : Cité Verte, Aboboté, Toit Rouge.', {'size': 9, 'color': MUTE})]])
-    # tableau formats
-    label_caps(s, 7.1, 4.95, 5.6, 'Formats : CA, trafic et panier Vs N-1')
-    frows = [[f, E.fpct(R['fmt'][f]['ca']), E.fpct(R['fmt'][f]['tk']), E.fpct(R['fmt'][f]['pan'])] for f in E.FORMAT_ORDER]
-    fcol = [[None] + [sign_color(R['fmt'][f][k]) for k in ('ca', 'tk', 'pan')] for f in E.FORMAT_ORDER]
-    table(s, 7.1, 5.25, 5.6, frows, [1.7, 1.3, 1.3, 1.3], ['Format', 'CA', 'Trafic', 'Panier'], size=10, row_h=0.3, colors=fcol)
+        bolds.append([True] + [True] * len(vals))
+    table(s, xr, Y0 + 0.4, 5.15, rows, [1.15, 0.8, 0.8, 0.8, 0.8, 0.8], hdr, size=12, row_h=0.52, fills=fills, colors=colors, bolds=bolds)
+    tb(s, xr, Y0 + 3.1, 5.15, 0.3, [[('Gris : écart inférieur à 0,5 M FCFA, non significatif.', {'size': 9, 'color': MUTE})]])
+    worst = min(((sct, f, R['mtx'][sct][f]) for sct in E.SECTEUR_ORDER for f in E.FORMAT_ORDER), key=lambda x: x[2])
+    best = max(((sct, f, R['mtx'][sct][f]) for sct in E.SECTEUR_ORDER for f in E.FORMAT_ORDER), key=lambda x: x[2])
+    takeaway(s, X0, 6.2, W, 0.55, f"Plus forte perte : {worst[0]} en {worst[1]} ({E.fdm(worst[2])} M). "
+                                   f"Plus fort gain : {best[0]} en {best[1]} ({E.fdm(best[2])} M).")
 
 
 def _p4(prs, R, ftr):
-    s = _content(prs, R, 'Écarts', R['texts']['p4_title'], ftr)
+    s = _content(prs, 'Écarts', R['texts']['p4_title'], ftr, R)
     C = R['contrib']
-    vmax = max(abs(r['v']) for r in C['rayon'] + C['site']) * 1.05
-    label_caps(s, 0.61, 1.5, 5.8, 'Par rayon')
-    diverging_rows(s, 0.61, 1.85, 5.8, C['rayon'], vmax, name_w=2.5, row_h=0.72, size=12, sub_size=9.5)
-    label_caps(s, 6.9, 1.5, 5.8, 'Par magasin')
-    diverging_rows(s, 6.9, 1.85, 5.8, C['site'], vmax, name_w=2.5, row_h=0.72, size=12, sub_size=9.5)
-    tb(s, 0.61, 6.35, 12.1, 0.4, [[('Écart de marge Vs N-1, M FCFA. Les deux listes ne s’additionnent pas : un rayon et un magasin peuvent porter la même perte.', {'size': 9.5, 'color': MUTE, 'italic': True})]])
+    for k, x, lab in (('rayon', X0, 'Par rayon'), ('site', 6.95, 'Par magasin')):
+        eyebrow(s, x, Y0, 5.75, lab)
+        rows = C[k]
+        bar_chart(s, x, Y0 + 0.3, 5.75, 3.85, [r['n'] for r in rows], [r['v'] for r in rows], size=11)
+        tb(s, x, Y0 + 4.2, 5.75, 0.4, [[(' · '.join(f"{r['n']} : {r['why']}" for r in rows if r['v'] < 0)[:150], {'size': 9, 'color': MUTE})]])
+    wr, ws = R['rayons'][0], R['sites'][0]
+    takeaway(s, X0, 6.2, W, 0.55, f"{wr['label']} ({E.fdm(wr['dM'])} M) et {ws['Site']} ({E.fdm(ws['dM'])} M) concentrent le recul. "
+                                   'Les deux listes ne s’additionnent pas.')
 
 
 def _p5(prs, R, ftr):
-    s = _content(prs, R, "Plan d'actions", 'engagements et décisions attendues', ftr)
-    rows, cols = [], []
+    s = _content(prs, "Plan d'actions", 'engagements et décisions attendues', ftr, R)
     filled, empty = [], []
     for sct in E.SECTEUR_ORDER:
         for i, f_ in enumerate(R['familles'][sct]['flop']):
             c = f_.get('cdg', {})
-            item = (sct, f_, c)
-            if c.get('Action') or c.get('Commentaire'):
-                filled.append(item)
-            elif i < 2:
-                empty.append(item)
-    items = sorted(filled, key=lambda x: (x[2].get('Décision DG', '').lower() != 'oui', x[1]['dM']))[:8]
-    items += sorted(empty, key=lambda x: x[1]['dM'])[:max(0, 8 - len(items))]
+            (filled if (c.get('Action') or c.get('Commentaire')) else empty if i < 2 else []).append((sct, f_, c))
+    items = sorted(filled, key=lambda x: (x[2].get('Décision DG', '').lower() != 'oui', x[1]['dM']))[:7]
+    items += sorted(empty, key=lambda x: x[1]['dM'])[:max(0, 7 - len(items))]
+    rows, cols = [], []
     for sct, f_, c in items:
         short = {'Non-alimentaire': 'Non-alim.'}.get(sct, sct)
-        rows.append([f"{f_['label']} ({short})", E.fdm(f_['dM']), c.get('Cause') or '—', c.get('Action') or f"En attente : {E.CHEFS[sct]}",
+        rows.append([f"{f_['label']}", short, E.fdm(f_['dM']), c.get('Cause') or '—', c.get('Action') or f"En attente : {E.CHEFS[sct]}",
                      c.get('Responsable') or '—', c.get('Échéance') or '—', c.get('Décision DG') or '—'])
-        grey = MUTE
-        cols.append([None, sign_color(f_['dM']), None if c.get('Cause') else grey, None if c.get('Action') else grey,
-                     None if c.get('Responsable') else grey, None if c.get('Échéance') else grey,
-                     (TNEG if (c.get('Décision DG') or '').lower() == 'oui' else None) if c.get('Décision DG') else grey])
-    table(s, 0.61, 1.5, 12.1, rows, [2.8, 0.85, 1.6, 3.6, 1.35, 0.95, 0.95],
-          ['Famille', 'Écart (M)', 'Cause', 'Action', 'Responsable', 'Échéance', 'Décision DG'], size=10, row_h=0.5,
-          aligns=['l', 'r', 'l', 'l', 'l', 'c', 'c'], colors=cols)
-    tb(s, 0.61, 1.6 + 0.5 * (len(rows) + 1), 12.1, 0.4,
-       [[('Repris des « Causes et actions » saisies par les chefs de groupe, gel à 10:10. Les lignes « Décision DG : Oui » sont en tête et remontent en page 2.', {'size': 9.5, 'color': MUTE, 'italic': True})]])
+        g_ = MUTE
+        cols.append([None, MUTE, sc(f_['dM']), None if c.get('Cause') else g_, None if c.get('Action') else g_,
+                     None if c.get('Responsable') else g_, None if c.get('Échéance') else g_,
+                     (NEG_T if (c.get('Décision DG') or '').lower() == 'oui' else None) if c.get('Décision DG') else g_])
+    table(s, X0, Y0, W, rows, [2.5, 0.95, 0.85, 1.5, 3.15, 1.2, 1.05, 0.9],
+          ['Famille', 'Secteur', 'Écart (M)', 'Cause', 'Action', 'Responsable', 'Échéance', 'Décision'], size=11, row_h=0.5,
+          aligns=['l', 'l', 'r', 'l', 'l', 'l', 'c', 'c'], colors=cols)
+    n_ok = sum(1 for _, _, c in items if c.get('Action'))
+    takeaway(s, X0, 6.2, W, 0.55, f"{n_ok} action(s) engagée(s) sur {len(items)} familles en recul. "
+                                   'Repris des « Causes et actions » des chefs de groupe, gel à 10:10.', label='Suivi')
 
 
 def _annex_sector(prs, R, sct, code, ftr):
-    s = _content(prs, R, sct if sct != 'Non-alimentaire' else 'Non-alim.', R['texts']['sect_title'][sct], ftr)
+    s = _content(prs, 'Non-alim.' if sct == 'Non-alimentaire' else sct, R['texts']['sect_title'][sct], ftr, R)
     o = R['sect_detail'][sct]
-    label_caps(s, 0.61, 1.45, 5.0, "Chiffre d'affaires et marge (Vs N-1)")
-    rows = [['CA (M FCFA)', E.fm(o['CA']), E.fm(o['CA1']), E.fdm(o['dCA'])],
-            ['Marge (M FCFA)', E.fm(o['M']), E.fm(o['M1']), E.fdm(o['dM'])],
-            ['Taux de marge', f"{E.fnum(o['t'] * 100)} %", f"{E.fnum(o['t1'] * 100)} %", E.fpt(o['dt'])]]
-    cols = [[None, None, MUTE, sign_color(o['dCA'])], [None, None, MUTE, sign_color(o['dM'])], [None, None, MUTE, sign_color(o['dt'])]]
-    bolds = [[True, True, False, True]] * 3
-    table(s, 0.61, 1.75, 5.0, rows, [1.7, 1.1, 1.1, 1.1], ['', 'Réel', 'N-1', 'Δ'], size=11, row_h=0.36, colors=cols, bolds=bolds)
-    label_caps(s, 0.61, 3.35, 5.0, 'Écart de marge par format (M FCFA)')
-    for i, f in enumerate(E.FORMAT_ORDER):
-        v = R['familles'][sct]['fmt'][f]
-        small = abs(v) < E.SEUIL_SIGNIF
-        fill = GREY if small else ('FBEAE8' if v < 0 else 'E7F4EC')
-        x = 0.61 + i * 1.27
-        rect(s, x, 3.65, 1.2, 0.72, fill)
-        tb(s, x, 3.67, 1.2, 0.3, [[(f, {'size': 9.5, 'color': '3A3F5C'})]], align=PP_ALIGN.CENTER)
-        tb(s, x, 3.92, 1.2, 0.4, [[(E.fdm(v), {'size': 14, 'bold': True, 'color': sign_color(v, small)})]], align=PP_ALIGN.CENTER)
-    tb(s, 0.61, 4.5, 5.0, 0.9, [[(R['texts']['lecture'][sct], {'size': 10, 'color': '33385A'})]])
-    # familles
-    label_caps(s, 6.0, 1.45, 6.7, 'Familles · écart de marge (dont volume / dont taux)')
     fam = R['familles'][sct]
+    # 3 indicateurs
+    K = [("CA", E.fm(o['CA']), 'M FCFA', o['ca'], E.fpct(o['ca'])), ('Marge', E.fm(o['M']), 'M FCFA', o['dM'], f"{E.fdm(o['dM'])} M"),
+         ('Taux de marge', E.fnum(o['t'] * 100), '%', o['dt'], E.fpt(o['dt']))]
+    for i, (lab, v, u, d, ds) in enumerate(K):
+        x = X0 + i * 1.95
+        tb(s, x, Y0, 1.9, 0.22, [[(lab.upper(), {'bold': True, 'size': 9, 'color': MUTE})]])
+        tb(s, x, Y0 + 0.22, 1.9, 0.5, [[(v, {'bold': True, 'size': 22, 'color': NAVY}), (' ' + u, {'size': 9.5, 'color': MUTE})]])
+        pill(s, x, Y0 + 0.78, ('▼ ' if d < 0 else '▲ ') + ds, d, size=10)
+    hline(s, X0, Y0 + 1.25, 5.7)
+    eyebrow(s, X0, Y0 + 1.42, 5.7, 'Écart de marge par format (M FCFA)')
+    for i, f in enumerate(E.FORMAT_ORDER):
+        v = fam['fmt'][f]
+        small = abs(v) < E.SEUIL_SIGNIF
+        x = X0 + i * 1.44
+        rect(s, x, Y0 + 1.78, 1.36, 0.78, SOFT if small else (NEG_BG if v < 0 else POS_BG))
+        tb(s, x, Y0 + 1.82, 1.36, 0.26, [[(f, {'size': 10, 'color': MUTE})]], align=PP_ALIGN.CENTER)
+        tb(s, x, Y0 + 2.08, 1.36, 0.42, [[(E.fdm(v), {'size': 17, 'bold': True, 'color': sc(v, small)})]], align=PP_ALIGN.CENTER)
+    tb(s, X0, Y0 + 2.75, 5.7, 1.0, [[(R['texts']['lecture'][sct], {'size': 11, 'color': INK})]], line=1.15)
+    # familles
+    xr = 6.85
+    eyebrow(s, xr, Y0, 5.85, 'Familles : contributeurs et détracteurs (M FCFA)')
     sel = fam['top'][:3] + fam['flop'][:3][::-1]
-    vmax = max([abs(f_['dM']) for f_ in sel] + [1]) * 1.05
-    rws = [{'n': f_['label'], 'why': f"volume {E.fdm(f_['effV'])} · taux {E.fdm(f_['effT'])}", 'v': f_['dM']} for f_ in sel]
-    diverging_rows(s, 6.0, 1.78, 6.7, rws, vmax, name_w=2.9, row_h=0.6, size=11, sub_size=9)
+    bar_chart(s, xr, Y0 + 0.28, 5.85, 3.0, [f_['label'] for f_ in sel], [f_['dM'] for f_ in sel], size=10.5)
+    tb(s, xr, Y0 + 3.3, 5.85, 0.6, [[(' · '.join(f"{f_['label']} : volume {E.fdm(f_['effV'])}, taux {E.fdm(f_['effT'])}" for f_ in fam['flop'][:3]),
+                                       {'size': 9, 'color': MUTE})]])
     # causes et actions
-    rect(s, 0.61, 5.55, 12.1, 1.3, 'F7F8FB', line='C9CCDB')
-    gen = R.get('general', {}).get(sct) if isinstance(R.get('general'), dict) else None
-    paras = [[(f'Causes et actions · {E.CHEFS[sct]}', {'bold': True, 'color': NAVY, 'size': 11})]]
+    gen = (R.get('general') or {}).get(sct)
     lines = [f_ for f_ in fam['flop'][:3] if f_.get('cdg', {}).get('Commentaire') or f_.get('cdg', {}).get('Action')]
+    rect(s, X0, 5.55, W, 1.2, SOFT)
+    rect(s, X0, 5.55, 0.06, 1.2, ORANGE)
+    paras = [[(f'CAUSES ET ACTIONS · {E.CHEFS[sct].upper()}', {'bold': True, 'size': 9.5, 'color': NAVY})]]
     if gen:
-        paras.append([(gen, {'size': 10})])
+        paras.append([(gen, {'size': 11})])
     for f_ in lines:
         c = f_['cdg']
-        paras.append([(f"{f_['label']} : ", {'bold': True, 'size': 10}), (' '.join(x for x in [c.get('Cause') and f"[{c['Cause']}]", c.get('Commentaire'), c.get('Action') and f"Action : {c['Action']}"] if x), {'size': 10})])
+        paras.append([(f"{f_['label']} : ", {'bold': True, 'size': 11}),
+                      (' '.join(x for x in [c.get('Cause') and f"[{c['Cause']}]", c.get('Commentaire'), c.get('Action') and f"→ {c['Action']}"] if x), {'size': 11})])
     if not gen and not lines:
-        paras.append([(f'En attente : présenté en séance par {E.CHEFS[sct]}.', {'italic': True, 'color': MUTE, 'size': 10.5})])
-    tb(s, 0.72, 5.6, 11.9, 1.22, paras, spacing=2)
+        paras.append([(f'En attente : présenté en séance par {E.CHEFS[sct]}.', {'italic': True, 'color': MUTE, 'size': 11})])
+    tb(s, X0 + 0.25, 5.62, W - 0.4, 1.08, paras, spacing=3)
 
 
 def _annex_lexique(prs, R, ftr):
-    s = _content(prs, R, 'Annexe', 'lexique et méthode', ftr)
-    lex = [('CA', 'ventes HT de la semaine, en M FCFA'), ('Marge', 'CA − coût d’achat des produits vendus ; marge N-1 = hors promo + promo'),
+    s = _content(prs, 'Annexe', 'lexique et méthode', ftr, R)
+    lex = [('CA', 'ventes HT de la semaine, en M FCFA'), ('Marge', 'CA − coût d’achat ; marge N-1 = hors promo + promo'),
            ('Taux de marge', 'marge ÷ CA'), ('Trafic', 'nombre de tickets de caisse (débit)'), ('Panier moyen', 'CA ÷ tickets, en FCFA'),
            ('Vs N-1', 'même semaine de l’année précédente'), ('Δ (écart)', 'valeur N − valeur N-1'), ('pt (point)', 'écart entre deux taux'),
            ('Effet volume', '(CA N − CA N-1) × taux N-1 ; inclut l’effet prix'), ('Effet taux', 'CA N × (taux N − taux N-1)'),
            ('Non significatif', 'écart de marge inférieur à 0,5 M FCFA, affiché en gris'),
-           ('Ex-Supeco', 'anciens Supeco convertis en Market : ' + ', '.join(f"{n.replace('Market ', '')} ({d})" for n, d in E.CONVERSIONS)),
+           ('Ex-Supeco', 'Supeco convertis en Market : ' + ', '.join(f"{n.replace('Market ', '')} ({d})" for n, d in E.CONVERSIONS)),
            ('Familles', 'classées par écart de marge en valeur, CA ≥ 1 M FCFA en N ou N-1'),
-           ('Sources', 'exports Power BI A (famille × site), B (rayon × site), C (site) ; casse et budget hors périmètre')]
+           ('Sources', 'exports Power BI A (famille × magasin), B (rayon × magasin), C (magasin) ; casse et budget hors périmètre')]
     half = (len(lex) + 1) // 2
     for col, chunk in enumerate([lex[:half], lex[half:]]):
-        tb(s, 0.61 + col * 6.2, 1.55, 5.9, 5.2, [[(k + ' : ', {'bold': True, 'color': NAVY}), (v, {})] for k, v in chunk], size=12, spacing=9)
+        x = X0 + col * 6.2
+        for i, (k, v) in enumerate(chunk):
+            y = Y0 + i * 0.72
+            tb(s, x, y, 5.8, 0.66, [[(k, {'bold': True, 'size': 12, 'color': NAVY})], [(v, {'size': 11})]])
+            hline(s, x, y + 0.68, 5.8)
 
 
 def build_report(R: dict, masque, out) -> None:
     prs = Presentation(masque)
     _drop_all_slides(prs)
     sem = f"S{R['meta']['week']}"
-    ftr = f'Revue de performance · {sem}'
+    ftr = f'Revue de performance · {sem}' + (' · données fictives' if R.get('demo') else '')
     _cover(prs, R)
     _p2(prs, R, ftr)
     _p3(prs, R, ftr)
