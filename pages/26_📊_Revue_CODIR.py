@@ -46,63 +46,142 @@ def sgn(v):
     return 'neg' if v < 0 else 'pos'
 
 
+# ------------------------------------------------------------------ fiches des 3 exports Power BI
+EXPORTS = {
+    'A': {
+        'titre': 'Export A · Famille × Magasin',
+        'role': 'CA, marge, promo et quantités de chaque famille dans chaque magasin. Sert au calcul de la marge et au Top/Flop des familles.',
+        'lignes': ['Departement', 'Rayon', 'Famille', 'Site nom long'],
+        'mesures': ['CA', 'CA N-1', 'Marge', 'Marge Hors Promo N-1', 'Marge Promo N-1', 'CA Promo', 'CA Promo N-1', 'Qté Vente', 'Qté Vente N-1'],
+        'filtres': [('Date', 'du lundi au dimanche de la semaine écoulée'), ('Site nom long', 'les 12 magasins'),
+                    ('Départements', 'tous : PGC, Frais, Bazar, EPCS, Textile'), ('Hors e-commerce', 'fk_format n\u2019est pas Ecommerce')],
+        'repere': 'environ 1 500 lignes, colonnes N-1 incluses',
+    },
+    'B': {
+        'titre': 'Export B · Rayon × Magasin',
+        'role': 'Débit (tickets) et volume par rayon et par magasin. Sert au trafic, au panier et aux articles par panier.',
+        'lignes': ['Département', 'Site', 'Rayon'],
+        'mesures': ['CA', 'Débit', 'Débit N-1', 'Volume', 'Volume N-1'],
+        'filtres': [('Date', 'les 7 jours de la semaine écoulée'), ('Site nom long', 'les 12 magasins'),
+                    ('Libellé long Département', '01 PGC, 02 Frais, 03 Bazar, 04 EPCS, 06 Textile'), ('Libellé', 'HT')],
+        'repere': 'environ 370 lignes ; garder les lignes « Total » (le total général donne les tickets du réseau)',
+    },
+    'C': {
+        'titre': 'Export C · Magasin',
+        'role': 'Débit (tickets) de chaque magasin, N et N-1. Sert au trafic et au panier par format et par magasin.',
+        'lignes': ['Site'],
+        'mesures': ['Débit', 'Débit N-1'],
+        'filtres': [('Date', 'les 7 jours de la semaine écoulée'), ('Site nom long', 'les 12 magasins'), ('Libellé', 'HT')],
+        'repere': '13 lignes : les 12 magasins et la ligne « Total »',
+    },
+}
+
+
+def export_card(k):
+    x = EXPORTS[k]
+    chips = lambda cols: ''.join(f"<span class='col-chip'>{c}</span>" for c in cols)
+    filt = ''.join(f"<div class='rule-row'><span>{a}</span><span class='mut'>{b}</span></div>" for a, b in x['filtres'])
+    T.html(f"""<div class='card card-tall'>
+        <div class='section-title' style='margin-bottom:4px'>{x['titre']}</div>
+        <div class='note' style='margin-top:0'>{x['role']}</div>
+        <div class='col-group'>1. Axes en lignes, dans cet ordre</div>{chips(x['lignes'])}
+        <div class='col-group'>2. Mesures à cocher</div>{chips(x['mesures'])}
+        <div class='col-group'>3. Filtres</div>{filt}
+        <div class='col-group'>4. Export</div>
+        <div class='note' style='margin-top:2px'>Exporter les données en .xlsx, sans retoucher le fichier (le pied de page « Filtres appliqués » doit rester).
+        Repère : {x['repere']}.</div></div>""")
+
+
+def slot_status(k, f):
+    """Contrôle immédiat du fichier déposé dans l'emplacement k."""
+    try:
+        d = E.inspect_export(io.BytesIO(f.getvalue()))
+    except Exception:  # noqa: BLE001
+        st.error('Fichier illisible : réexporter depuis Power BI en .xlsx.')
+        return False
+    if d['kind'] != k:
+        if d['kind'] in EXPORTS:
+            st.error(f"Ce fichier est l\u2019{EXPORTS[d['kind']]['titre']} : déposez-le dans son emplacement.")
+        else:
+            miss = ', '.join(d['missing'][k][:6])
+            st.error(f'Fichier non reconnu. Colonnes manquantes pour l\u2019export {k} : {miss}.')
+        return False
+    if d['missing'][k]:
+        st.error('Colonnes manquantes : ' + ', '.join(d['missing'][k]))
+        return False
+    per = f"semaine du {d['period'][0]:%d/%m} au {d['period'][1]:%d/%m}" if d['period'] else 'période introuvable (pied de page absent)'
+    st.success(f"Reconnu · {per} · {d['rows']} lignes")
+    return True
+
+
 # ------------------------------------------------------------------ barre latérale
 T.sidebar_brand('📊', 'Revue CODIR')
-T.sidebar_label('Import fichiers')
+T.sidebar_label('1 · Les 3 exports Power BI')
+files, oks = {}, {}
 with st.sidebar:
-    up = st.file_uploader('Exports Power BI A, B et C', type=['xlsx'], accept_multiple_files=True, key='exports',
-                          help='A : famille × site · B : rayon × site · C : site. Ordre libre.')
-    cdg = st.file_uploader('Causes et actions complétées (10:10)', type=['xlsx'], accept_multiple_files=True, key='cdg',
-                           help='Classeurs des chefs de groupe, facultatif.')
+    for k, lab in [('A', 'Export A · Famille × Magasin'), ('B', 'Export B · Rayon × Magasin'), ('C', 'Export C · Magasin')]:
+        f = st.file_uploader(lab, type=['xlsx'], key=f'exp_{k}', help=EXPORTS[k]['role'])
+        if f:
+            files[k] = f
+            oks[k] = slot_status(k, f)
+T.sidebar_label('2 · Après 10:10 (facultatif)')
+with st.sidebar:
+    cdg = st.file_uploader('Classeurs « Causes et actions » complétés', type=['xlsx'], accept_multiple_files=True, key='cdg',
+                           help='Les classeurs remplis par les chefs de groupe.')
     mup = None
     if not MASQUE.exists():
         mup = st.file_uploader('Masque PowerPoint (.pptx)', type=['pptx'], key='masque',
                                help='Non stocké dans le dépôt GitHub : à déposer à chaque session.')
 T.sidebar_footer('Vs N-1 · M FCFA HT · 12 magasins<br>Casse et budget hors périmètre')
+ready = len(files) == 3 and all(oks.values())
 
 # ------------------------------------------------------------------ page d'accueil (avant import)
-if not up:
-    T.page_header('📊', 'Revue CODIR', 'Rapport hebdomadaire à la Direction Générale · entonnoir Vs N-1, de la semaine jusqu’aux familles')
-    T.landing_hero('Le rapport du lundi, prêt pour 10:30.',
-                   'Dépose les 3 exports Power BI de la semaine dans la barre latérale : le module contrôle leur cohérence, '
-                   'calcule l’entonnoir Global → Secteur → Format → Famille, prépare le classeur des chefs de groupe '
-                   'et génère le rapport PowerPoint sur le masque de l’entreprise.')
-    c1, c2 = st.columns(2)
+if not ready:
+    T.page_header('📊', 'Revue CODIR', 'Rapport hebdomadaire à la Direction Générale · entonnoir Vs N-1, de la semaine jusqu\u2019aux familles')
+    T.landing_hero('Trois exports Power BI, un rapport prêt pour 10:30.',
+                   'Chaque lundi à 08:00, tire les 3 exports décrits ci-dessous pour la semaine écoulée (lundi → dimanche), '
+                   'puis dépose chacun dans son emplacement de la barre latérale. Chaque fichier est contrôlé dès le dépôt ; '
+                   'l\u2019analyse démarre quand les trois sont reconnus.')
+    etat = ''.join(
+        T.badge(f"✓ {EXPORTS[k]['titre']} reconnu", 'ok') if oks.get(k) else
+        T.badge(f"✗ {EXPORTS[k]['titre']} à corriger", 'crit') if k in files else
+        T.badge(f"○ {EXPORTS[k]['titre']} à déposer", 'info') for k in 'ABC')
+    T.html(f"<div style='display:flex;gap:8px;flex-wrap:wrap;margin:-4px 0 14px'>{etat}</div>")
+    T.section('Les 3 exports à tirer de Power BI')
+    cols = st.columns(3)
+    for col, k in zip(cols, 'ABC'):
+        with col:
+            export_card(k)
+    st.write('')
+    c1, c2, c3 = st.columns(3)
     with c1:
-        T.rules_card('🧭 Ce que contient le module', [
-            ('Synthèse exécutive', 'KPI, passage de marge, faits marquants'),
-            ('Secteurs', 'PGC, Frais, Non-alimentaire : formats et familles'),
-            ('Rapport et exports', 'PowerPoint 5 pages + annexe, classeur, PDF'),
-            ('Lexique', 'définitions, formules, périmètre'),
+        T.rules_card('⚠️ Erreurs fréquentes', [
+            ('Mauvaise semaine', 'vérifier lundi → dimanche'),
+            ('Magasin manquant', 'les 12 doivent être cochés'),
+            ('Mesure N-1 absente', 'cocher les colonnes N-1'),
+            ('Fichier retouché', 'ne pas supprimer le pied de page'),
+            ('Lignes Total supprimées', 'les garder dans l\u2019export B'),
         ])
     with c2:
+        T.rules_card('🛡️ Contrôles après dépôt', [
+            ('Type de fichier', 'reconnu à ses colonnes'),
+            ('Même semaine', 'dans les 3 exports'),
+            ('CA export A = CA export B', 'écart toléré 0,1 %'),
+            ('Tickets des magasins = réseau', 'export C complet'),
+            ('12 magasins', 'dans chaque export'),
+        ])
+    with c3:
         T.rules_card('⚙️ Le lundi', [
-            ('08:00 · Pôle BDD', 'dépose les 3 exports'),
+            ('08:00 · Pôle BDD', 'tire et dépose les 3 exports'),
             ('08:15 · Pôle BDD', 'classeur des chefs de groupe sur Teams'),
             ('10:10 · Chefs de groupe', 'gel des « Causes et actions »'),
             ('10:30 · Coordinateur', 'envoi du rapport au directeur'),
-            ('14:00 · Équipe', 'point de détail et plans d’action'),
+            ('14:00 · Équipe', 'point de détail et plans d\u2019action'),
         ])
-    st.write('')
-    c3, c4 = st.columns(2)
-    with c3:
-        T.rules_card('🛡️ Contrôles automatiques', [
-            ('CA export A = CA export B', 'écart toléré 0,1 %'),
-            ('Tickets des sites = réseau', 'export C complet'),
-            ('12 magasins', 'dans chaque export'),
-            ('Même semaine', 'lue dans « Filtres appliqués »'),
-            ('Familles retenues', 'CA ≥ 1 M FCFA en N ou N-1'),
-            ('Écart non significatif', '&lt; 0,5 M FCFA, affiché en gris'),
-        ])
-    with c4:
-        T.columns_card('📄 Colonnes attendues', [
-            ('Export A · famille × site', ['Departement', 'Rayon', 'Famille', 'Site nom long', 'CA', 'CA N-1', 'Marge',
-                                           'Marge Hors Promo N-1', 'Marge Promo N-1', 'CA Promo', 'Qté Vente']),
-            ('Export B · rayon × site', ['Département', 'Site', 'Rayon', 'CA', 'Débit', 'Débit N-1', 'Volume', 'Volume N-1']),
-            ('Export C · site', ['Site', 'Débit', 'Débit N-1']),
-        ], note='Les colonnes N-1 sont lues automatiquement. Le Budget, s’il est présent, est ignoré.')
-    st.info('Dépose les 3 exports Power BI dans la barre latérale pour démarrer.')
+    st.info('Dépose les 3 exports dans leurs emplacements de la barre latérale : A, puis B, puis C.')
     st.stop()
+
+up = [files[k] for k in 'ABC']
 
 # ------------------------------------------------------------------ données
 try:
