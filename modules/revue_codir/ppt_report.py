@@ -300,7 +300,7 @@ def _cover(prs, R):
     box.fill.solid()
     box.fill.fore_color.rgb = rgb('FFFFFF')
     meta = [[('Vs N-1 · M FCFA HT · 12 magasins', {'size': 11, 'color': 'FFFFFF', 'bold': True})],
-            [(f"Données au lundi {m['data_date']:%d/%m/%Y}, 08:00 · Préparé par : Category management · Validé par : [nom]", {'size': 10, 'color': 'C5C8E0'})],
+            [(f"Données au lundi {m['data_date']:%d/%m/%Y}, 08:00", {'size': 10, 'color': 'C5C8E0'})],
             [('Confidentiel · usage interne', {'size': 10, 'color': 'C5C8E0'})]]
     if R.get('demo'):
         meta.append([('Données fictives · démonstration', {'size': 11, 'color': ORANGE, 'bold': True})])
