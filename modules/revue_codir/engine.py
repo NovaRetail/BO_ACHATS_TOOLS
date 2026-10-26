@@ -407,8 +407,8 @@ def _texts(R):
     t['faits'] = [
         f"Trafic {fpct(tk)}, panier {fpct(pan)} : CA {fpct(g['ca'])}.",
         f"Secteurs : {secteurs_line}.",
-        (f"Pourquoi : {wr['label']} {_effect_word(wr, False)} ({fdm(wr['effV'] if abs(wr['effV']) >= abs(wr['effT']) else wr['effT'])} M) ; "
-         f"cause à confirmer par le chef de groupe {wr['Secteur']}.") if wr['dM'] < 0 else
+        (f"Pourquoi : {wr['label']} ({wr['Secteur']}) {_effect_word(wr, False)} "
+         f"({fdm(wr['effV'] if abs(wr['effV']) >= abs(wr['effT']) else wr['effT'])} M).") if wr['dM'] < 0 else
         f"Pourquoi : {wr['label']} est le rayon le plus en recul.",
     ]
     t['taux'] = f"Taux de marge {fnum(g['t'] * 100)} % ({fpt(g['dt'])})."

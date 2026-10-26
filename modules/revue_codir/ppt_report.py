@@ -1,6 +1,6 @@
 """Rapport PowerPoint à la Direction Générale, généré sur le masque de l'entreprise.
 
-build_report(R, masque, out) : 5 pages principales + annexe (A1 à A4).
+build_report(R, masque, out) : 4 pages principales + annexe (A1 à A4).
 Mise en page « exécutive » : un message par page (titre), gros chiffres, graphiques natifs modifiables,
 un encadré « À retenir », beaucoup d'air. Tous les chiffres viennent de `R` (engine.compute).
 """
@@ -299,7 +299,7 @@ def _cover(prs, R):
              anchor=MSO_ANCHOR.MIDDLE)
     box.fill.solid()
     box.fill.fore_color.rgb = rgb('FFFFFF')
-    meta = [[('Rapport à la Direction Générale · Vs N-1 · M FCFA HT', {'size': 11, 'color': 'FFFFFF', 'bold': True})],
+    meta = [[('Vs N-1 · M FCFA HT · 12 magasins', {'size': 11, 'color': 'FFFFFF', 'bold': True})],
             [(f"Données au lundi {m['data_date']:%d/%m/%Y}, 08:00 · Préparé par : Category management · Validé par : [nom]", {'size': 10, 'color': 'C5C8E0'})],
             [('Confidentiel · usage interne', {'size': 10, 'color': 'C5C8E0'})]]
     if R.get('demo'):
@@ -345,21 +345,17 @@ def _p2(prs, R, ftr):
         tb(s, X0 + 0.5, yy, 5.5, 0.62, [runs], size=12.5, anchor=MSO_ANCHOR.MIDDLE)
     # priorités de la semaine
     xr = 6.95
-    eyebrow(s, xr, yb, 5.75, 'Priorités de la semaine')
+    eyebrow(s, xr, yb, 5.75, 'Familles à surveiller')
     flops = sorted([(sc_, f_) for sc_ in E.SECTEUR_ORDER for f_ in R['familles'][sc_]['flop'][:3]], key=lambda x: x[1]['dM'])[:3]
     for i, (sct, f_) in enumerate(flops):
-        yy = yb + 0.4 + i * 0.72
-        c = f_.get('cdg', {})
-        rect(s, xr, yy, 5.76, 0.62, SOFT)
-        rect(s, xr, yy, 0.06, 0.62, NEG if f_['dM'] < 0 else POS)
-        act = c.get('Action') or f"En attente : présenté en séance par {E.CHEFS[sct]}"
-        tb(s, xr + 0.2, yy + 0.04, 4.3, 0.56, [[(f_['label'], {'bold': True, 'size': 12}), (f"  ·  {sct}", {'size': 10, 'color': MUTE})],
-                                                [(act, {'size': 10, 'italic': not c.get('Action'), 'color': INK if c.get('Action') else MUTE})]])
-        tb(s, xr + 4.5, yy, 1.15, 0.62, [[(f"{E.fdm(f_['dM'])} M", {'bold': True, 'size': 14, 'color': sc(f_['dM'])})]],
+        yy = yb + 0.4 + i * 0.8
+        rect(s, xr, yy, 5.76, 0.68, SOFT)
+        rect(s, xr, yy, 0.06, 0.68, NEG if f_['dM'] < 0 else POS)
+        ca = f"CA {E.fpct(f_['ca'])} · " if f_['CA1'] else ''
+        tb(s, xr + 0.2, yy + 0.06, 4.3, 0.6, [[(f_['label'], {'bold': True, 'size': 12}), (f"  ·  {sct}", {'size': 10, 'color': MUTE})],
+                                                [(f"{ca}dont volume {E.fdm(f_['effV'])} M · dont taux {E.fdm(f_['effT'])} M", {'size': 10, 'color': MUTE})]])
+        tb(s, xr + 4.5, yy, 1.15, 0.68, [[(f"{E.fdm(f_['dM'])} M", {'bold': True, 'size': 14, 'color': sc(f_['dM'])})]],
            align=PP_ALIGN.RIGHT, anchor=MSO_ANCHOR.MIDDLE)
-    decs = [f_ for sct in E.SECTEUR_ORDER for f_ in R['familles'][sct]['flop'] if f_.get('cdg', {}).get('Décision DG', '').lower() == 'oui']
-    dtxt = (f"{len(decs)} décision(s) attendue(s) en page 5 : " + ', '.join(f_['label'] for f_ in decs[:3])) if decs else 'Aucune décision demandée à la Direction cette semaine.'
-    tb(s, xr, yb + 2.6, 5.76, 0.3, [[('Décisions DG  ', {'bold': True, 'size': 10.5, 'color': NAVY}), (dtxt, {'size': 10.5})]])
     # contexte en une ligne
     ctx = (f"Contexte : {t['contexte']} · Ex-Supeco convertis : " + ', '.join(f"{n.replace('Market ', '')} {d[:5]}" for n, d in E.CONVERSIONS)
            + ' · À vérifier : ' + ', '.join(E.SITES_A_VERIFIER) + ' · Vs N-1 uniquement, budget au reporting mensuel.')
@@ -452,32 +448,6 @@ def _p4(prs, R, ftr):
                                    'Les deux listes ne s’additionnent pas.')
 
 
-def _p5(prs, R, ftr):
-    s = _content(prs, "Plan d'actions", 'engagements et décisions attendues', ftr, R)
-    filled, empty = [], []
-    for sct in E.SECTEUR_ORDER:
-        for i, f_ in enumerate(R['familles'][sct]['flop']):
-            c = f_.get('cdg', {})
-            (filled if (c.get('Action') or c.get('Commentaire')) else empty if i < 2 else []).append((sct, f_, c))
-    items = sorted(filled, key=lambda x: (x[2].get('Décision DG', '').lower() != 'oui', x[1]['dM']))[:7]
-    items += sorted(empty, key=lambda x: x[1]['dM'])[:max(0, 7 - len(items))]
-    rows, cols = [], []
-    for sct, f_, c in items:
-        short = {'Non-alimentaire': 'Non-alim.'}.get(sct, sct)
-        rows.append([f"{f_['label']}", short, E.fdm(f_['dM']), c.get('Cause') or '—', c.get('Action') or f"En attente : {E.CHEFS[sct]}",
-                     c.get('Responsable') or '—', c.get('Échéance') or '—', c.get('Décision DG') or '—'])
-        g_ = MUTE
-        cols.append([None, MUTE, sc(f_['dM']), None if c.get('Cause') else g_, None if c.get('Action') else g_,
-                     None if c.get('Responsable') else g_, None if c.get('Échéance') else g_,
-                     (NEG_T if (c.get('Décision DG') or '').lower() == 'oui' else None) if c.get('Décision DG') else g_])
-    table(s, X0, Y0, W, rows, [2.5, 0.95, 0.85, 1.5, 3.15, 1.2, 1.05, 0.9],
-          ['Famille', 'Secteur', 'Écart (M)', 'Cause', 'Action', 'Responsable', 'Échéance', 'Décision'], size=11, row_h=0.5,
-          aligns=['l', 'l', 'r', 'l', 'l', 'l', 'c', 'c'], colors=cols)
-    n_ok = sum(1 for _, _, c in items if c.get('Action'))
-    takeaway(s, X0, 6.2, W, 0.55, f"{n_ok} action(s) engagée(s) sur {len(items)} familles en recul. "
-                                   'Repris des « Causes et actions » des chefs de groupe, gel à 10:10.', label='Suivi')
-
-
 def _annex_sector(prs, R, sct, code, ftr):
     s = _content(prs, 'Non-alim.' if sct == 'Non-alimentaire' else sct, R['texts']['sect_title'][sct], ftr, R)
     o = R['sect_detail'][sct]
@@ -499,29 +469,14 @@ def _annex_sector(prs, R, sct, code, ftr):
         rect(s, x, Y0 + 1.78, 1.36, 0.78, SOFT if small else (NEG_BG if v < 0 else POS_BG))
         tb(s, x, Y0 + 1.82, 1.36, 0.26, [[(f, {'size': 10, 'color': MUTE})]], align=PP_ALIGN.CENTER)
         tb(s, x, Y0 + 2.08, 1.36, 0.42, [[(E.fdm(v), {'size': 17, 'bold': True, 'color': sc(v, small)})]], align=PP_ALIGN.CENTER)
-    tb(s, X0, Y0 + 2.75, 5.7, 1.0, [[(R['texts']['lecture'][sct], {'size': 11, 'color': INK})]], line=1.15)
+    tb(s, X0, Y0 + 2.8, 5.7, 1.4, [[(R['texts']['lecture'][sct], {'size': 12, 'color': INK})]], line=1.2)
     # familles
     xr = 6.85
     eyebrow(s, xr, Y0, 5.85, 'Familles : contributeurs et détracteurs (M FCFA)')
     sel = fam['top'][:3] + fam['flop'][:3][::-1]
-    bar_chart(s, xr, Y0 + 0.28, 5.85, 3.0, [f_['label'] for f_ in sel], [f_['dM'] for f_ in sel], size=10.5)
-    tb(s, xr, Y0 + 3.3, 5.85, 0.6, [[(' · '.join(f"{f_['label']} : volume {E.fdm(f_['effV'])}, taux {E.fdm(f_['effT'])}" for f_ in fam['flop'][:3]),
+    bar_chart(s, xr, Y0 + 0.28, 5.85, 3.9, [f_['label'] for f_ in sel], [f_['dM'] for f_ in sel], size=11)
+    tb(s, xr, Y0 + 4.3, 5.85, 0.6, [[(' · '.join(f"{f_['label']} : volume {E.fdm(f_['effV'])}, taux {E.fdm(f_['effT'])}" for f_ in fam['flop'][:3]),
                                        {'size': 9, 'color': MUTE})]])
-    # causes et actions
-    gen = (R.get('general') or {}).get(sct)
-    lines = [f_ for f_ in fam['flop'][:3] if f_.get('cdg', {}).get('Commentaire') or f_.get('cdg', {}).get('Action')]
-    rect(s, X0, 5.55, W, 1.2, SOFT)
-    rect(s, X0, 5.55, 0.06, 1.2, ORANGE)
-    paras = [[(f'CAUSES ET ACTIONS · {E.CHEFS[sct].upper()}', {'bold': True, 'size': 9.5, 'color': NAVY})]]
-    if gen:
-        paras.append([(gen, {'size': 11})])
-    for f_ in lines:
-        c = f_['cdg']
-        paras.append([(f"{f_['label']} : ", {'bold': True, 'size': 11}),
-                      (' '.join(x for x in [c.get('Cause') and f"[{c['Cause']}]", c.get('Commentaire'), c.get('Action') and f"→ {c['Action']}"] if x), {'size': 11})])
-    if not gen and not lines:
-        paras.append([(f'En attente : présenté en séance par {E.CHEFS[sct]}.', {'italic': True, 'color': MUTE, 'size': 11})])
-    tb(s, X0 + 0.25, 5.62, W - 0.4, 1.08, paras, spacing=3)
 
 
 def _annex_lexique(prs, R, ftr):
@@ -552,7 +507,6 @@ def build_report(R: dict, masque, out) -> None:
     _p2(prs, R, ftr)
     _p3(prs, R, ftr)
     _p4(prs, R, ftr)
-    _p5(prs, R, ftr)
     for code, sct in zip(['A1', 'A2', 'A3'], E.SECTEUR_ORDER):
         _annex_sector(prs, R, sct, code, f'Annexe {code} · {ftr}')
     _annex_lexique(prs, R, f'Annexe A4 · {ftr}')
