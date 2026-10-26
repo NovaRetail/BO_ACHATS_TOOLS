@@ -53,7 +53,7 @@ EXPORTS = {
         'role': 'CA, marge, promo et quantités de chaque famille dans chaque magasin. Sert au calcul de la marge et au Top/Flop des familles.',
         'lignes': ['Departement', 'Rayon', 'Famille', 'Site nom long'],
         'mesures': ['CA', 'CA N-1', 'Marge', 'Marge Hors Promo N-1', 'Marge Promo N-1', 'CA Promo', 'CA Promo N-1', 'Qté Vente', 'Qté Vente N-1'],
-        'filtres': [('Date', 'du lundi au dimanche de la semaine écoulée'), ('Site nom long', 'les 12 magasins'),
+        'filtres': [('Date', 'du lundi au dimanche de la semaine écoulée'), ('Site nom long', 'tous les magasins du réseau'),
                     ('Départements', 'tous : PGC, Frais, Bazar, EPCS, Textile'), ('Hors e-commerce', 'fk_format n\u2019est pas Ecommerce')],
         'repere': 'environ 1 500 lignes, colonnes N-1 incluses',
     },
@@ -62,7 +62,7 @@ EXPORTS = {
         'role': 'Débit (tickets) et volume par rayon et par magasin. Sert au trafic, au panier et aux articles par panier.',
         'lignes': ['Département', 'Site', 'Rayon'],
         'mesures': ['CA', 'Débit', 'Débit N-1', 'Volume', 'Volume N-1'],
-        'filtres': [('Date', 'les 7 jours de la semaine écoulée'), ('Site nom long', 'les 12 magasins'),
+        'filtres': [('Date', 'les 7 jours de la semaine écoulée'), ('Site nom long', 'tous les magasins du réseau'),
                     ('Libellé long Département', '01 PGC, 02 Frais, 03 Bazar, 04 EPCS, 06 Textile'), ('Libellé', 'HT')],
         'repere': 'environ 370 lignes ; garder les lignes « Total » (le total général donne les tickets du réseau)',
     },
@@ -71,8 +71,8 @@ EXPORTS = {
         'role': 'Débit (tickets) de chaque magasin, N et N-1. Sert au trafic et au panier par format et par magasin.',
         'lignes': ['Site'],
         'mesures': ['Débit', 'Débit N-1'],
-        'filtres': [('Date', 'les 7 jours de la semaine écoulée'), ('Site nom long', 'les 12 magasins'), ('Libellé', 'HT')],
-        'repere': '13 lignes : les 12 magasins et la ligne « Total »',
+        'filtres': [('Date', 'les 7 jours de la semaine écoulée'), ('Site nom long', 'tous les magasins du réseau'), ('Libellé', 'HT')],
+        'repere': 'une ligne par magasin, plus la ligne « Total »',
     },
 }
 
@@ -143,7 +143,7 @@ with st.sidebar:
     if not MASQUE.exists():
         mup = st.file_uploader('Masque PowerPoint (.pptx)', type=['pptx'], key='masque',
                                help='Non stocké dans le dépôt GitHub : à déposer à chaque session.')
-T.sidebar_footer('Vs N-1 · M FCFA HT · 12 magasins<br>Casse et budget hors périmètre')
+T.sidebar_footer('Vs N-1 · M FCFA HT<br>Casse et budget hors périmètre')
 ready = len(files) == 3 and all(oks.values())
 
 # ------------------------------------------------------------------ page d'accueil (avant import)
@@ -168,7 +168,7 @@ if not ready:
     with c1:
         T.rules_card('⚠️ Erreurs fréquentes', [
             ('Mauvaise semaine', 'vérifier lundi → dimanche'),
-            ('Magasin manquant', 'les 12 doivent être cochés'),
+            ('Magasin manquant', 'cocher tous les magasins du réseau'),
             ('Mesure N-1 absente', 'cocher les colonnes N-1'),
             ('Fichier retouché', 'ne pas supprimer le pied de page'),
             ('Lignes Total supprimées', 'les garder dans l\u2019export B'),
@@ -179,7 +179,7 @@ if not ready:
             ('Même semaine', 'dans les 3 exports'),
             ('CA export A = CA export B', 'écart toléré 0,1 %'),
             ('Tickets des magasins = réseau', 'export C complet'),
-            ('12 magasins', 'dans chaque export'),
+            ('Mêmes magasins', 'dans les 3 exports'),
         ])
     with c3:
         T.rules_card('⚙️ Le lundi', [
@@ -207,7 +207,7 @@ g, t, m = R['global'], R['texts'], R['meta']
 sem = f"S{m['week']}"
 checks_ok = all(ok for _, ok, _ in R['checks'])
 
-T.hero(f'📊 Revue CODIR · {sem}', f"{m['periode']} · Vs N-1 · données au {m['data_date']:%d/%m/%Y} 08:00", [
+T.hero(f'📊 Revue CODIR · {sem}', f"{m['periode']} · {m['n_sites']} magasins · Vs N-1 · données au {m['data_date']:%d/%m/%Y} 08:00", [
     f"CA {E.fm(g['CA'])} M · {E.fpct(g['ca'])}",
     (f"Marge {E.fdm(g['dM'])} M", 'alert' if g['dM'] < 0 else 'ok'),
     f"Taux {E.fnum(g['t'] * 100)} % · {E.fpt(g['dt'])}",

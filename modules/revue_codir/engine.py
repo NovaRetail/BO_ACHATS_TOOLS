@@ -223,8 +223,10 @@ def prepare(found: dict) -> dict:
     checks.append(('CA export A = CA export B', ecart <= TOLERANCE, f'{fm(caA)} M contre {fm(caB)} M (écart {fnum(ecart * 100, 3)} %)'))
     tks = st['T'].sum()
     checks.append(('Tickets des sites = tickets du réseau', abs(tks - T) <= max(1, T * TOLERANCE), f'{fnum(tks, 0)} contre {fnum(T, 0)}'))
-    checks.append(('12 magasins dans chaque export', fam['Site'].nunique() == 12 and st['Site'].nunique() == 12,
-                   f'A : {fam["Site"].nunique()} · C : {st["Site"].nunique()}'))
+    sa, sb_, sc_ = set(fam['Site']), set(ray['Site']), set(st['Site'])
+    checks.append(('Mêmes magasins dans les 3 exports', sa == sb_ == sc_,
+                   f'A : {len(sa)} · B : {len(sb_)} · C : {len(sc_)}'
+                   + ('' if sa == sb_ == sc_ else ' · écarts : ' + ', '.join(sorted((sa | sb_ | sc_) - (sa & sb_ & sc_))))))
     ps = {k: v for k, v in periods.items() if v}
     same = len(set(ps.values())) == 1 and len(ps) == 3
     checks.append(('Même période dans les 3 exports', same,
@@ -238,7 +240,7 @@ def prepare(found: dict) -> dict:
     start, end = per
     iso = start.isocalendar()
     monday_after = end + timedelta(days=(7 - end.weekday()) % 7 or 7)
-    meta = {'start': start, 'end': end, 'week': iso[1], 'year': iso[0], 'data_date': monday_after,
+    meta = {'start': start, 'end': end, 'week': iso[1], 'year': iso[0], 'data_date': monday_after, 'n_sites': fam['Site'].nunique(),
             'periode': f'du {start:%d} au {end:%d} {_MOIS[end.month]} {end.year}' if start.month == end.month
             else f'du {start:%d/%m} au {end:%d/%m/%Y}'}
     return {'fam': fam, 'ray': ray, 'ds': ds, 'st': st, 'T': T, 'T1': T1, 'VOL': VOL, 'VOL1': VOL1,
