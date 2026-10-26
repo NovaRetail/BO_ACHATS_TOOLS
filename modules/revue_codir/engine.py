@@ -122,6 +122,27 @@ def identify(df: pd.DataFrame) -> str:
     return '?'
 
 
+REQUIRED = {
+    'A': ['Departement', 'Rayon', 'Famille', 'Site nom long', 'CA', 'CA N-1', 'Marge', 'Marge Hors Promo N-1', 'Marge Promo N-1',
+          'CA Promo', 'CA Promo N-1', 'Qté Vente', 'Qté Vente N-1'],
+    'B': ['Département', 'Site', 'Rayon', 'CA', 'Débit', 'Débit N-1', 'Volume', 'Volume N-1'],
+    'C': ['Site', 'Débit', 'Débit N-1'],
+}
+LABELS = {'A': 'Export A · Famille × Magasin', 'B': 'Export B · Rayon × Magasin', 'C': 'Export C · Magasin'}
+
+
+def inspect_export(src) -> dict:
+    """Diagnostic d'un fichier déposé : type reconnu, colonnes manquantes, période, lignes Total."""
+    df = _read(src)
+    kind = identify(df)
+    per = period_from_footer(_footer(df))
+    out = {'kind': kind, 'rows': len(df), 'period': per, 'has_footer': bool(_footer(df))}
+    out['missing'] = {k: [c for c in cols if c not in df.columns] for k, cols in REQUIRED.items()}
+    first = df.columns[0]
+    out['has_total'] = bool((df[first].astype(str) == 'Total').any())
+    return out
+
+
 def period_from_footer(txt: str):
     dates = [datetime.strptime(d, '%d/%m/%Y').date() for d in re.findall(r'\d{2}/\d{2}/\d{4}', txt)]
     if not dates:
@@ -199,7 +220,7 @@ def prepare(found: dict) -> dict:
     checks = []
     caA, caB = fam['CA'].sum(), ds['CA'].sum()
     ecart = abs(caA - caB) / caB if caB else 1
-    checks.append(('CA export A = CA export B', ecart <= TOLERANCE, f'{fm(caA)} M contre {fm(caB)} M (écart {ecart * 100:.3f} %)'))
+    checks.append(('CA export A = CA export B', ecart <= TOLERANCE, f'{fm(caA)} M contre {fm(caB)} M (écart {fnum(ecart * 100, 3)} %)'))
     tks = st['T'].sum()
     checks.append(('Tickets des sites = tickets du réseau', abs(tks - T) <= max(1, T * TOLERANCE), f'{fnum(tks, 0)} contre {fnum(T, 0)}'))
     checks.append(('12 magasins dans chaque export', fam['Site'].nunique() == 12 and st['Site'].nunique() == 12,

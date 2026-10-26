@@ -24,13 +24,15 @@ L'application s'ouvre dans le navigateur (http://localhost:8501). Pour la versio
 
 ## Les 3 exports attendus
 
-| Export | Axes | Mesures utilisées |
-|---|---|---|
-| A | Département, Rayon, Famille, Site nom long | CA, Marge, Marge hors promo N-1, Marge promo N-1, CA promo, Qté vente (N et N-1) |
-| B | Département, Site, Rayon | CA, Débit, Volume (N et N-1) |
-| C | Site | Débit (N et N-1) |
+Chaque export est déposé dans **son** emplacement de la barre latérale ; il est contrôlé dès le dépôt (type reconnu, colonnes, semaine).
 
-L'ordre de dépôt est libre : l'outil reconnaît chaque fichier à ses colonnes et lit la période dans le pied de page « Filtres appliqués ».
+| Export | Axes en lignes (dans l'ordre) | Mesures à cocher | Filtres |
+|---|---|---|---|
+| A · Famille × Magasin | Departement, Rayon, Famille, Site nom long | CA, CA N-1, Marge, Marge Hors Promo N-1, Marge Promo N-1, CA Promo, CA Promo N-1, Qté Vente, Qté Vente N-1 | semaine lundi → dimanche, 12 magasins, tous départements, hors e-commerce |
+| B · Rayon × Magasin | Département, Site, Rayon | CA, Débit, Débit N-1, Volume, Volume N-1 | 7 jours de la semaine, 12 magasins, départements 01 à 06, HT |
+| C · Magasin | Site | Débit, Débit N-1 | 7 jours de la semaine, 12 magasins, HT |
+
+Exporter en .xlsx sans retoucher le fichier : le pied de page « Filtres appliqués » donne la semaine. Dans l'export B, garder les lignes « Total » (le total général donne les tickets du réseau). Repères : A ≈ 1 500 lignes, B ≈ 370 lignes, C = 13 lignes.
 
 ## Si un contrôle est rouge
 
