@@ -137,23 +137,27 @@ ready = len(files) == 3 and all(oks.values())
 
 # ------------------------------------------------------------------ page d'accueil (avant import)
 if not ready:
-    T.page_header('📊', 'Revue CODIR', 'Rapport hebdomadaire à la Direction Générale · entonnoir Vs N-1, de la semaine jusqu\u2019aux familles')
-    T.landing_hero('Trois exports Power BI, un rapport prêt pour 10:30.',
-                   'Chaque lundi à 08:00, tire les 3 exports décrits ci-dessous pour la semaine écoulée (lundi → dimanche), '
-                   'puis dépose chacun dans son emplacement de la barre latérale. Chaque fichier est contrôlé dès le dépôt ; '
-                   'l\u2019analyse démarre quand les trois sont reconnus.')
-    etat = ''.join(
-        T.badge(f"✓ {EXPORTS[k]['titre']} reconnu", 'ok') if oks.get(k) else
-        T.badge(f"✗ {EXPORTS[k]['titre']} à corriger", 'crit') if k in files else
-        T.badge(f"○ {EXPORTS[k]['titre']} à déposer", 'info') for k in 'ABC')
-    T.html(f"<div style='display:flex;gap:8px;flex-wrap:wrap;margin:-4px 0 14px'>{etat}</div>")
+    rows = [(EXPORTS[k]['titre'], 'ok' if oks.get(k) else ('err' if k in files else 'wait'),
+             'reconnu' if oks.get(k) else ('à corriger' if k in files else 'à déposer')) for k in 'ABC']
+    rows.append(('Masque PowerPoint', 'ok' if (MASQUE.exists() or mup) else 'wait', 'par défaut' if MASQUE.exists() else ''))
+    T.landing_hero('REVUE <b>CODIR</b>',
+                   'Rapport hebdomadaire à la Direction Générale : entonnoir Vs N-1 de la semaine jusqu\u2019aux familles. '
+                   'Chaque lundi à 08:00, tire les 3 exports Power BI de la semaine écoulée (lundi → dimanche) et dépose-les '
+                   'dans la barre latérale ; chaque fichier est contrôlé dès le dépôt.',
+                   eyebrow='Pilotage · Hebdomadaire · Vs N-1',
+                   status=T.landing_status('Préparation de la revue', rows, 'exports reconnus', count=3))
+    T.steps([('08:00 · Pôle BDD', 'tire et dépose les 3 exports'),
+             ('08:15 · Pôle BDD', 'classeur des chefs de groupe sur Teams'),
+             ('10:10 · Chefs de groupe', 'gel des « Causes et actions »'),
+             ('10:30 · Coordinateur', 'envoi du rapport au directeur'),
+             ('14:00 · Équipe', 'point de détail et plans d\u2019action')])
     T.section('Les 3 exports à tirer de Power BI')
     cols = st.columns(3)
     for col, k in zip(cols, 'ABC'):
         with col:
             export_card(k)
     st.write('')
-    c1, c2, c3 = st.columns(3)
+    c1, c2 = st.columns(2)
     with c1:
         T.rules_card('⚠️ Erreurs fréquentes', [
             ('Mauvaise semaine', 'vérifier lundi → dimanche'),
@@ -169,14 +173,6 @@ if not ready:
             ('CA export A = CA export B', 'écart toléré 0,1 %'),
             ('Tickets des magasins = réseau', 'export C complet'),
             ('12 magasins', 'dans chaque export'),
-        ])
-    with c3:
-        T.rules_card('⚙️ Le lundi', [
-            ('08:00 · Pôle BDD', 'tire et dépose les 3 exports'),
-            ('08:15 · Pôle BDD', 'classeur des chefs de groupe sur Teams'),
-            ('10:10 · Chefs de groupe', 'gel des « Causes et actions »'),
-            ('10:30 · Coordinateur', 'envoi du rapport au directeur'),
-            ('14:00 · Équipe', 'point de détail et plans d\u2019action'),
         ])
     st.info('Dépose les 3 exports dans leurs emplacements de la barre latérale : A, puis B, puis C.')
     st.stop()
@@ -196,14 +192,14 @@ g, t, m = R['global'], R['texts'], R['meta']
 sem = f"S{m['week']}"
 checks_ok = all(ok for _, ok, _ in R['checks'])
 
-T.hero(f'📊 Revue CODIR · {sem}', f"{m['periode']} · Vs N-1 · données au {m['data_date']:%d/%m/%Y} 08:00", [
+T.hero(f'REVUE CODIR · <b>{sem}</b>', f"{m['periode']} · Vs N-1 · données au {m['data_date']:%d/%m/%Y} 08:00", [
     f"CA {E.fm(g['CA'])} M · {E.fpct(g['ca'])}",
     (f"Marge {E.fdm(g['dM'])} M", 'alert' if g['dM'] < 0 else 'ok'),
     f"Taux {E.fnum(g['t'] * 100)} % · {E.fpt(g['dt'])}",
     f"Trafic {E.fpct(g['tk'])}",
     (f"Panier {E.fpct(g['pan'])}", 'alert' if g['pan'] < 0 else 'ok'),
     ('Contrôles OK', 'ok') if checks_ok else ('Contrôle à vérifier', 'alert'),
-])
+], eyebrow='Rapport hebdomadaire à la Direction Générale')
 if not checks_ok:
     T.alert('Un contrôle de cohérence n’est pas passé', ' · '.join(f'{lab} : {det}' for lab, ok, det in R['checks'] if not ok), 'crit')
 
@@ -216,8 +212,8 @@ with tabs[0]:
         T.kpi("Chiffre d'affaires", E.fm(g['CA']), E.fpct(g['ca']), sgn(g['ca']), f"N-1 {E.fm(g['CA1'])} M", 'blue', '💰', 'M FCFA'),
         T.kpi('Marge', E.fm(g['M']), f"{E.fdm(g['dM'])} M", sgn(g['dM']), f"N-1 {E.fm(g['M1'])} M", 'violet', '📈', 'M FCFA'),
         T.kpi('Taux de marge', E.fnum(g['t'] * 100), E.fpt(g['dt']), sgn(g['dt']), f"N-1 {E.fnum(g['t1'] * 100)} %", 'violet', '％', '%'),
-        T.kpi('Trafic', E.fnum(g['T'], 0), E.fpct(g['tk']), sgn(g['tk']), f"N-1 {E.fnum(g['T1'], 0)}", '', '🧾', 'tickets'),
-        T.kpi('Panier moyen', E.fnum(g['panier'], 0), E.fpct(g['pan']), sgn(g['pan']), f"N-1 {E.fnum(g['panier1'], 0)}", '', '🛒', 'FCFA'),
+        T.kpi('Trafic', E.fnum(g['T'], 0), E.fpct(g['tk']), sgn(g['tk']), f"N-1 {E.fnum(g['T1'], 0)}", 'teal', '🧾', 'tickets'),
+        T.kpi('Panier moyen', E.fnum(g['panier'], 0), E.fpct(g['pan']), sgn(g['pan']), f"N-1 {E.fnum(g['panier1'], 0)}", 'teal', '🛒', 'FCFA'),
     ])
     verif = ', '.join(f'{k} ({v})' for k, v in E.SITES_A_VERIFIER.items())
     T.alert('Contexte et périmètre',
@@ -236,7 +232,7 @@ with tabs[0]:
             if k == 'tot':
                 base.append(0)
                 h.append(v / 1e6)
-                col.append('#8FB8F5' if n == 'Marge N-1' else T.NAVY)
+                col.append('#B9BAD6' if n == 'Marge N-1' else T.NAVY)
                 txt.append(E.fm(v))
             else:
                 base.append(min(cur, cur + v) / 1e6)
