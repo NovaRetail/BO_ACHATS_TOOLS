@@ -1,5 +1,6 @@
 # Masque PowerPoint de l'entreprise : jamais dans le dépôt
 modules/revue_codir/assets/*.pptx
+modules/*/assets/*.pptx
 
 # Exports de données : jamais dans le dépôt
 *.xlsx

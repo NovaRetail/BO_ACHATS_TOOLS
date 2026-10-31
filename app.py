@@ -16,6 +16,7 @@ PAGES_DIR = Path("pages")
 # num : (nom affiché, description, couleur, rubrique) — l'ordre ci-dessous est l'ordre d'affichage
 META = {
     # Pilotage
+    "27": ("Flash Quotidien",         "Ventes de la veille · secteurs · retours attendus · PowerPoint", "#F09F39", "pilotage"),
     "26": ("Revue CODIR",             "Rapport hebdo à la DG · entonnoir Vs N-1 · PowerPoint",  "#24235C", "pilotage"),
     "24": ("PGC Radar",               "Réel vs Budget vs N-1 · alertes à traiter",             "#5E35B1", "pilotage"),
     # Ventes et marge
