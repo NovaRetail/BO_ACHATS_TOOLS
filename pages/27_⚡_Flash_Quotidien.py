@@ -315,6 +315,213 @@ if not (f_hier and f_sem and f_site):
     st.stop()
 
 
+# ------------------------------------------------------------------ styles des résultats (même charte que l'accueil)
+APP_CSS = f"""
+<style>
+.bi, .bi * {{font-family:'Inter', system-ui, sans-serif; box-sizing:border-box;}}
+.bi {{color:{INK};}}
+/* contrôle des extractions */
+.bi-check {{display:flex; align-items:center; gap:10px; flex-wrap:wrap; background:#fff; border:1px solid #E3E5EE;
+  border-radius:12px; padding:10px 14px; margin-bottom:14px; font-size:.8rem;}}
+.bi-check .h {{font-weight:700; color:{NAVY}; margin-right:4px;}}
+.bi-check .p {{display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:999px; font-weight:600;}}
+.bi-check .p.ok {{background:{TEAL}14; color:{TEAL};}} .bi-check .p.alerte {{background:{ORANGE}1F; color:#B4610A;}}
+.bi-check .p.erreur {{background:{RED}14; color:{RED};}}
+/* cascade de marge dans le bandeau */
+.wf {{display:flex; flex-direction:column; gap:7px; margin-top:4px;}}
+.wf-r {{display:grid; grid-template-columns:92px 1fr 70px; align-items:center; gap:8px; font-size:.78rem; color:#E7E8F5;}}
+.wf-t {{position:relative; height:16px; background:rgba(255,255,255,.06); border-radius:4px;}}
+.wf-t span {{position:absolute; top:0; bottom:0; border-radius:4px;}}
+.wf-r .v {{text-align:right; font-weight:700; color:#fff; white-space:nowrap;}}
+.wf-n {{font-size:.68rem; color:#9C9DC4; margin-top:6px;}}
+/* cartes KPI */
+.kgrid {{display:grid; grid-template-columns:repeat(5,1fr); gap:14px; margin:18px 0 6px 0;}}
+.kc {{background:#fff; border:1px solid #E3E5EE; border-radius:16px; padding:16px 16px 14px; position:relative; overflow:hidden;
+  box-shadow:0 1px 2px rgba(20,20,60,.04),0 8px 22px rgba(20,20,60,.05);}}
+.kc:before {{content:""; position:absolute; left:0; top:0; right:0; height:3px; background:var(--acc);}}
+.kc .hd {{display:flex; align-items:center; gap:8px; font-size:.78rem; color:{MUTE}; font-weight:600;}}
+.kc .ic {{width:26px; height:26px; border-radius:8px; display:flex; align-items:center; justify-content:center;
+  font-size:.8rem; background:var(--tint); color:var(--acc); font-weight:800;}}
+.kc .v {{font-size:1.75rem; font-weight:800; color:{NAVY}; margin:10px 0 6px 0; letter-spacing:-.01em; white-space:nowrap;}}
+.kc .v.pos {{color:{TEAL};}} .kc .v.neg {{color:{RED};}}
+.kc .d {{display:inline-flex; align-items:center; gap:4px; font-size:.76rem; font-weight:700; padding:3px 9px; border-radius:999px;}}
+.d.pos {{background:{TEAL}17; color:{TEAL};}} .d.neg {{background:{RED}14; color:{RED};}}
+.kc .s {{font-size:.74rem; color:{MUTE}; margin-top:8px;}}
+.kc .cmp {{margin-top:10px; display:flex; flex-direction:column; gap:3px;}}
+.kc .cmp div {{display:grid; grid-template-columns:28px 1fr; align-items:center; gap:6px; font-size:.64rem; color:{MUTE};}}
+.kc .cmp i {{display:block; height:5px; border-radius:3px;}}
+/* à retenir */
+.ret {{display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin:12px 0 4px 0;}}
+.ret div {{display:flex; gap:12px; align-items:flex-start; background:#fff; border:1px solid #E3E5EE; border-radius:14px;
+  padding:14px 16px; font-size:.86rem; line-height:1.45;}}
+.ret b.n {{flex:none; width:26px; height:26px; border-radius:50%; background:{ORANGE}; color:#fff; display:flex;
+  align-items:center; justify-content:center; font-size:.8rem;}}
+/* onglets en contrôle segmenté */
+div[data-testid="stTabs"] [role="tablist"] {{gap:4px; background:{GREY}; padding:5px; border-radius:12px;
+  width:fit-content; border:none; box-shadow:none;}}
+div[data-testid="stTabs"] [data-testid="stTab"] {{height:36px; padding:0 18px; border-radius:9px; background:transparent;
+  font-family:'Inter',sans-serif; font-weight:600; color:{MUTE}; border:none; margin:0;}}
+div[data-testid="stTabs"] [data-testid="stTab"] p {{font-weight:600; font-size:.88rem;}}
+div[data-testid="stTabs"] [data-testid="stTab"][aria-selected="true"] {{background:#fff; color:{NAVY};
+  box-shadow:0 1px 3px rgba(20,20,60,.14);}}
+div[data-testid="stTabs"] [data-testid="stTab"][aria-selected="true"] p {{color:{NAVY};}}
+div[data-testid="stTabs"] [role="tablist"] > :not([data-testid="stTab"]) {{display:none;}}
+div[data-testid="stTabs"] [role="tablist"] ~ * {{border:none;}}
+div[data-testid="stTabs"] [data-testid="stTab"] div {{background:transparent !important;}}
+div[data-testid="stTabs"] [data-testid="stTab"]:after, div[data-testid="stTabs"] [data-testid="stTab"]:before {{display:none;}}
+/* titres de section */
+.sec {{display:flex; align-items:center; gap:10px; margin:22px 0 10px 0;}}
+.sec h3 {{margin:0; padding:0; font-size:1rem; font-weight:700; color:{NAVY};}}
+.sec .line {{flex:1; height:1px; background:#E3E5EE;}} .sec .hint {{font-size:.76rem; color:{MUTE};}}
+/* tableaux */
+.tw {{background:#fff; border:1px solid #E3E5EE; border-radius:14px; overflow:auto;
+  box-shadow:0 1px 2px rgba(20,20,60,.04),0 8px 22px rgba(20,20,60,.04);}}
+table.bt {{width:100%; border-collapse:collapse; font-size:.8rem;}}
+.bt th {{position:sticky; top:0; background:#F7F7FB; color:{MUTE}; font-weight:700; font-size:.66rem; letter-spacing:.06em;
+  text-transform:uppercase; text-align:right; padding:10px 10px; border-bottom:1px solid #E3E5EE; white-space:nowrap;}}
+.bt th.l, .bt td.l {{text-align:left;}}
+.bt td {{padding:9px 10px; border-bottom:1px solid #F0F1F5; text-align:right; white-space:nowrap; color:{INK};}}
+.bt tr:last-child td {{border-bottom:none;}}
+.bt tr:hover td {{background:#FAFAFD;}}
+.bt td.first {{font-weight:700; color:{NAVY};}}
+.bt td .sub {{font-weight:500; color:{MUTE}; font-size:.72rem; margin-top:1px;}}
+.bt tr.al td.first {{box-shadow:inset 3px 0 0 {RED};}}
+.bt tr.tot td {{background:#F7F7FB; font-weight:700;}}
+.bt .pos {{color:{TEAL}; font-weight:600;}} .bt .neg {{color:{RED}; font-weight:600;}}
+.db {{display:flex; align-items:center; justify-content:flex-end; gap:8px;}}
+.db .tr {{position:relative; width:52px; height:8px; background:{GREY}; border-radius:4px;}}
+.db .tr:after {{content:""; position:absolute; left:50%; top:-2px; bottom:-2px; width:1px; background:#C9CBD8;}}
+.db .tr span {{position:absolute; top:0; bottom:0; border-radius:4px;}}
+.pill {{display:inline-block; font-size:.7rem; font-weight:700; padding:2px 8px; border-radius:6px; white-space:nowrap;}}
+.pill.nav {{background:#24235C12; color:{NAVY};}} .pill.or {{background:{ORANGE}1F; color:#B4610A;}}
+.pill.rd {{background:{RED}14; color:{RED};}} .pill.tl {{background:{TEAL}17; color:{TEAL};}}
+/* cartes secteur */
+.g3 {{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px;}}
+.sc {{background:#fff; border:1px solid #E3E5EE; border-radius:16px; padding:16px 18px;
+  box-shadow:0 1px 2px rgba(20,20,60,.04),0 8px 22px rgba(20,20,60,.05);}}
+.sc .top {{display:flex; align-items:center; justify-content:space-between;}}
+.sc .nm {{font-weight:800; color:#fff; background:{NAVY}; border-radius:8px; padding:4px 10px; font-size:.78rem; letter-spacing:.04em;}}
+.sc .big {{font-size:2rem; font-weight:800; margin:12px 0 0 0; letter-spacing:-.01em;}}
+.sc .bl {{font-size:.74rem; color:{MUTE};}}
+.sc .mg {{display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin:14px 0;}}
+.sc .mg div {{background:{GREY}; border-radius:10px; padding:8px 10px;}}
+.sc .mg .l {{font-size:.66rem; color:{MUTE}; text-transform:uppercase; letter-spacing:.06em; font-weight:700;}}
+.sc .mg .v {{font-size:.95rem; font-weight:800; color:{NAVY}; margin-top:2px;}}
+.sc .mg .x {{font-size:.72rem; font-weight:700;}}
+.sc .k {{font-size:.66rem; letter-spacing:.1em; text-transform:uppercase; color:{MUTE}; font-weight:700; margin-bottom:6px;}}
+.sc .ry {{display:flex; align-items:center; justify-content:space-between; gap:8px; padding:7px 0; border-top:1px solid #F0F1F5;
+  font-size:.8rem;}}
+.sc .ry b {{color:{NAVY};}}
+.pos {{color:{TEAL};}} .neg {{color:{RED};}}
+/* carte de chaleur secteur × format */
+.hm {{display:grid; gap:6px;}}
+.hm .c {{border-radius:10px; padding:10px 12px; min-height:62px; font-size:.74rem;}}
+.hm .c .v {{font-size:1.05rem; font-weight:800;}}
+.hm .h {{font-size:.66rem; letter-spacing:.08em; text-transform:uppercase; color:{MUTE}; font-weight:700; align-self:end; padding:0 4px 2px;}}
+.hm .rh {{display:flex; align-items:center; font-weight:800; color:{NAVY}; font-size:.85rem;}}
+.leg {{display:flex; align-items:center; gap:8px; font-size:.7rem; color:{MUTE}; margin-top:8px;}}
+.leg i {{display:block; width:160px; height:8px; border-radius:4px;
+  background:linear-gradient(90deg,{RED},#F6C3CD,#F3F4F8,#B9E1E3,{TEAL});}}
+/* convertis */
+.cv {{background:#fff; border:1px solid #E3E5EE; border-radius:14px; padding:14px 16px;
+  box-shadow:0 1px 2px rgba(20,20,60,.04),0 8px 22px rgba(20,20,60,.05);}}
+.cv .t {{display:flex; justify-content:space-between; align-items:center;}}
+.cv .t b {{color:{NAVY}; font-size:.95rem;}}
+.cv .m {{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:6px; margin-top:10px;}}
+.cv .m div {{background:{GREY}; border-radius:8px; padding:6px 8px;}}
+.cv .m .l {{font-size:.58rem; color:{MUTE}; text-transform:uppercase; letter-spacing:.05em; font-weight:700;}}
+.cv .m .v {{font-size:.88rem; font-weight:800;}}
+/* bandeau d'export */
+.dl {{display:flex; align-items:center; gap:14px; background:linear-gradient(120deg,#1B1A4A,{NAVY}); color:#fff;
+  border-radius:14px; padding:16px 20px; margin-top:24px;}}
+.dl b {{color:{ORANGE};}} .dl span {{color:#CFD0E6; font-size:.85rem;}}
+div[data-testid="stDownloadButton"] button {{border-radius:10px; font-weight:700; font-family:'Inter',sans-serif; height:44px;}}
+div[data-testid="stDownloadButton"] button[kind="primary"] {{background:{NAVY}; border-color:{NAVY};}}
+div[data-testid="stDownloadButton"] button[kind="primary"]:hover {{background:#34338A; border-color:#34338A;}}
+.frame {{background:#fff; border:1px solid #E3E5EE; border-radius:12px; padding:6px; margin-bottom:12px;
+  box-shadow:0 8px 22px rgba(20,20,60,.06);}}
+@media (max-width:1100px) {{ .kgrid {{grid-template-columns:repeat(2,1fr);}} .g3, .ret {{grid-template-columns:1fr;}} }}
+</style>"""
+
+st.markdown(LANDING_CSS + APP_CSS, unsafe_allow_html=True)
+
+
+def html(s: str):
+    st.markdown(_h(s), unsafe_allow_html=True)
+
+
+def sec_title(t: str, hint: str = ""):
+    html(f"<div class='bi'><div class='sec'><h3>{t}</h3><div class='line'></div><span class='hint'>{hint}</span></div></div>")
+
+
+def cl(v) -> str:
+    return "" if v is None else ("pos" if v >= 0 else "neg")
+
+
+def dbar(v, m, label) -> str:
+    """Barre divergente centrée sur zéro, échelle commune à la colonne."""
+    if v is None or not m:
+        return label
+    w = min(abs(v) / m, 1) * 50
+    side = f"left:50%;width:{w:.1f}%;background:{TEAL}" if v >= 0 else f"right:50%;width:{w:.1f}%;background:{RED}"
+    return f"<div class='db'><span class='{cl(v)}'>{label}</span><div class='tr'><span style='{side}'></span></div></div>"
+
+
+# colonnes : (titre, clé, type) ; types : txt, m (millions), pct, pts, taux, dm (écart en M avec barre), dpct (pct avec barre)
+KPI_COLS = [("CA", "ca", "m"), ("CA vs N-1", "vs_n1", "dpct"), ("Marge", "marge", "m"), ("Marge vs N-1", "marge_vs_n1", "pct"),
+            ("Écart marge", "dmarge", "dm"), ("Taux", "taux", "taux"), ("Écart taux", "dpts", "pts"),
+            ("Effet volume", "effet_volume", "sm"), ("Effet taux", "effet_taux", "sm")]
+TRAFIC_COLS = [("Débit", "debit_vs_n1", "pct"), ("Panier", "panier_vs_n1", "pct")]
+SITE_COLS = KPI_COLS[:7] + TRAFIC_COLS   # sans les effets volume/taux, pour tenir à l'écran
+
+
+def fmt_cell(t, v, m=None):
+    if t == "txt":
+        return v if v is not None else ""
+    if v is None or (isinstance(v, float) and v != v):
+        return "<span style='color:#B0B3C6'>n.d.</span>"
+    if t == "m":
+        return E.mfcfa(v)
+    if t == "sm":
+        return f"<span class='{cl(v)}'>{E.mfcfa(v, dec=2, sign=True)}</span>"
+    if t == "taux":
+        return E.pct(v, sign=False)
+    if t == "pct":
+        return f"<span class='{cl(v)}'>{E.pct(v)}</span>"
+    if t == "pts":
+        return f"<span class='{cl(v)}'>{E.pts(v)}</span>"
+    if t == "dm":
+        return dbar(v, m, E.mfcfa(v, dec=2, sign=True))
+    if t == "dpct":
+        return dbar(v, m, E.pct(v))
+    return str(v)
+
+
+def bi_table(rows: list[dict], cols: list[tuple], first: tuple, extra_left: list[tuple] = (), alert_key=None, total=None):
+    """rows : dictionnaires de KPI ; first : (titre, clé) de la 1re colonne ; extra_left : colonnes texte à gauche."""
+    allrows = rows + ([total] if total else [])
+    mx = {k: max([abs(r.get(k) or 0) for r in allrows] or [0]) for _, k, t in cols if t in ("dm", "dpct")}
+    head = f"<th class='l'>{first[0]}</th>" + "".join(f"<th class='l'>{h}</th>" for h, _ in extra_left) \
+        + "".join(f"<th class='{'l' if t == 'txt' else ''}'>{h}</th>" for h, _, t in cols)
+    body = ""
+    for r in allrows:
+        trc = "tot" if r is total else ("al" if alert_key and r.get(alert_key) else "")
+        body += f"<tr class='{trc}'><td class='l first'>{r.get(first[1], '')}</td>"
+        body += "".join(f"<td class='l'>{r.get(k, '')}</td>" for _, k in extra_left)
+        body += "".join(f"<td class='{'l' if t == 'txt' else ''}'>{fmt_cell(t, r.get(k), mx.get(k))}</td>"
+                        for _, k, t in cols) + "</tr>"
+    html(f"<div class='bi'><div class='tw'><table class='bt'><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div></div>")
+
+
+def heat(v):
+    if v is None:
+        return GREY, INK
+    a = min(abs(v) / 0.30, 1)
+    base = (8, 134, 141) if v >= 0 else (230, 34, 68)
+    bg = f"rgba({base[0]},{base[1]},{base[2]},{0.10 + 0.80 * a:.2f})"
+    return bg, ("#fff" if a > 0.45 else INK)
+
+
 # ------------------------------------------------------------------ calcul
 @st.cache_data(show_spinner="Lecture des extractions…")
 def run(b_hier, n_hier, b_sem, n_sem, b_site, n_site, d):
@@ -329,124 +536,166 @@ def run(b_hier, n_hier, b_sem, n_sem, b_site, n_site, d):
 
 checks, R = run(f_hier.getvalue(), f_hier.name, f_sem.getvalue(), f_sem.name, f_site.getvalue(), f_site.name, date_flash)
 
-icon = {"ok": "✅", "alerte": "⚠️", "erreur": "⛔"}
-nb_pb = sum(c.statut != "ok" for c in checks)
-with st.expander(f"Contrôle des extractions · {'tout est conforme' if not nb_pb else f'{nb_pb} point(s) à vérifier'}",
-                 expanded=bool(nb_pb)):
-    for c in checks:
-        st.markdown(f"{icon.get(c.statut, '•')} {c.message}")
+# ------------------------------------------------------------------ contrôle des extractions
+icon = {"ok": "✓", "alerte": "!", "erreur": "✕"}
+nb_ok = sum(c.statut == "ok" for c in checks)
+pills = "".join(f"<span class='p {c.statut}' title='{c.message}'>{icon.get(c.statut, '•')} "
+                f"{c.message.split(' : ')[0] if c.statut == 'ok' else c.message}</span>" for c in checks)
+html(f"<div class='bi'><div class='bi-check'><span class='h'>Contrôle des extractions · {nb_ok}/{len(checks)} conformes</span>"
+     f"{pills}</div></div>")
 if R is None:
     st.error("Génération bloquée : corrigez l'extraction signalée en rouge (voir les consignes dans la barre latérale).")
     st.stop()
 
-# ------------------------------------------------------------------ en-tête
-r = R["reseau"]
-st.markdown(f"<div class='hero'><h1>FLASH <b>COMMERCIAL</b></h1>"
-            f"<p>Ventes du {R['date'].strftime('%d/%m/%Y')} · {R['lecture']}</p></div>", unsafe_allow_html=True)
-k1, k2, k3, k4, k5 = st.columns(5)
-kpi_card(k1, "Chiffre d'affaires", E.mfcfa(r["ca"]), E.pct(r["vs_n1"]) + " vs N-1", r["vs_n1"])
-kpi_card(k2, "Marge", E.mfcfa(r["marge"]), f"{E.pct(r['marge_vs_n1'])} · {E.mfcfa(r['dmarge'], sign=True)}", r["marge_vs_n1"])
-kpi_card(k3, "Taux de marge", E.pct(r["taux"], sign=False), E.pts(r["dpts"]), r["dpts"])
-kpi_card(k4, "Fréquentation", E.pct(r.get("debit_vs_n1")), "panier " + E.pct(r.get("panier_vs_n1")), r.get("debit_vs_n1"))
-sem = R["reseau_sem"]
-kpi_card(k5, "Semaine vs budget", E.pct(sem.get("vs_budget")), E.pct(sem["vs_n1"]) + " vs N-1", sem.get("vs_budget"))
-
-st.markdown("")
-for m in R["messages"]:
-    st.markdown(f"<div class='msg'>{m}</div>", unsafe_allow_html=True)
+# ------------------------------------------------------------------ bandeau
+r, sem = R["reseau"], R["reseau_sem"]
+rep = R["date_reponse"]
+n_quest = sum(x["type"] == "Réponse attendue" for x in R["retours"])
+m0, ev, et = r["marge_n1"], r["effet_volume"], r["effet_taux"]
+lv = [m0, m0 + ev, m0 + ev + et]
+lo, hi = min(lv) * 0.80, max(lv) * 1.02
 
 
-def kpi_df(items: dict | list, label: str, trafic=False) -> pd.DataFrame:
-    rows = []
-    it = items.items() if isinstance(items, dict) else [(x["nom"], x) for x in items]
-    for n, k in it:
-        row = {label: n, "CA (M)": k["ca"] / 1e6, "CA vs N-1": k["vs_n1"] * 100, "Marge (M)": k["marge"] / 1e6,
-               "Marge vs N-1": k["marge_vs_n1"] * 100, "Écart marge (M)": k["dmarge"] / 1e6,
-               "Taux": k["taux"] * 100, "Écart taux (pt)": k["dpts"],
-               "Effet volume (M)": k["effet_volume"] / 1e6, "Effet taux (M)": k["effet_taux"] / 1e6}
-        if trafic:
-            row["Débit vs N-1"] = (k.get("debit_vs_n1") or 0) * 100
-            row["Panier vs N-1"] = (k.get("panier_vs_n1") or 0) * 100
-        rows.append(row)
-    return pd.DataFrame(rows)
+def _x(v):
+    return (v - lo) / (hi - lo) * 100
 
 
-CFG = {
-    "CA (M)": st.column_config.NumberColumn(format="%.1f"),
-    "Marge (M)": st.column_config.NumberColumn(format="%.1f"),
-    "CA vs N-1": st.column_config.NumberColumn(format="%+.1f %%"),
-    "Marge vs N-1": st.column_config.NumberColumn(format="%+.1f %%"),
-    "Écart marge (M)": st.column_config.NumberColumn(format="%+.2f"),
-    "Taux": st.column_config.NumberColumn(format="%.1f %%"),
-    "Écart taux (pt)": st.column_config.NumberColumn(format="%+.1f"),
-    "Effet volume (M)": st.column_config.NumberColumn(format="%+.2f"),
-    "Effet taux (M)": st.column_config.NumberColumn(format="%+.2f"),
-    "Débit vs N-1": st.column_config.NumberColumn(format="%+.1f %%"),
-    "Panier vs N-1": st.column_config.NumberColumn(format="%+.1f %%"),
-}
+def wf_row(lab, a, b, color, val):
+    x0, x1 = sorted((_x(a), _x(b)))
+    return (f"<div class='wf-r'><span>{lab}</span><div class='wf-t'><span style='left:{x0:.1f}%;width:{max(x1 - x0, 0.8):.1f}%;"
+            f"background:{color}'></span></div><span class='v'>{val}</span></div>")
 
 
-def show(df):
-    st.dataframe(df, hide_index=True, width="stretch", column_config=CFG)
+wf = ("<div class='lp-status'><h6>D'où vient l'écart de marge</h6><div class='wf'>"
+      + wf_row("Marge N-1", lo, m0, "#8E8FB8", E.mfcfa(m0))
+      + wf_row("Effet volume", m0, m0 + ev, TEAL if ev >= 0 else RED, E.mfcfa(ev, sign=True))
+      + wf_row("Effet taux", m0 + ev, m0 + ev + et, TEAL if et >= 0 else RED, E.mfcfa(et, sign=True))
+      + wf_row("Marge N", lo, r["marge"], ORANGE, E.mfcfa(r["marge"]))
+      + "</div><div class='wf-n'>Échelle zoomée sur l'écart · effet volume = ventes en plus au taux N-1</div></div>")
 
+html(f"""<div class='lp'><div class='lp-hero'><div class='lp-hl'>
+<div class='lp-eyebrow'>Flash commercial · ventes du {JOURS[R['date'].weekday()]} {R['date'].strftime('%d/%m/%Y')}</div>
+<div class='lp-title'>CA <b>{E.pct(r['vs_n1'], 0)}</b>, MARGE <b>{E.pct(r['marge_vs_n1'], 0)}</b></div>
+<div class='lp-sub'>{R['lecture']}</div>
+<div class='lp-meta'>
+<span class='lp-chip'><b>{len(R['sites_alerte'])}</b> magasins en alerte</span>
+<span class='lp-chip'><b>{len(R['alertes'])}</b> rayons × magasins hors seuil</span>
+<span class='lp-chip'><b>{n_quest}</b> questions aux secteurs · réponse <b>{JOURS[rep.weekday()]} {rep.strftime('%d/%m')} {C.HEURE_REPONSE}</b></span>
+</div></div>{wf}</div></div>""")
+
+
+def kcard(acc, ic, lab, val, dlt, dval, sub, cmp=None, val_tone=None):
+    arrow = "▲" if (dval or 0) >= 0 else "▼"
+    c = ""
+    if cmp:
+        a, b = cmp
+        mx = max(a, b) or 1
+        c = (f"<div class='cmp'><div>N<i style='width:{a / mx * 100:.0f}%;background:{acc}'></i></div>"
+             f"<div>N-1<i style='width:{b / mx * 100:.0f}%;background:#D5D7E4'></i></div></div>")
+    return (f"<div class='kc' style='--acc:{acc};--tint:{acc}1A'><div class='hd'><span class='ic'>{ic}</span>{lab}</div>"
+            f"<div class='v {cl(val_tone)}'>{val}</div><span class='d {cl(dval)}'>{arrow} {dlt}</span>"
+            f"<div class='s'>{sub}</div>{c}</div>")
+
+
+cards = [
+    kcard(NAVY, "F", "Chiffre d'affaires", E.mfcfa(r["ca"]), E.pct(r["vs_n1"]) + " vs N-1", r["vs_n1"],
+          f"N-1 : {E.mfcfa(r['ca_n1'])} FCFA HT", (r["ca"], r["ca_n1"])),
+    kcard(ORANGE, "Σ", "Marge", E.mfcfa(r["marge"]), E.pct(r["marge_vs_n1"]) + " vs N-1", r["marge_vs_n1"],
+          f"soit {E.mfcfa(r['dmarge'], sign=True)} FCFA", (r["marge"], r["marge_n1"])),
+    kcard(TEAL, "%", "Taux de marge", E.pct(r["taux"], sign=False), E.pts(r["dpts"]), r["dpts"],
+          f"N-1 : {E.pct(r['taux_n1'], sign=False)}", (r["taux"], r["taux_n1"])),
+    kcard("#4B4AA8", "↗", "Fréquentation", E.pct(r.get("debit_vs_n1")), "panier " + E.pct(r.get("panier_vs_n1")),
+          r.get("panier_vs_n1"), "Débit (tickets) vs N-1", val_tone=r.get("debit_vs_n1")),
+    kcard(RED if (sem.get("vs_budget") or 0) < 0 else TEAL, "◎", "Semaine vs budget", E.pct(sem.get("vs_budget")),
+          E.pct(sem["vs_n1"]) + " vs N-1", sem["vs_n1"], f"Cumul semaine : {E.mfcfa(sem['ca'])} FCFA",
+          val_tone=sem.get("vs_budget")),
+]
+html("<div class='bi'><div class='kgrid'>" + "".join(cards) + "</div>"
+     "<div class='ret'>" + "".join(f"<div><b class='n'>{i}</b><span>{m}</span></div>"
+                                   for i, m in enumerate(R["messages"], 1)) + "</div></div>")
 
 # ------------------------------------------------------------------ onglets
 t_sec, t_fmt, t_ou, t_ret, t_ppt = st.tabs(["Secteurs", "Formats et zones", "Où agir", "Retours attendus", "Aperçu PPT"])
 
 with t_sec:
-    cols = st.columns(len(R["secteurs"]))
-    for col, (sec, k) in zip(cols, R["secteurs"].items()):
-        rayons = R["rayons"].get(sec, [])[:3]
-        lst = "".join(f"<li>{x['nom']} : marge {E.kfcfa(x['dmarge'])}, taux {E.pts(x['dpts'])}</li>" for x in rayons)
-        col.markdown(f"""<div class='card'><span class='tag'>{sec}</span>
-<div class='kpi' style='background:none;padding:6px 0'><div class='l'>Marge vs N-1</div>
-<div class='v {tone(k['marge_vs_n1'])}'>{E.pct(k['marge_vs_n1'])}</div>
-<div class='l'>soit {E.mfcfa(k['dmarge'], sign=True)} FCFA · CA {E.pct(k['vs_n1'])} · taux {E.pct(k['taux'], sign=False)}
-({E.pts(k['dpts'])}) · semaine vs budget {E.pct(k['sem'].get('vs_budget'))}</div></div>
-<b>À regarder</b><ul style='margin:4px 0 0 0'>{lst or '<li>Rien hors seuil</li>'}</ul></div>""", unsafe_allow_html=True)
-    show(kpi_df(R["secteurs"], "Secteur"))
-    st.markdown("**Secteur × format** (écarts hors seuil)")
-    rows = [{"Secteur": s, "Format": f, "Hors seuil": v["texte"]}
-            for s, d in R["croise"].items() for f, v in d.items() if v["texte"]]
-    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+    sc = ""
+    for sec, k in R["secteurs"].items():
+        vb = k["sem"].get("vs_budget")
+        rays = "".join(f"<div class='ry'><b>{x['nom']}</b><span><span class='{cl(x['dmarge'])}'>{E.kfcfa(x['dmarge'])}</span>"
+                       f" · <span class='{cl(x['dpts'])}'>{E.pts(x['dpts'])}</span></span></div>"
+                       for x in R["rayons"].get(sec, [])[:3]) or "<div class='ry'>Rien hors seuil</div>"
+        sc += f"""<div class='sc'><div class='top'><span class='nm'>{sec.upper()}</span>
+<span class='pill {'tl' if k['dmarge'] >= 0 else 'rd'}'>{E.mfcfa(k['dmarge'], sign=True)} FCFA</span></div>
+<div class='big {cl(k['marge_vs_n1'])}'>{E.pct(k['marge_vs_n1'])}</div><div class='bl'>marge vs N-1 · {E.mfcfa(k['marge'])} FCFA</div>
+<div class='mg'><div><div class='l'>CA</div><div class='v'>{E.mfcfa(k['ca'])}</div><div class='x {cl(k['vs_n1'])}'>{E.pct(k['vs_n1'])}</div></div>
+<div><div class='l'>Taux</div><div class='v'>{E.pct(k['taux'], sign=False)}</div><div class='x {cl(k['dpts'])}'>{E.pts(k['dpts'])}</div></div>
+<div><div class='l'>Sem. vs bgt</div><div class='v {cl(vb)}'>{E.pct(vb)}</div><div class='x' style='color:{MUTE}'>cumul</div></div></div>
+<div class='k'>Rayons à regarder</div>{rays}</div>"""
+    html(f"<div class='bi'><div class='g3' style='margin-top:14px'>{sc}</div></div>")
+
+    sec_title("Secteurs · détail", "hier vs même jour N-1")
+    bi_table([{"nom": n, **k} for n, k in R["secteurs"].items()], KPI_COLS, ("Secteur", "nom"),
+             total={"nom": "Réseau", **R["reseau"]})
+
+    sec_title("Secteur × format", "couleur = marge vs N-1 · texte = écarts hors seuil")
+    fmts = C.FORMATS
+    grid = f"<div class='hm' style='grid-template-columns:140px repeat({len(fmts)},1fr)'><div></div>"
+    grid += "".join(f"<div class='h'>{f}</div>" for f in fmts)
+    for s_, d_ in R["croise"].items():
+        grid += f"<div class='rh'>{s_}</div>"
+        for f in fmts:
+            v = d_.get(f)
+            if not v:
+                grid += f"<div class='c' style='background:{GREY}'></div>"
+                continue
+            bg, fg = heat(v["kpi"].get("marge_vs_n1"))
+            grid += (f"<div class='c' style='background:{bg};color:{fg}'><div class='v'>{E.pct(v['kpi'].get('marge_vs_n1'), 0)}</div>"
+                     f"<div>{v['texte'] or 'Dans les seuils'}</div></div>")
+    grid += "</div><div class='leg'>−30 %<i></i>+30 %</div>"
+    html(f"<div class='bi'>{grid}</div>")
 
 with t_fmt:
-    show(kpi_df(R["formats"], "Format", trafic=True))
-    show(kpi_df(R["zones"], "Zone de pricing", trafic=True))
-    st.markdown("**Magasins**")
-    df = kpi_df(R["sites"], "Magasin", trafic=True)
-    df.insert(1, "Alerte", ["⚠️" if x["alerte"] else "" for x in R["sites"]])
-    show(df)
+    sec_title("Formats", "débit et panier vs N-1")
+    bi_table([{"nom": n, **k} for n, k in R["formats"].items()], SITE_COLS, ("Format", "nom"))
+    sec_title("Zones de pricing")
+    bi_table([{"nom": n, **k} for n, k in R["zones"].items()], SITE_COLS, ("Zone", "nom"))
+    sec_title("Magasins", "liseré rouge = magasin en alerte")
+    bi_table([{**x, "fz": f"<span class='pill nav'>{x['format']}</span> <span class='pill or'>{x['zone']}</span>"}
+              for x in R["sites"]], SITE_COLS, ("Magasin", "nom"), [("Format · zone", "fz")], alert_key="alerte")
 
 with t_ou:
-    a, b = st.columns([3, 2])
-    with a:
-        st.markdown(f"**Alertes rayon × magasin** · top {C.TOP_ALERTES} par perte de marge")
-        al = pd.DataFrame([{
-            "Rayon": E.short_rayon(x["rayon"]), "Magasin": E.short_site(x["site"]), "Secteur": x["secteur"],
-            "CA vs N-1": x["vs_n1"] * 100, "Écart marge (M)": x["dmarge"] / 1e6, "Écart taux (pt)": x["dpts"],
-            "Diagnostic": x["diagnostic"], "Qui": x["qui"], "Aussi sur la semaine": "oui" if x.get("persistant") else ""}
-            for x in R["alertes"]])
-        show(al)
-    with b:
-        st.markdown("**Magasins convertis**")
+    if True:
+        sec_title("Alertes rayon × magasin", f"triées par perte de marge · {len(R['alertes'])} lignes")
+        rows = [{**x, "ry": f"{E.short_rayon(x['rayon'])}<div class='sub'>{E.short_site(x['site'])} · {x['secteur']}</div>",
+                 "dg": f"<span class='pill or'>{x['diagnostic']}</span>",
+                 "qu": f"<span class='pill tl'>{x['qui']}</span>",
+                 "pe": "<span class='pill rd'>Oui</span>" if x.get("persistant") else ""} for x in R["alertes"]]
+        bi_table(rows, [("CA vs N-1", "vs_n1", "dpct"), ("Écart marge", "dmarge", "dm"), ("Écart taux", "dpts", "pts"),
+                        ("Diagnostic", "dg", "txt"), ("Qui", "qu", "txt"), ("Persiste", "pe", "txt")],
+                 ("Rayon · magasin", "ry"))
+    if True:
+        sec_title("Magasins convertis", "comparés à leur ancien format Supeco : on lit surtout la tendance")
+        cv = ""
         for x in R["convertis"]:
-            st.markdown(f"""<div class='card'><h4>{x['nom']} <span style='color:{MUTE};font-weight:400;font-size:.85rem'>
-· converti le {x['converti_le'].strftime('%d/%m/%Y') if x.get('converti_le') else 'n.d.'}</span></h4>
-Marge <b class='{tone(x['marge_vs_n1'])}'>{E.pct(x['marge_vs_n1'])}</b> · Débit <b class='{tone(x.get('debit_vs_n1'))}'>
-{E.pct(x.get('debit_vs_n1'))}</b> · Panier <b class='{tone(x.get('panier_vs_n1'))}'>{E.pct(x.get('panier_vs_n1'))}</b>
-· Budget sem. <b class='{tone(x['sem'].get('vs_budget'))}'>{E.pct(x['sem'].get('vs_budget'))}</b></div>""",
-                        unsafe_allow_html=True)
+            vb = x["sem"].get("vs_budget")
+            m = "".join(f"<div><div class='l'>{l}</div><div class='v {cl(v)}'>{E.pct(v, 0) if v is not None else 'n.d.'}</div></div>"
+                        for l, v in [("Marge", x["marge_vs_n1"]), ("Débit", x.get("debit_vs_n1")),
+                                     ("Panier", x.get("panier_vs_n1")), ("Budget", vb)])
+            dte = x["converti_le"].strftime("%d/%m/%Y") if x.get("converti_le") else "n.d."
+            cv += (f"<div class='cv'><div class='t'><b>{x['nom']}</b><span class='pill nav'>converti le {dte}</span></div>"
+                   f"<div class='m'>{m}</div></div>")
+        html(f"<div class='bi'><div class='g3'>{cv}</div></div>")
 
 with t_ret:
-    jr = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"][R["date_reponse"].weekday()]
-    st.markdown(f"**Réponse attendue le {jr} {R['date_reponse'].strftime('%d/%m')} avant {C.HEURE_REPONSE}**")
-    st.caption("Vous pouvez reformuler une question avant de générer le PPT.")
+    sec_title(f"{n_quest} questions aux secteurs",
+              f"réponse le {JOURS[rep.weekday()]} {rep.strftime('%d/%m')} avant {C.HEURE_REPONSE} · modifiable avant génération")
     ed = st.data_editor(pd.DataFrame(R["retours"])[["sujet", "question", "qui", "type"]],
                         hide_index=True, width="stretch", num_rows="dynamic",
-                        column_config={"sujet": "Sujet", "question": "Question", "qui": "Qui répond",
+                        column_config={"sujet": st.column_config.TextColumn("Sujet", width="medium"),
+                                       "question": st.column_config.TextColumn("Question", width="large"),
+                                       "qui": st.column_config.TextColumn("Qui répond", width="medium"),
                                        "type": st.column_config.SelectboxColumn(
-                                           "Type", options=["Réponse attendue", "Pour information"])})
+                                           "Type", options=["Réponse attendue", "Pour information"], width="small")})
     R = {**R, "retours": ed.fillna("").to_dict("records")}
 
 # ------------------------------------------------------------------ génération
@@ -479,9 +728,11 @@ with t_ppt:
     else:
         imgs = render_preview(ppt_bytes)
         if imgs:
-            c = st.columns(2)
+            sec_title("Aperçu du PowerPoint", f"{len(imgs)} slides sur le masque CFAO")
+            c = st.columns(2, gap="medium")
             for i, im in enumerate(imgs):
-                c[i % 2].image(im, width="stretch")
+                with c[i % 2]:
+                    st.image(im, width="stretch")
         else:
             st.info("Aperçu image indisponible sur ce poste (LibreOffice absent). Plan du PPT généré :")
             st.markdown(f"""1. **Couverture** · Flash commercial, ventes du {R['date'].strftime('%d/%m/%Y')}
@@ -491,10 +742,11 @@ with t_ppt:
 5. **Retours attendus** · {sum(x['type'] == 'Réponse attendue' for x in R['retours'])} questions
 6. **Comment lire ce flash**""")
 
-st.divider()
+html(f"<div class='bi'><div class='dl'><div><b>Diffuser</b><br><span>PowerPoint pour les secteurs · Excel de détail "
+     f"en valeurs · ventes du {R['date'].strftime('%d/%m/%Y')}</span></div></div></div>")
 d1, d2, _ = st.columns([1, 1, 2])
-d1.download_button("⬇️ PowerPoint pour les secteurs", ppt_bytes or b"", file_name=f"Flash_commercial_{stamp}.pptx",
+d1.download_button("⬇  PowerPoint pour les secteurs", ppt_bytes or b"", file_name=f"Flash_commercial_{stamp}.pptx",
                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                    disabled=ppt_bytes is None, type="primary", width="stretch")
-d2.download_button("⬇️ Excel de détail", xls_bytes, file_name=f"Flash_quotidien_{stamp}.xlsx",
+d2.download_button("⬇  Excel de détail", xls_bytes, file_name=f"Flash_quotidien_{stamp}.xlsx",
                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", width="stretch")
