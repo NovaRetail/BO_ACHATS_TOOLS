@@ -281,10 +281,10 @@ avec les écarts à traiter et les questions à poser aux secteurs. Trois extrac
 
     sv = C.SEUILS
     seuils = "".join(f"<div class='lp-t'><div class='v'>{v}</div><div class='l'>{l}</div></div>" for v, l in [
-        (E.pct(sv['ca_vs_n1'], 0), "CA vs N-1"),
-        (E.pct(sv['marge_vs_n1'], 0), "Marge vs N-1"),
-        (E.pts(sv['taux_pts'], 0).replace("pt", "pts"), "Taux de marge vs N-1"),
-        (f"{sv['ca_n1_min'] / 1000:,.0f} k".replace(",", " "), "CA N-1 mini d'un rayon × site (FCFA)"),
+        (E.pct(sv['ca_vs_n1'], 0), "Alerte si le CA vs N-1 passe sous ce seuil"),
+        (E.pct(sv['marge_vs_n1'], 0), "Alerte si la marge vs N-1 passe sous ce seuil"),
+        (E.pts(sv['taux_pts'], 0).replace("pt", "pts"), "Alerte si le taux de marge recule de plus"),
+        ("≥ " + f"{sv['ca_n1_min'] / 1000:,.0f} k".replace(",", " "), "CA N-1 minimum d'un rayon × site suivi (FCFA)"),
     ])
 
     outputs = f"""<div class='lp-grid2'>
