@@ -1,169 +1,99 @@
-import re
+"""SmartBuyer Hub · page d'accueil.
+
+Les modules sont découverts dans pages/ ; le registre META donne leur nom, leur usage et leur rubrique.
+Un module retiré du dossier pages/ (rangé sur la branche « archive ») disparaît de l'accueil sans autre changement.
+"""
 from pathlib import Path
 
 import streamlit as st
 
-st.set_page_config(page_title="NovaRetail Solutions", page_icon="🛍️", layout="wide")
+from core import theme as T
 
-# ════════════════════════════════════════════════════════════════════════════
-#  REGISTRE DES MODULES
-#  Clé = préfixe numérique du fichier (stable). Un module absent du dossier
-#  pages/ n'apparaît nulle part ; un module présent mais inconnu ici s'affiche
-#  quand même (rubrique « Autres ») avec un libellé déduit du nom de fichier.
-# ════════════════════════════════════════════════════════════════════════════
-PAGES_DIR = Path("pages")
+st.set_page_config(page_title="SmartBuyer Hub", page_icon="🛍️", layout="wide")
+T.apply()
 
-# num : (nom affiché, description, couleur, rubrique) — l'ordre ci-dessous est l'ordre d'affichage
+PAGES_DIR = Path(__file__).resolve().parent / "pages"
+
+# num : (nom, à quoi il sert, quand on l'ouvre, rubrique) — l'ordre est l'ordre d'affichage
 META = {
-    # Pilotage
-    "27": ("Flash Quotidien",         "Ventes de la veille · secteurs · retours attendus · PowerPoint", "#F09F39", "pilotage"),
-    "26": ("Revue CODIR",             "Rapport hebdo à la DG · entonnoir Vs N-1 · PowerPoint",  "#24235C", "pilotage"),
-    "24": ("PGC Radar",               "Réel vs Budget vs N-1 · alertes à traiter",             "#5E35B1", "pilotage"),
-    # Ventes et marge
-    "18": ("Reporting Vente CA",      "CA en recul · 4 critères de détection · scoring",       "#FF3B30", "ventes"),
-    "17": ("Reporting Sous-Familles", "Alertes marge sous-famille × magasin · 3 paliers",      "#FF9500", "ventes"),
-    "22": ("Suivi Rayon vs Pays",     "Rayon vs tendance pays · magasins à regarder",          "#007AFF", "ventes"),
-    "06": ("Marge négative",          "Ventes à perte article × magasin · Flop 100",           "#FF3B30", "ventes"),
-    # Assortiment et fournisseurs
-    "05": ("Suivi Implantation",      "Taux T1 · alertes article × magasin · cessions",        "#1A7A3A", "assort"),
-    "07": ("OTIF",                    "Taux de service fournisseurs · plan d’action acheteurs", "#1A7A3A", "assort"),
+    "27": ("Flash Quotidien", "Ventes de la veille par secteur, retours attendus et PowerPoint.", "Chaque matin", "pilotage"),
+    "26": ("Revue CODIR", "Entonnoir de la semaine Vs N-1 et rapport PowerPoint du CODIR.", "Lundi", "pilotage"),
+    "24": ("PGC Radar", "Réel vs N-1 et budget, format, rayon et alertes rayon × magasin.", "Chaque semaine", "pilotage"),
+    "06": ("Marge négative", "Ventes à perte article × magasin, Flop 100 et effet promo.", "Chaque semaine", "marge"),
+    "05": ("Suivi Implantation", "Taux d'implantation T1, actions par article et cessions.", "À chaque vague T1", "assort"),
+    "07": ("OTIF", "Taux de service fournisseurs et plan d'action acheteurs.", "Chaque semaine", "assort"),
 }
-ORDER = list(META)
-
-# ordre + libellés des rubriques (celles non vides s'affichent)
-SECTIONS = [
-    ("pilotage", "📋 Pilotage"),
-    ("ventes",   "📊 Ventes et marge"),
-    ("assort",   "🏪 Assortiment et fournisseurs"),
-    ("autres",   "🧩 Autres modules"),
-]
-
-DEFAULT_COLOR = "#48484A"
+SECTIONS = [("pilotage", "📋 Pilotage"), ("marge", "💸 Marge"), ("assort", "🏪 Assortiment et fournisseurs"), ("autres", "🧩 Autres")]
 
 
-def discover_pages():
-    """Scanne pages/ et retourne les modules réellement présents, enrichis du registre."""
-    found = []
+def discover():
+    out = []
     for p in sorted(PAGES_DIR.glob("*.py")):
-        if p.name.startswith("_"):          # _utils, _archive… ignorés
-            continue
         parts = p.stem.split("_")
-        if not parts or not parts[0].isdigit():
+        if p.name.startswith("_") or not parts[0].isdigit():
             continue
-        num   = parts[0]
-        emoji = parts[1] if len(parts) > 1 else "•"
-        raw   = " ".join(parts[2:]) if len(parts) > 2 else p.stem
-        name, desc, color, section = META.get(num, (raw, "", DEFAULT_COLOR, "autres"))
-        found.append({
-            "num": num, "emoji": emoji, "name": name, "desc": desc,
-            "color": color, "section": section, "path": f"pages/{p.name}",
-        })
-    return found
+        num, emoji = parts[0], (parts[1] if len(parts) > 1 else "•")
+        name, desc, when, sec = META.get(num, (" ".join(parts[2:]) or p.stem, "", "", "autres"))
+        out.append(dict(num=num, emoji=emoji, name=name, desc=desc, when=when, sec=sec, path=f"pages/{p.name}"))
+    order = list(META)
+    return sorted(out, key=lambda m: order.index(m["num"]) if m["num"] in order else 99)
 
 
-PAGES = discover_pages()
+MODS = discover()
 
-
-def pages_of(section_key):
-    group = [m for m in PAGES if m["section"] == section_key]
-    return sorted(group, key=lambda m: ORDER.index(m["num"]) if m["num"] in ORDER else 99)
-
-
-# ── STYLE ────────────────────────────────────────────────────────────────────
-st.markdown("""
-<style>
-html, body, [class*="css"] {
-    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", Arial, sans-serif !important;
-    background-color: #F2F2F7;
-}
-.stApp { background: #F2F2F7; }
-.main .block-container { padding-top: 2rem; max-width: 1300px; }
-header[data-testid="stHeader"] { display: none !important; }
-[data-testid="stSidebar"] { background: #FFFFFF !important; border-right: 0.5px solid #E5E5EA !important; }
-/* on masque la nav auto de Streamlit : on gère la nôtre, groupée par thème */
+st.markdown("""<style>
 [data-testid="stSidebarNav"] { display: none !important; }
-
-.page-title   { font-size: 28px; font-weight: 700; color: #1C1C1E; letter-spacing: -0.03em; margin: 0; }
-.page-caption { font-size: 13px; color: #8E8E93; margin-top: 3px; margin-bottom: 1.5rem; }
-.section-label {
-    font-size: 11px; font-weight: 600; color: #8E8E93;
-    text-transform: uppercase; letter-spacing: 0.07em;
-    margin: 1.4rem 0 0.6rem; padding-bottom: 6px;
-    border-bottom: 0.5px solid #E5E5EA;
-}
-.kpi-bar { background: #FFFFFF; border-radius: 14px; border: 0.5px solid #E5E5EA; padding: 0.85rem 1.25rem; text-align: center; }
-.kpi-bar-val   { font-size: 20px; font-weight: 700; color: #1C1C1E; }
-.kpi-bar-label { font-size: 11px; color: #8E8E93; margin-top: 2px; }
-
-/* libellés de rubrique dans la sidebar */
-.side-group { font-size: 10px; font-weight: 700; color: #8E8E93; text-transform: uppercase; letter-spacing: .06em; margin: 14px 0 4px; }
-
-/* Cartes de modules : st.container(border=True) */
 [data-testid="stMain"] [data-testid="stVerticalBlockBorderWrapper"] {
-    background: #FFFFFF; border-radius: 12px !important; border: 0.5px solid #E5E5EA !important;
-    padding: 2px 4px 6px !important;
-}
-.mod-bar  { height: 3px; width: 34px; border-radius: 2px; margin: 6px 0 2px 10px; }
-.mod-desc { font-size: 12px; color: #8E8E93; margin: -6px 0 2px 10px; line-height: 1.4; min-height: 34px; }
-[data-testid="stMain"] [data-testid="stPageLink"] p { font-size: 14px !important; font-weight: 600 !important; color: #1C1C1E !important; }
-</style>
-""", unsafe_allow_html=True)
+  background: #fff; border-radius: 16px !important; border: 1px solid #E3E5EE !important;
+  box-shadow: 0 1px 2px rgba(20,20,60,.04), 0 8px 22px rgba(20,20,60,.05); padding: 6px 8px 10px !important; }
+[data-testid="stMain"] [data-testid="stPageLink"] p { font-size: 15px !important; font-weight: 800 !important; color: #24235C !important; }
+.mod-when { display:inline-block; font-size: 11px; font-weight: 700; color: #B4610A; background: #FDF1E2;
+  border-radius: 999px; padding: 2px 9px; margin: 0 0 4px 10px; }
+.mod-desc { font-size: 12.5px; color: #6B7090; margin: 0 0 4px 10px; line-height: 1.45; min-height: 36px; }
+</style>""", unsafe_allow_html=True)
 
-# ── SIDEBAR : navigation groupée (auto) ──────────────────────────────────────
-with st.sidebar:
-    st.markdown("""
-<div style='margin-bottom:8px;padding-bottom:16px;border-bottom:0.5px solid #E5E5EA'>
-  <div style='font-size:17px;font-weight:700;color:#1C1C1E;letter-spacing:-0.02em'>NovaRetail Solutions</div>
-  <div style='font-size:11px;color:#8E8E93;margin-top:2px'>Hub analytique · Achats Carrefour CI</div>
-</div>""", unsafe_allow_html=True)
+# ── Barre latérale : navigation par rubrique ──────────────────────────────────
+T.sidebar_brand("🛍️", "SmartBuyer Hub", "Achats et category management")
+for key, label in SECTIONS:
+    group = [m for m in MODS if m["sec"] == key]
+    if group:
+        T.sidebar_label(label)
+        with st.sidebar:
+            for m in group:
+                st.page_link(m["path"], label=f"{m['emoji']}  {m['name']}")
+T.sidebar_footer("Carrefour Côte d'Ivoire · CFAO Consumer<br>Usage personnel · les équipes reçoivent les exports Excel et PowerPoint")
 
-    for sec_key, sec_label in SECTIONS:
-        group = pages_of(sec_key)
-        if not group:
-            continue
-        st.markdown(f"<div class='side-group'>{sec_label}</div>", unsafe_allow_html=True)
-        for m in group:
-            st.page_link(m["path"], label=f"{m['emoji']}  {m['name']}")
+# ── Bandeau ───────────────────────────────────────────────────────────────────
+rows = [(f"{m['emoji']} {m['name']}", "ok", m["when"]) for m in MODS if m["sec"] == "pilotage"]
+T.landing_hero("SMARTBUYER <b>HUB</b>",
+               "Les outils de pilotage achats et category management : on dépose les exports Power BI ou ERP, "
+               "on lit, puis on diffuse un Excel ou un PowerPoint aux équipes.",
+               eyebrow="Carrefour Côte d'Ivoire · CFAO Consumer",
+               status=T.landing_status("Rituels de pilotage", rows, "modules de pilotage"))
 
-# ── EN-TÊTE ──────────────────────────────────────────────────────────────────
-st.markdown("<div class='page-title'>NovaRetail Solutions</div>", unsafe_allow_html=True)
-st.markdown("<div class='page-caption'>Plateforme analytique · Achats et category management · Carrefour Côte d\'Ivoire</div>", unsafe_allow_html=True)
+T.kpi_row([
+    T.kpi("Modules actifs", str(len(MODS)), "", "mut", "même charte CFAO", "blue", "🧩"),
+    T.kpi("Rubriques", str(sum(1 for k, _ in SECTIONS if any(m["sec"] == k for m in MODS))), "", "mut", "pilotage, marge, assortiment", "violet", "🗂️"),
+    T.kpi("Sources", "PBI · ERP", "", "mut", "exports déposés à la main", "teal", "📥"),
+    T.kpi("Sorties", "Excel · PPT", "", "mut", "valeurs uniquement, sans formule", "", "📤"),
+])
 
-# ── KPIs (compteur de modules automatique) ───────────────────────────────────
-k1, k2, k3, k4, k5 = st.columns(5)
-for col, val, label in [
-    (k1, str(len(PAGES)), "Modules actifs"),
-    (k2, str(sum(1 for k, _ in SECTIONS if pages_of(k))), "Rubriques"),
-    (k3, "3", "Secteurs couverts"),
-    (k4, "12", "Magasins"),
-    (k5, "v2.5", "Version"),
-]:
-    col.markdown(f'<div class="kpi-bar"><div class="kpi-bar-val">{val}</div><div class="kpi-bar-label">{label}</div></div>', unsafe_allow_html=True)
+T.steps([("Choisir", "le module selon le rituel du jour"), ("Exporter", "les fichiers Power BI ou ERP indiqués sur sa page d'accueil"),
+         ("Déposer", "dans la barre latérale du module"), ("Lire", "le bandeau, les indicateurs puis les onglets"),
+         ("Diffuser", "l'Excel ou le PowerPoint généré")])
 
-# ── BLOC PRINCIPAL : récap de toutes les apps ────────────────────────────────
-def mod_card(m):
-    with st.container(border=True):
-        st.markdown(f"<div class='mod-bar' style='background:{m['color']}'></div>", unsafe_allow_html=True)
-        st.page_link(m["path"], label=f"{m['emoji']}  {m['name']}  ›")
-        st.markdown(f"<div class='mod-desc'>{m['desc'] or '&nbsp;'}</div>", unsafe_allow_html=True)
-
-
-for sec_key, sec_label in SECTIONS:
-    group = pages_of(sec_key)
+# ── Modules ───────────────────────────────────────────────────────────────────
+for key, label in SECTIONS:
+    group = [m for m in MODS if m["sec"] == key]
     if not group:
         continue
-    st.markdown(f"<div class='section-label'>{sec_label}</div>", unsafe_allow_html=True)
-    rows = [group[i:i + 3] for i in range(0, len(group), 3)]
-    for row in rows:
+    T.section(label)
+    for i in range(0, len(group), 3):
         cols = st.columns(3)
-        for col, m in zip(cols, row):
-            with col:
-                mod_card(m)
+        for col, m in zip(cols, group[i:i + 3]):
+            with col, st.container(border=True):
+                st.page_link(m["path"], label=f"{m['emoji']}  {m['name']}  ›")
+                T.html((f"<div class='mod-when'>{m['when']}</div>" if m["when"] else "") + f"<div class='mod-desc'>{m['desc'] or '&nbsp;'}</div>")
 
-# ── FOOTER ───────────────────────────────────────────────────────────────────
-st.markdown("---")
-st.markdown(
-    f'<div style="text-align:center;color:#C7C7CC;font-size:11px;padding:8px 0">'
-    f'NovaRetail Solutions · v2.5 · {len(PAGES)} modules · Carrefour Côte d\'Ivoire</div>',
-    unsafe_allow_html=True,
-)
+T.html("<div class='note' style='text-align:center;margin-top:18px'>Les modules retirés (Reporting Sous-Familles, Reporting Vente CA, "
+       "Suivi Rayon vs Pays et les plus anciens) sont conservés sur la branche « archive » du dépôt.</div>")
