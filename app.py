@@ -23,7 +23,7 @@ META = {
     "18": ("Reporting Vente CA",      "CA en recul · 4 critères de détection · scoring",       "#FF3B30", "ventes"),
     "17": ("Reporting Sous-Familles", "Alertes marge sous-famille × magasin · 3 paliers",      "#FF9500", "ventes"),
     "22": ("Suivi Rayon vs Pays",     "Rayon vs tendance pays · magasins à regarder",          "#007AFF", "ventes"),
-    "06": ("Marges Négatives",        "Flop 100 · matrice rayon × magasin",                    "#FF3B30", "ventes"),
+    "06": ("Marge négative",          "Ventes à perte article × magasin · Flop 100",           "#FF3B30", "ventes"),
     # Assortiment et fournisseurs
     "05": ("Suivi Implantation",      "Taux T1 · alertes article × magasin · cessions",        "#1A7A3A", "assort"),
     "07": ("OTIF",                    "Taux de service fournisseurs · plan d’action acheteurs", "#1A7A3A", "assort"),
