@@ -26,7 +26,7 @@ META = {
     "06": ("Marges Négatives",        "Flop 100 · matrice rayon × magasin",                    "#FF3B30", "ventes"),
     # Assortiment et fournisseurs
     "05": ("Suivi Implantation",      "Taux T1 · alertes article × magasin · cessions",        "#1A7A3A", "assort"),
-    "07": ("OTIF",                    "Taux de service · ponctualité · watchlist GOLD/SILVER", "#1A7A3A", "assort"),
+    "07": ("OTIF",                    "Taux de service fournisseurs · plan d’action acheteurs", "#1A7A3A", "assort"),
 }
 ORDER = list(META)
 
