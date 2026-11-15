@@ -20,6 +20,7 @@ META = {
     "26": ("Revue CODIR", "Entonnoir de la semaine Vs N-1 et rapport PowerPoint du CODIR.", "Lundi", "pilotage"),
     "24": ("PGC Radar", "Réel vs N-1 et budget, format, rayon et alertes rayon × magasin.", "Chaque semaine", "pilotage"),
     "06": ("Marge négative", "Ventes à perte article × magasin, Flop 100 et effet promo.", "Chaque semaine", "marge"),
+    "28": ("Résultats Promo", "Réalisé vs prévision, marge dégagée et coût de la promo, verdict et action par article.", "Après chaque promo", "marge"),
     "05": ("Suivi Implantation", "Taux d'implantation T1, actions par article et cessions.", "À chaque vague T1", "assort"),
     "07": ("OTIF", "Taux de service fournisseurs et plan d'action acheteurs.", "Chaque semaine", "assort"),
 }
