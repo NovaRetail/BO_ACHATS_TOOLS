@@ -31,7 +31,7 @@ Les modules retirés sont conservés sur la branche `archive` (récupérables à
 | 17 | Reporting Sous-Familles | Ventes et marge |
 | 22 | Suivi Rayon vs Pays | Ventes et marge |
 | 06 | Marges Négatives | Ventes et marge |
-| 28 | Résultats Promo | Ventes et marge |
+| 28 | Forecast Promo | Ventes et marge |
 | 05 | Suivi Implantation | Assortiment et fournisseurs |
 | 07 | OTIF | Assortiment et fournisseurs |
 
