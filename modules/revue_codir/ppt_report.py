@@ -278,7 +278,7 @@ def _p2(prs, R, ftr):
     npend = sum(len(R['familles'][sct]['flop'][:3]) for sct in E.SECTEUR_ORDER)
     box = rect(s, 6.85, 5.18, 5.85, 0.55, NAVY)
     tb(s, 6.95, 5.2, 5.7, 0.5, [[('Suite : ', {'bold': True, 'color': ORANGE, 'size': 9.5}),
-                                  (f"{npend} points en attente de retour des chefs de groupe (page 5).", {'color': 'FFFFFF', 'size': 9.5})]],
+                                  (f"{npend} points en attente de retour des chefs de groupe.", {'color': 'FFFFFF', 'size': 9.5})]],
        anchor=MSO_ANCHOR.MIDDLE)
     # contexte
     rect(s, 0.61, 5.95, 12.1, 0.85, LIGHT)
@@ -374,21 +374,6 @@ def _p4(prs, R, ftr):
     tb(s, 0.61, 6.35, 12.1, 0.4, [[('Écart de marge Vs N-1, M FCFA. Les deux listes ne s’additionnent pas : un rayon et un magasin peuvent porter la même perte.', {'size': 9.5, 'color': MUTE, 'italic': True})]])
 
 
-def _p5(prs, R, ftr):
-    s = _content(prs, R, "Plan d'actions", 'points en attente de retour', ftr)
-    rows, cols = [], []
-    for sct in E.SECTEUR_ORDER:
-        short = {'Non-alimentaire': 'Non-alim.'}.get(sct, sct)
-        for f_ in R['familles'][sct]['flop'][:3]:
-            rows.append([f"{f_['label']} ({short})", E.fdm(f_['dM']), E.CHEFS[sct], PENDING])
-            cols.append([None, sign_color(f_['dM']), None, MUTE])
-    table(s, 0.61, 1.5, 12.1, rows, [4.6, 1.3, 3.1, 3.1],
-          ['Famille', 'Écart (M)', 'Chef de groupe', 'Statut'], size=10, row_h=0.46,
-          aligns=['l', 'r', 'l', 'l'], colors=cols)
-    tb(s, 0.61, 1.6 + 0.46 * (len(rows) + 1), 12.1, 0.4,
-       [[('Trois familles les plus en recul par secteur. Les causes et actions seront présentées en séance par les chefs de groupe.', {'size': 9.5, 'color': MUTE, 'italic': True})]])
-
-
 def _annex_sector(prs, R, sct, code, ftr):
     s = _content(prs, R, sct if sct != 'Non-alimentaire' else 'Non-alim.', R['texts']['sect_title'][sct], ftr)
     o = R['sect_detail'][sct]
@@ -448,7 +433,6 @@ def build_report(R: dict, masque, out) -> None:
     _p2(prs, R, ftr)
     _p3(prs, R, ftr)
     _p4(prs, R, ftr)
-    _p5(prs, R, ftr)
     for code, sct in zip(['A1', 'A2', 'A3'], E.SECTEUR_ORDER):
         _annex_sector(prs, R, sct, code, f'Annexe {code} · {ftr}')
     _annex_lexique(prs, R, f'Annexe A4 · {ftr}')
