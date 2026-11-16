@@ -19,7 +19,7 @@ NAVY, ORANGE, GREY, YEL = '24235C', 'F19F39', 'ECEDF2', 'FFF2CC'
 F = 'Arial'
 CAUSES = ['Prix / promo', 'Rupture / supply', 'Dégagement DLC', 'Effet de base N-1', 'Mix / gros volumes',
           'Fréquentation', 'Concurrence', 'Opération commerciale', 'Donnée à vérifier', 'Autre']
-FIELDS = ['Cause', 'Commentaire', 'Action', 'Responsable', 'Échéance', 'Décision DG']
+FIELDS = ['Cause', 'Commentaire', 'Action', 'Responsable', 'Échéance']
 HEAD = Font(name=F, size=10, bold=True, italic=True, color='FFFFFF')
 NORM = Font(name=F, size=10)
 BOLD = Font(name=F, size=10, bold=True)
@@ -93,8 +93,8 @@ def write_workbook(R: dict, out) -> None:
     _title(ws, 1, f'Revue de performance · {sem}', f"{meta['periode']} · Vs N-1 · M FCFA HT · données au {meta['data_date']:%d/%m/%Y} 08:00")
     lines = [
         ('Ce que vous devez faire', True),
-        ('1. Ouvrez l’onglet de votre secteur (PGC, Frais, Non-alimentaire).', False),
-        ('2. Lisez le résultat et les familles qui reculent le plus.', False),
+        ('1. Ouvrez l’onglet Synthèse (vue d’ensemble), puis l’onglet de votre secteur (PGC, Frais, Non-alimentaire).', False),
+        ('2. Lisez la page Synthèse, puis le résultat et les familles qui reculent le plus dans votre secteur.', False),
         ('3. Remplissez les cellules jaunes « Causes et actions » des 3 familles prioritaires (les 2 suivantes sont facultatives).', False),
         ('4. Ajoutez un commentaire général d’une ou deux phrases (300 caractères maximum).', False),
         ('', False),
@@ -110,12 +110,13 @@ def write_workbook(R: dict, out) -> None:
         ws.cell(4 + i, 1, t).font = Font(name=F, size=11, bold=b, color=NAVY if b else '1E2140')
     ws.column_dimensions['A'].width = 120
 
+    # ---------------- synthèse (avant les onglets secteur)
+    _synthese(wb, R, sem)
+
     # ---------------- listes
     ls = wb.create_sheet('Listes')
     for i, c in enumerate(CAUSES):
         ls.cell(1 + i, 1, c)
-    ls.cell(1, 2, 'Oui')
-    ls.cell(2, 2, 'Non')
     ls.sheet_state = 'hidden'
 
     # ---------------- onglets secteur
@@ -186,15 +187,14 @@ def write_workbook(R: dict, out) -> None:
         ws.add_data_validation(dvg)
         dvg.add(ws.cell(r, 1))
         r += 2
-        _header(ws, r, ['Famille', 'Écart (M)', 'Cause', 'Commentaire (150 car.)', '', 'Action (150 car.)', '', 'Responsable', 'Échéance', 'Décision DG'])
+        _header(ws, r, ['Famille', 'Écart (M)', 'Cause', 'Commentaire (150 car.)', '', 'Action (150 car.)', '', 'Responsable', 'Échéance'])
         ws.merge_cells(start_row=r, start_column=4, end_row=r, end_column=5)
         ws.merge_cells(start_row=r, start_column=6, end_row=r, end_column=7)
         r += 1
         dvc = DataValidation(type='list', formula1='=Listes!$A$1:$A$10', allow_blank=True, showErrorMessage=True, error='Choisir dans la liste.')
-        dvo = DataValidation(type='list', formula1='=Listes!$B$1:$B$2', allow_blank=True, showErrorMessage=True)
         dvt = DataValidation(type='textLength', operator='lessThanOrEqual', formula1='150', showErrorMessage=True, error='150 caractères maximum.')
         dvd = DataValidation(type='date', operator='greaterThan', formula1='45000', allow_blank=True, showErrorMessage=True, error='Saisir une date (jj/mm/aaaa).')
-        for dv in (dvc, dvo, dvt, dvd):
+        for dv in (dvc, dvt, dvd):
             ws.add_data_validation(dv)
         for i, f_ in enumerate(R['familles'][s]['flop']):
             _val(ws, r, 1, f_['label'] + ('' if i < 3 else ' (facultatif)'), bold=i < 3)
@@ -204,19 +204,18 @@ def write_workbook(R: dict, out) -> None:
             _yellow(ws, r, 6, 7)
             _yellow(ws, r, 8)
             _yellow(ws, r, 9)
-            _yellow(ws, r, 10)
             ws.cell(r, 9).number_format = 'dd/mm/yyyy'
             dvc.add(ws.cell(r, 3))
             dvt.add(ws.cell(r, 4))
             dvt.add(ws.cell(r, 6))
             dvd.add(ws.cell(r, 9))
-            dvo.add(ws.cell(r, 10))
             ws.cell(r, 11, f_['key']).font = Font(name=F, size=8, color='FFFFFF')
             ws.row_dimensions[r].height = 36
             r += 1
 
         for c, w in zip('ABCDEFGHIJK', [34, 22, 18, 22, 16, 22, 16, 18, 13, 12, 4]):
             ws.column_dimensions[c].width = w
+        ws.column_dimensions['J'].hidden = True
         ws.column_dimensions['K'].hidden = True
         ws.protection.sheet = True
         ws.protection.formatColumns = False
@@ -225,6 +224,94 @@ def write_workbook(R: dict, out) -> None:
 
     wb.active = 0
     wb.save(out)
+
+
+def _synthese(wb, R: dict, sem: str) -> None:
+    """Page de synthèse (lecture seule) placée avant les onglets par secteur."""
+    meta, g, t = R['meta'], R['global'], R['texts']
+    ws = wb.create_sheet('Synthèse')
+    ws.sheet_view.showGridLines = False
+    _title(ws, 1, f'Synthèse · {sem}', f"{meta['periode']} · Vs N-1 · M FCFA HT · données au {meta['data_date']:%d/%m/%Y} 08:00")
+    r = 4
+    _band(ws, r, 'Réseau : chiffre d’affaires et marge (Vs N-1)', 8)
+    r += 1
+    _header(ws, r, ['Indicateur', 'Réel', 'N-1', 'Δ', 'Δ %'])
+    r += 1
+    for lab, a, b, d, p, f in [("Chiffre d'affaires", g['CA'] / 1e6, g['CA1'] / 1e6, g['dCA'] / 1e6, g['ca'], M1),
+                               ('Marge', g['M'] / 1e6, g['M1'] / 1e6, g['dM'] / 1e6, g['M'] / g['M1'] - 1 if g['M1'] else None, M1),
+                               ('Taux de marge', g['t'], g['t1'], g['dt'], None, '0.0%')]:
+        _val(ws, r, 1, lab, bold=True)
+        _val(ws, r, 2, a, f, bold=True)
+        _val(ws, r, 3, b, f)
+        _val(ws, r, 4, d, PT if lab == 'Taux de marge' else MS, bold=True, sign=True)
+        if p is not None:
+            _val(ws, r, 5, p, PC, sign=True)
+        r += 1
+    ws.cell(r, 1, 'Lecture : ' + t['p2_title'][0].upper() + t['p2_title'][1:] + '. ' + t['taux']).font = Font(name=F, size=10, italic=True, color='33385A')
+    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=8)
+    r += 2
+
+    _band(ws, r, 'Par secteur', 8)
+    r += 1
+    _header(ws, r, ['Secteur', 'CA (M)', 'CA Vs N-1', 'Marge (M)', 'Écart marge (M)', 'Taux de marge', 'Évol. taux', 'Chef de groupe'])
+    r += 1
+    for sct in E.SECTEUR_ORDER:
+        o = R['sect'][sct]
+        _val(ws, r, 1, sct, bold=True)
+        _val(ws, r, 2, o['CA'] / 1e6, M1)
+        _val(ws, r, 3, o['ca'], PC, sign=True)
+        _val(ws, r, 4, o['M'] / 1e6, M1)
+        _val(ws, r, 5, o['dM'] / 1e6, MS, bold=True, sign=True)
+        _val(ws, r, 6, o['t'], '0.0%')
+        _val(ws, r, 7, o['dt'], PT, sign=True)
+        _val(ws, r, 8, E.CHEFS[sct])
+        r += 1
+    _val(ws, r, 1, 'Total réseau', bold=True)
+    _val(ws, r, 2, g['CA'] / 1e6, M1, bold=True)
+    _val(ws, r, 3, g['ca'], PC, sign=True, bold=True)
+    _val(ws, r, 4, g['M'] / 1e6, M1, bold=True)
+    _val(ws, r, 5, g['dM'] / 1e6, MS, bold=True, sign=True)
+    _val(ws, r, 6, g['t'], '0.0%', bold=True)
+    _val(ws, r, 7, g['dt'], PT, sign=True, bold=True)
+    _val(ws, r, 8, '')
+    r += 2
+
+    _band(ws, r, 'Écart de marge secteur × format (Vs N-1, M FCFA)', 8)
+    r += 1
+    _header(ws, r, ['Secteur'] + E.FORMAT_ORDER + ['Total'])
+    r += 1
+    for sct in E.SECTEUR_ORDER:
+        _val(ws, r, 1, sct, bold=True)
+        for j, f in enumerate(E.FORMAT_ORDER):
+            _val(ws, r, 2 + j, R['mtx'][sct][f] / 1e6, MS, sign=True)
+        _val(ws, r, 2 + len(E.FORMAT_ORDER), R['sect'][sct]['dM'] / 1e6, MS, bold=True, sign=True)
+        r += 1
+    _val(ws, r, 1, 'Total réseau', bold=True)
+    for j, f in enumerate(E.FORMAT_ORDER):
+        _val(ws, r, 2 + j, R['fmt'][f]['dM'] / 1e6, MS, bold=True, sign=True)
+    _val(ws, r, 2 + len(E.FORMAT_ORDER), g['dM'] / 1e6, MS, bold=True, sign=True)
+    r += 2
+
+    _band(ws, r, 'Familles qui reculent le plus (tous secteurs)', 8)
+    r += 1
+    _header(ws, r, ['Famille', 'Secteur', 'CA (M)', 'Écart marge (M)', 'dont volume', 'dont taux', 'Évol. taux', 'Chef de groupe'])
+    r += 1
+    flops = sorted(((sct, f_) for sct in E.SECTEUR_ORDER for f_ in R['familles'][sct]['flop']), key=lambda x: x[1]['dM'])[:5]
+    for sct, f_ in flops:
+        _val(ws, r, 1, f_['label'], bold=True)
+        _val(ws, r, 2, sct)
+        _val(ws, r, 3, f_['CA'] / 1e6, M1)
+        _val(ws, r, 4, f_['dM'] / 1e6, MS, bold=True, sign=True)
+        _val(ws, r, 5, f_['effV'] / 1e6, MS, sign=True)
+        _val(ws, r, 6, f_['effT'] / 1e6, MS, sign=True)
+        _val(ws, r, 7, f_['dt'], PT, sign=True)
+        _val(ws, r, 8, E.CHEFS[sct])
+        r += 1
+
+    for c, w in zip('ABCDEFGH', [30, 16, 16, 16, 18, 16, 16, 20]):
+        ws.column_dimensions[c].width = w
+    ws.protection.sheet = True
+    ws.freeze_panes = 'A4'
 
 
 def _txt(v):
@@ -255,7 +342,7 @@ def read_comments(files) -> dict:
                         out['__general__'][s] = t
                     continue
                 vals = {'Cause': _txt(ws.cell(r, 3).value), 'Commentaire': _txt(ws.cell(r, 4).value), 'Action': _txt(ws.cell(r, 6).value),
-                        'Responsable': _txt(ws.cell(r, 8).value), 'Échéance': _txt(ws.cell(r, 9).value), 'Décision DG': _txt(ws.cell(r, 10).value)}
+                        'Responsable': _txt(ws.cell(r, 8).value), 'Échéance': _txt(ws.cell(r, 9).value)}
                 if any(vals.values()):
                     out[key] = vals
     return out
