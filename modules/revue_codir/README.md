@@ -53,5 +53,5 @@ Exporter en .xlsx sans retoucher le fichier : le pied de page « Filtres appliqu
 
 - `app.py` : application Streamlit (Accueil et lexique, Synthèse exécutive, Drill-down secteurs, Rapport PowerPoint).
 - `engine.py` : lecture des exports, contrôles et tous les calculs (source unique des chiffres).
-- `ppt_report.py` : rapport de 5 pages + annexe sur le masque `assets/masque_cfao_consumer.pptx`.
-- `excel_cdg.py` : classeur des chefs de groupe (valeurs uniquement, aucune formule) et relecture des « Causes et actions ».
+- `ppt_report.py` : rapport de 5 pages + annexe sur le masque `assets/masque_cfao_consumer.pptx`. Les points à suivre (3 familles les plus en recul par secteur) y figurent « En attente de retour » ; les saisies des chefs de groupe ne sont pas reprises dans la présentation.
+- `excel_cdg.py` : classeur des chefs de groupe (onglet Synthèse en lecture seule, puis un onglet par secteur ; valeurs uniquement, aucune formule) et relecture des « Causes et actions ».

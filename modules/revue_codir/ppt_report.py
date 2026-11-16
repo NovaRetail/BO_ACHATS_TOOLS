@@ -21,6 +21,7 @@ from . import engine as E
 NAVY, ORANGE, INK, MUTE = '24235C', 'F19F39', '1E2140', '6B7090'
 NEG, POS, SMALL, GREY, LIGHT = 'C0392B', '1E8449', 'B5B9CC', 'ECEDF2', 'F3F4F8'
 TNEG, TPOS = 'B3261E', '1B7A45'
+PENDING = 'En attente de retour'
 
 
 def rgb(h):
@@ -268,19 +269,16 @@ def _p2(prs, R, ftr):
     flops = sorted(flops, key=lambda x: x[1]['dM'])[:3]
     yy = 3.12
     for sct, f_ in flops:
-        c = f_.get('cdg', {})
-        act = c.get('Action') or f"En attente : présenté en séance par {E.CHEFS[sct]}"
-        who = c.get('Responsable') or E.CHEFS[sct]
         tb(s, 6.85, yy, 4.4, 0.55, [[(f"{f_['label']} · {E.fdm(f_['dM'])} M", {'bold': True, 'size': 11})],
-                                     [(act, {'size': 9.5, 'italic': not c.get('Action'), 'color': INK if c.get('Action') else MUTE})]])
-        tb(s, 11.25, yy, 1.45, 0.55, [[(who, {'size': 9, 'color': MUTE})]], align=PP_ALIGN.RIGHT)
+                                     [(PENDING, {'size': 9.5, 'italic': True, 'color': MUTE})]])
+        tb(s, 11.25, yy, 1.45, 0.55, [[(E.CHEFS[sct], {'size': 9, 'color': MUTE})]], align=PP_ALIGN.RIGHT)
         ln = s.shapes.add_connector(1, Inches(6.85), Inches(yy + 0.6), Inches(12.7), Inches(yy + 0.6))
         ln.line.color.rgb = rgb(GREY)
         yy += 0.66
-    decs = [f_ for sct in E.SECTEUR_ORDER for f_ in R['familles'][sct]['flop'] if f_.get('cdg', {}).get('Décision DG', '').lower() == 'oui']
+    npend = sum(len(R['familles'][sct]['flop'][:3]) for sct in E.SECTEUR_ORDER)
     box = rect(s, 6.85, 5.18, 5.85, 0.55, NAVY)
-    dtxt = (f"{len(decs)} décision(s) demandée(s) : " + ', '.join(f_['label'] for f_ in decs[:3]) + ' (page 5).') if decs else 'Aucune décision demandée cette semaine (page 5).'
-    tb(s, 6.95, 5.2, 5.7, 0.5, [[('De quoi avons-nous besoin : ', {'bold': True, 'color': ORANGE, 'size': 9.5}), (dtxt, {'color': 'FFFFFF', 'size': 9.5})]],
+    tb(s, 6.95, 5.2, 5.7, 0.5, [[('Suite : ', {'bold': True, 'color': ORANGE, 'size': 9.5}),
+                                  (f"{npend} points en attente de retour des chefs de groupe (page 5).", {'color': 'FFFFFF', 'size': 9.5})]],
        anchor=MSO_ANCHOR.MIDDLE)
     # contexte
     rect(s, 0.61, 5.95, 12.1, 0.85, LIGHT)
@@ -377,32 +375,18 @@ def _p4(prs, R, ftr):
 
 
 def _p5(prs, R, ftr):
-    s = _content(prs, R, "Plan d'actions", 'engagements et décisions attendues', ftr)
+    s = _content(prs, R, "Plan d'actions", 'points en attente de retour', ftr)
     rows, cols = [], []
-    filled, empty = [], []
     for sct in E.SECTEUR_ORDER:
-        for i, f_ in enumerate(R['familles'][sct]['flop']):
-            c = f_.get('cdg', {})
-            item = (sct, f_, c)
-            if c.get('Action') or c.get('Commentaire'):
-                filled.append(item)
-            elif i < 2:
-                empty.append(item)
-    items = sorted(filled, key=lambda x: (x[2].get('Décision DG', '').lower() != 'oui', x[1]['dM']))[:8]
-    items += sorted(empty, key=lambda x: x[1]['dM'])[:max(0, 8 - len(items))]
-    for sct, f_, c in items:
         short = {'Non-alimentaire': 'Non-alim.'}.get(sct, sct)
-        rows.append([f"{f_['label']} ({short})", E.fdm(f_['dM']), c.get('Cause') or '—', c.get('Action') or f"En attente : {E.CHEFS[sct]}",
-                     c.get('Responsable') or '—', c.get('Échéance') or '—', c.get('Décision DG') or '—'])
-        grey = MUTE
-        cols.append([None, sign_color(f_['dM']), None if c.get('Cause') else grey, None if c.get('Action') else grey,
-                     None if c.get('Responsable') else grey, None if c.get('Échéance') else grey,
-                     (TNEG if (c.get('Décision DG') or '').lower() == 'oui' else None) if c.get('Décision DG') else grey])
-    table(s, 0.61, 1.5, 12.1, rows, [2.8, 0.85, 1.6, 3.6, 1.35, 0.95, 0.95],
-          ['Famille', 'Écart (M)', 'Cause', 'Action', 'Responsable', 'Échéance', 'Décision DG'], size=10, row_h=0.5,
-          aligns=['l', 'r', 'l', 'l', 'l', 'c', 'c'], colors=cols)
-    tb(s, 0.61, 1.6 + 0.5 * (len(rows) + 1), 12.1, 0.4,
-       [[('Repris des « Causes et actions » saisies par les chefs de groupe, gel à 10:10. Les lignes « Décision DG : Oui » sont en tête et remontent en page 2.', {'size': 9.5, 'color': MUTE, 'italic': True})]])
+        for f_ in R['familles'][sct]['flop'][:3]:
+            rows.append([f"{f_['label']} ({short})", E.fdm(f_['dM']), E.CHEFS[sct], PENDING])
+            cols.append([None, sign_color(f_['dM']), None, MUTE])
+    table(s, 0.61, 1.5, 12.1, rows, [4.6, 1.3, 3.1, 3.1],
+          ['Famille', 'Écart (M)', 'Chef de groupe', 'Statut'], size=10, row_h=0.46,
+          aligns=['l', 'r', 'l', 'l'], colors=cols)
+    tb(s, 0.61, 1.6 + 0.46 * (len(rows) + 1), 12.1, 0.4,
+       [[('Trois familles les plus en recul par secteur. Les causes et actions seront présentées en séance par les chefs de groupe.', {'size': 9.5, 'color': MUTE, 'italic': True})]])
 
 
 def _annex_sector(prs, R, sct, code, ftr):
@@ -432,18 +416,11 @@ def _annex_sector(prs, R, sct, code, ftr):
     vmax = max([abs(f_['dM']) for f_ in sel] + [1]) * 1.05
     rws = [{'n': f_['label'], 'why': f"volume {E.fdm(f_['effV'])} · taux {E.fdm(f_['effT'])}", 'v': f_['dM']} for f_ in sel]
     diverging_rows(s, 6.0, 1.78, 6.7, rws, vmax, name_w=2.9, row_h=0.6, size=11, sub_size=9)
-    # causes et actions
+    # points en attente de retour
     rect(s, 0.61, 5.55, 12.1, 1.3, 'F7F8FB', line='C9CCDB')
-    gen = R.get('general', {}).get(sct) if isinstance(R.get('general'), dict) else None
-    paras = [[(f'Causes et actions · {E.CHEFS[sct]}', {'bold': True, 'color': NAVY, 'size': 11})]]
-    lines = [f_ for f_ in fam['flop'][:3] if f_.get('cdg', {}).get('Commentaire') or f_.get('cdg', {}).get('Action')]
-    if gen:
-        paras.append([(gen, {'size': 10})])
-    for f_ in lines:
-        c = f_['cdg']
-        paras.append([(f"{f_['label']} : ", {'bold': True, 'size': 10}), (' '.join(x for x in [c.get('Cause') and f"[{c['Cause']}]", c.get('Commentaire'), c.get('Action') and f"Action : {c['Action']}"] if x), {'size': 10})])
-    if not gen and not lines:
-        paras.append([(f'En attente : présenté en séance par {E.CHEFS[sct]}.', {'italic': True, 'color': MUTE, 'size': 10.5})])
+    paras = [[(f'Points en attente de retour · {E.CHEFS[sct]}', {'bold': True, 'color': NAVY, 'size': 11})]]
+    for f_ in fam['flop'][:3]:
+        paras.append([(f"{f_['label']} ({E.fdm(f_['dM'])} M) : ", {'bold': True, 'size': 10}), (PENDING, {'italic': True, 'color': MUTE, 'size': 10})])
     tb(s, 0.72, 5.6, 11.9, 1.22, paras, spacing=2)
 
 
