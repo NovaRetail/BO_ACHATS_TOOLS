@@ -42,19 +42,33 @@ def load_sales(data: bytes, name: str):
     return E.parse_sales(data, name)
 
 
+@st.cache_data(show_spinner="Lecture de la référence…")
+def _load_base(data, name, promo_days, ref_days_override):
+    return load_base(data, name, promo_days, ref_days_override)
+
+
 @st.cache_data(show_spinner=False)
 def load_promo(data: bytes, name: str, price_ttc: bool):
     return E.parse_promo(data, name, price_ttc)
 
 
 @st.cache_data(show_spinner=False)
-def run(sales, promo, params):
-    return E.compute(sales, promo, dict(params))
+def load_base(data: bytes, name: str, promo_days: int, ref_days_override):
+    ref, rf, _ = E.parse_sales(data, name)
+    ref_days = ref_days_override or E.period_days(rf)
+    if not ref_days:
+        raise ValueError("période de l'extraction de référence non lue : indiquez sa durée.")
+    return E.build_base(ref, ref_days, promo_days), rf, ref_days
 
 
 @st.cache_data(show_spinner=False)
-def export(a, tot, controls, filters, meta, params):
-    return E.build_excel(a, tot, controls, filters, meta, dict(params))
+def run(sales, promo, params, base):
+    return E.compute(sales, promo, dict(params), base)
+
+
+@st.cache_data(show_spinner=False)
+def export(a, tot, controls, sites, filters, meta, params):
+    return E.build_excel(a, tot, controls, sites, filters, meta, dict(params))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -78,7 +92,8 @@ def drill_html(a: pd.DataFrame, mode: str, params) -> str:
     keys = [k for k, _ in levels] + ["label"]
     names = [lab for _, lab in levels] + ["Article"]
     rows = [[str(r[k]) for k in keys] + [r["code"], _clean(r["prev_ca"]), _clean(r["CA N-1"]), _clean(r["CA"]), r["control"],
-                                         r["result"], _clean(r["short"]), bool(r["over"])] for r in a.to_dict("records")]
+                                         r["result"], _clean(r["short"]), bool(r["over"]), _clean(r["prev_qty"]), _clean(r["ref_qty"])]
+            for r in a.to_dict("records")]
     data = json.dumps({"rows": rows, "names": names, "p": p, "mode": mode}, ensure_ascii=False).replace("</", "<\\/")
     c = {"ok": (f"{T.TEAL}17", T.VERT_TEXTE), "att": (f"{T.ORANGE}1F", T.ORANGE_TEXTE), "crit": (f"{T.RED}14", T.ROUGE_TEXTE),
          "mut": ("#24235C12", T.NAVY)}
@@ -108,39 +123,41 @@ tr.go{{cursor:pointer}}tr.go:hover td{{background:{T.FOND}}}tr.go td:first-child
 <div class='card'><div class='crumb' id='crumb'></div><div class='scope' id='scope'></div><table><thead id='th'></thead><tbody id='tb'></tbody></table><div class='more' id='more'></div></div>
 <script>
 const X={data};const D=X.rows,N=X.names,P=X.p,MODE=X.mode,NL=N.length;
-const I={{code:NL,p:NL+1,n1:NL+2,ca:NL+3,k:NL+4,res:NL+5,sh:NL+6,o:NL+7}};
+const I={{code:NL,p:NL+1,n1:NL+2,ca:NL+3,k:NL+4,res:NL+5,sh:NL+6,o:NL+7,q:NL+8,b:NL+9}};
 let lvl=0,path=[],showAll=false;
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}}[c]));
 const M=v=>{{if(v==null)return'—';const a=Math.abs(v);return a>=1e9?(v/1e9).toFixed(2).replace('.',',')+' Md':a>=1e6?(v/1e6).toFixed(2).replace('.',',')+' M':a>=1e3?Math.round(v/1e3)+' k':Math.round(v)+''}};
 const PC=v=>v==null||!isFinite(v)?'—':Math.round(v*100)+' %';
 const R=v=>'× '+v.toFixed(1).replace('.',',');
 const B=(t,k)=>`<span class="b ${{k}}">${{esc(t)}}</span>`;
-const KC={{'À justifier':'crit','À surveiller':'att','Sans historique':'att','Cohérente':'ok','Surestimée':'crit','Pas de vente':'crit','Fiable':'ok','Sous-estimée':'att'}};
-function agg(rs){{const t={{n:rs.length,p:0,ca:0,n1:0,sh:0,o:0,j:0,w:0,h:0,pj:0}};rs.forEach(r=>{{t.p+=r[I.p]||0;t.ca+=r[I.ca]||0;t.n1+=r[I.n1]||0;t.sh+=r[I.sh]||0;t.o+=r[I.o]?1:0;
+const Q=v=>v==null?'—':Math.round(v).toLocaleString('fr-FR');
+const KC={{'À justifier':'crit','À surveiller':'att','Sous la base':'att','Sans historique':'att','Cohérente':'ok','Surestimée':'crit','Pas de vente':'crit','Fiable':'ok','Sous-estimée':'att'}};
+function agg(rs){{const t={{n:rs.length,p:0,ca:0,n1:0,sh:0,o:0,j:0,w:0,h:0,u:0,pj:0,q:0,b:0,qb:0}};rs.forEach(r=>{{t.p+=r[I.p]||0;t.ca+=r[I.ca]||0;t.n1+=r[I.n1]||0;t.sh+=r[I.sh]||0;t.o+=r[I.o]?1:0;
+ t.q+=r[I.q]||0;t.b+=r[I.b]||0;if(r[I.b]>0)t.qb+=r[I.q]||0;if(r[I.k]==='Sous la base')t.u++;
  if(r[I.k]==='À justifier'){{t.j++;t.pj+=r[I.p]||0}}if(r[I.k]==='À surveiller')t.w++;if(r[I.k]==='Sans historique')t.h++}});
- t.ratio=t.n1?t.p/t.n1:null;t.real=t.p?t.ca/t.p:null;t.bias=t.n?t.o/t.n:null;return t}}
+ t.ratio=t.b?t.qb/t.b:null;t.real=t.p?t.ca/t.p:null;t.bias=t.n?t.o/t.n:null;return t}}
 const lb=document.getElementById('lvl');N.forEach((n,i)=>{{const b=document.createElement('button');b.textContent=n;b.onclick=()=>{{if(i<path.length)path=path.slice(0,i);lvl=i;render()}};lb.appendChild(b)}});
 function render(){{
  const sc=D.filter(r=>path.every((v,i)=>r[i]===v)),T=agg(sc),lv=Math.max(lvl,path.length);
  let c=`<a onclick="go(0)">Tout le périmètre</a>`;path.forEach((v,i)=>c+=` › <a onclick="go(${{i+1}})">${{esc(v)}}</a>`);
  document.getElementById('crumb').innerHTML=c+` › <b>par ${{N[lv].toLowerCase()}}</b>`;
  document.getElementById('scope').innerHTML=MODE==='avant'
-  ?`Sur ce périmètre : CA prévu <b>${{M(T.p)}}</b> pour <b>${{M(T.n1)}}</b> en N-1 (${{T.ratio?R(T.ratio):'—'}}) · <b>${{T.j}}</b> à justifier, ${{T.w}} à surveiller, ${{T.h}} sans historique`
+  ?`Sur ce périmètre : <b>${{Q(T.q)}}</b> unités prévues pour une base de <b>${{Q(T.b)}}</b> (${{T.ratio?R(T.ratio):'—'}}) · CA prévu ${{M(T.p)}} · <b>${{T.j}}</b> à justifier, ${{T.w}} à surveiller, ${{T.u}} sous la base, ${{T.h}} sans historique`
   :`Sur ce périmètre : CA réalisé <b>${{M(T.ca)}}</b> pour <b>${{M(T.p)}}</b> prévus (${{PC(T.real)}}) · CA promis non réalisé <b>${{M(T.sh)}}</b> · biais <b>${{PC(T.bias)}}</b>`;
  const g=new Map();sc.forEach(r=>{{const k=r[lv];if(!g.has(k))g.set(k,[]);g.get(k).push(r)}});
  let L=[...g].map(([name,rs])=>({{name,rs,t:agg(rs),art:lv===NL-1?rs[0]:null}}));
  const total=L.length;
- if(!showAll)L=L.filter(x=>MODE==='avant'?(x.t.j+x.t.w+x.t.h)>0:(x.t.o>0&&x.t.sh>0));
+ if(!showAll)L=L.filter(x=>MODE==='avant'?(x.t.j+x.t.w+x.t.u+x.t.h)>0:(x.t.o>0&&x.t.sh>0));
  const nb=L.length;
- L.sort(MODE==='avant'?(a,b)=>(b.t.j-a.t.j)||(b.t.pj-a.t.pj)||((b.t.ratio??99)-(a.t.ratio??99)):(a,b)=>b.t.sh-a.t.sh);
+ L.sort(MODE==='avant'?(a,b)=>(b.t.j-a.t.j)||(b.t.w-a.t.w)||((b.t.ratio??99)-(a.t.ratio??99)):(a,b)=>b.t.sh-a.t.sh);
  const S=showAll?L:L.slice(0,15);
- document.getElementById('th').innerHTML=MODE==='avant'?`<tr><th>${{N[lv]}}</th><th>CA prévu</th><th>CA N-1</th><th>Prévu / N-1</th><th>Contrôle</th></tr>`
+ document.getElementById('th').innerHTML=MODE==='avant'?`<tr><th>${{N[lv]}}</th><th>Qté prévue</th><th>Base</th><th>Multiplicateur</th><th>CA prévu</th><th>Contrôle</th></tr>`
   :`<tr><th>${{N[lv]}}</th><th>CA prévu</th><th>CA réalisé</th><th>Réal.</th><th>CA promis non réalisé</th><th>Biais</th></tr>`;
  document.getElementById('tb').innerHTML=S.map((x,ix)=>{{const t=x.t,a=x.art,go=lv<NL-1?` class="go" data-i="${{ix}}"`:'';
   const sub=a?`<small>${{esc(a[I.code])}}</small>`:`<small>${{t.n}} art.</small>`;
-  if(MODE==='avant'){{const rk=t.ratio==null?B('pas de N-1','att'):B(R(t.ratio),t.ratio>P.justify?'crit':t.ratio>P.watch?'att':'ok');
-   const ct=a?B(a[I.k],KC[a[I.k]]):(t.j?B(t.j+' à justifier','crit'):t.w?B(t.w+' à surveiller','att'):t.h?B(t.h+' sans N-1','att'):B('RAS','ok'));
-   return `<tr${{go}}><td>${{esc(x.name)}}${{sub}}</td><td>${{M(t.p)}}</td><td>${{M(t.n1)}}</td><td>${{rk}}</td><td>${{ct}}</td></tr>`}}
+  if(MODE==='avant'){{const rk=t.ratio==null?B('sans base','att'):B(R(t.ratio),t.ratio>P.justify?'crit':t.ratio>P.watch?'att':t.ratio<1?'att':'ok');
+   const ct=a?B(a[I.k],KC[a[I.k]]):(t.j?B(t.j+' à justifier','crit'):t.w?B(t.w+' à surveiller','att'):t.u?B(t.u+' sous la base','att'):t.h?B(t.h+' sans historique','att'):B('RAS','ok'));
+   return `<tr${{go}}><td>${{esc(x.name)}}${{sub}}</td><td>${{Q(t.q)}}</td><td>${{Q(t.b)}}</td><td>${{rk}}</td><td>${{M(t.p)}}</td><td>${{ct}}</td></tr>`}}
   const rr=t.real==null?B('—','mut'):B(PC(t.real),t.real<P.low?'crit':t.real>P.high?'att':'ok');
   const bi=a?B(a[I.res],KC[a[I.res]]):B(PC(t.bias),t.bias>=.5?'crit':t.bias>=.25?'att':'ok');
   return `<tr${{go}}><td>${{esc(x.name)}}${{sub}}</td><td>${{M(t.p)}}</td><td><b>${{M(t.ca)}}</b></td><td>${{rr}}</td><td class="neg">${{t.sh?M(t.sh):'—'}}</td><td>${{bi}}</td></tr>`}}).join('')
@@ -177,10 +194,19 @@ with st.sidebar:
     f_promo = st.file_uploader("Code, Prévision Qté, Prix promo, PA, TVA", type=["xlsx", "xlsm", "csv"], key="fp_promo",
                                help="Une ligne par article. CA prévu et marge prévue sont calculés par le module.")
     price_ttc = st.toggle("Prix promo saisi TTC", value=True, help="Activé : le prix promo est ramené en HT avec la colonne TVA.")
-T.sidebar_label("3 · Règles")
+T.sidebar_label("3 · Base de comparaison (avant promo)")
 with st.sidebar:
-    watch = st.slider("① À surveiller au-delà de (× N-1)", 1.0, 2.0, 1.3, 0.1)
-    justify = st.slider("① À justifier au-delà de (× N-1)", 1.2, 5.0, 2.0, 0.1)
+    base_choice = st.radio("Comparer la prévision à", ["Base récente (hors promo)", "N-1 même période"], index=0,
+                           help="Base récente : ventes hors promo des semaines qui précèdent la promo, ramenées à sa durée. "
+                                "N-1 : quantité vendue l'an dernier sur les mêmes dates.")
+    f_ref = None
+    if base_choice.startswith("Base récente"):
+        f_ref = st.file_uploader("Extraction de référence (semaines avant la promo)", type=["xlsx", "xlsm", "csv"], key="fp_ref",
+                                 help="Même export PBI que l'extraction ventes, sur les 4 à 12 semaines qui précèdent la promo.")
+T.sidebar_label("4 · Règles")
+with st.sidebar:
+    watch = st.slider("① À surveiller au-delà de (× la base)", 1.0, 3.0, 1.5, 0.1)
+    justify = st.slider("① À justifier au-delà de (× la base)", 1.2, 5.0, 2.0, 0.1)
     low = st.slider("② Surestimée sous", 50, 100, 80, 5, format="%d %%") / 100
     high = st.slider("② Sous-estimée au-delà de", 100, 200, 120, 5, format="%d %%") / 100
     stable = st.slider("② Stable vs N-1 (±)", 0, 20, 5, 1, format="%d %%") / 100
@@ -196,7 +222,8 @@ P = dict(params)
 if f_sales is None or f_promo is None:
     T.sidebar_footer("CA prévu HT = Qté × Prix promo ÷ (1 + TVA)<br>Marge prévue = Qté × (Prix HT − PA)")
     rows = [("Extraction ventes PBI", "ok" if f_sales else "wait", "reçue" if f_sales else "à déposer"),
-            ("Liste promo des acheteurs", "ok" if f_promo else "wait", "reçue" if f_promo else "à déposer")]
+            ("Liste promo des acheteurs", "ok" if f_promo else "wait", "reçue" if f_promo else "à déposer"),
+            ("Extraction de référence (base récente)", "ok" if f_ref else "wait", "reçue" if f_ref else "facultative")]
     T.landing_hero("FORECAST <b>PROMO</b>",
                    "La prévision de l'acheteur tient-elle face à l'an dernier, et a-t-elle été tenue ? "
                    "On la contrôle avant la promo, on la mesure après, et on ne montre que ce qu'il faut challenger.",
@@ -204,7 +231,7 @@ if f_sales is None or f_promo is None:
                    status=T.landing_status("Préparation de l'analyse", rows, "fichiers obligatoires reçus", count=2))
     T.steps([("Collecter", "la liste promo de chaque acheteur : Code, Prévision Qté, Prix promo, PA, TVA"),
              ("Extraire", "les ventes PBI sur les dates de la promo (avant : seules les colonnes N-1 sont remplies)"),
-             ("① Contrôler", "avant validation : les prévisions à × 2 le N-1 sont à justifier"),
+             ("① Contrôler", "avant validation : prévision vs base récente ou N-1, au-delà de × 2 elle est à justifier"),
              ("② Mesurer", "après la promo : CA promis non réalisé et biais, niveau par niveau"),
              ("Exporter", "le classeur pour la revue avec les acheteurs")])
     T.section("Format des fichiers attendus")
@@ -214,14 +241,18 @@ if f_sales is None or f_promo is None:
             ("Liste promo des acheteurs", ["Code", "Prévision Qté", "Prix promo (TTC par défaut)", "PA (HT)", "TVA (18, 0,18 ou 18 %)",
                                            "Libellé (facultatif)"]),
             ("Extraction ventes (export PBI)", ["Departement · Rayon · Famille · Sous-Famille", "Article", "Site nom long", "CA · Marge · Qté Vente",
-                                                "CA N-1 · Qté Vente N-1 · Marge Hors Promo N-1 · Marge Promo N-1"]),
+                                                "CA Promo · CA Hors Promo · CA N-1 · Qté Vente N-1 · Marge Hors Promo N-1 · Marge Promo N-1"]),
+            ("Extraction de référence (facultative)", ["même export PBI, sur les 4 à 12 semaines qui précèdent la promo",
+                                                       "sert à la base récente : ventes hors promo ramenées à la durée de la promo"]),
         ], "Article au format « 12003043 - LIBELLÉ » : le code avant le tiret sert de clé. Les lignes « Total » sont ignorées. "
            "Sans l'axe Sous-Famille, la lecture passe directement de Famille à Article.")
     with c2:
         T.rules_card("📐 Méthode de calcul", [
             ("CA prévu HT", "Qté × Prix promo ÷ (1 + TVA)"),
             ("Marge prévue", "Qté × (Prix promo HT − PA)"),
-            ("① Contrôle", f"{T.badge('Cohérente', 'ok')} {T.badge('× 1,3', 'att')} {T.badge('× 2', 'crit')}"),
+            ("Base récente", "ventes hors promo des semaines précédentes, ramenées à la durée de la promo"),
+            ("Multiplicateur", "Prévision Qté ÷ Base"),
+            ("① Contrôle", f"{T.badge('Cohérente', 'ok')} {T.badge('× 1,5', 'att')} {T.badge('× 2', 'crit')} {T.badge('Sous la base', 'att')}"),
             ("② Prévision", f"{T.badge('Fiable', 'ok')} {T.badge('Surestimée', 'crit')} {T.badge('Sous-estimée', 'att')}"),
             ("CA promis non réalisé", "somme des manques article par article"),
             ("Biais", "part d'articles surestimés ou sans vente"),
@@ -270,25 +301,48 @@ if sales.empty:
     T.alert("Aucune ligne exploitable", "L'export ne contient aucune ligne article × site.", "crit")
     st.stop()
 
-a, tot, controls = run(sales, promo, params)
+base, base_note = None, None
+if base_choice.startswith("Base récente"):
+    promo_days = E.period_days(filters)
+    if not promo_days:
+        with st.sidebar:
+            promo_days = st.number_input("Durée de la promo (jours)", 1, 120, 21, help="Période non lue dans l'extraction ventes.")
+    if f_ref is None:
+        base_note = ("att", "Base récente choisie, extraction de référence non déposée",
+                     "La prévision est comparée au N-1 en attendant. Déposez l'export PBI des semaines qui précèdent la promo.")
+    else:
+        try:
+            base, rfilters, ref_days = _load_base(f_ref.getvalue(), f_ref.name, int(promo_days), None)
+            rper = (f"du {rfilters['period_from']:%d/%m/%Y} au {rfilters['period_to']:%d/%m/%Y}" if rfilters["period_from"] else "")
+            base_note = ("info", f"Base récente : {ref_days} jours de référence {rper}",
+                         f"Ventes hors promo ramenées aux {int(promo_days)} jours de la promo (quantité hors promo estimée au prorata du CA hors promo).")
+        except Exception as exc:  # noqa: BLE001
+            base_note = ("crit", "Extraction de référence illisible", f"{exc} La prévision est comparée au N-1.")
+params = params + (("base_mode", "recent" if base is not None else "n1"),)
+P = dict(params)
+
+a, tot, controls, sites = run(sales, promo, params, base)
 per = f"du {filters['period_from']:%d/%m/%Y} au {filters['period_to']:%d/%m/%Y}" if filters["period_from"] else "période non lue"
 before = tot["phase"] == "avant"
-T.sidebar_footer(f"{tot['n']} articles · {tot['sites']} sites<br>{per}<br>CA prévu : {meta['ca_mode']}")
+base_txt = "la base récente" if tot["base_mode"] == "recent" else "le N-1"
+T.sidebar_footer(f"{tot['n']} articles · {tot['sites']} sites<br>{per}<br>Base : {E.BASE_LABEL[tot['base_mode']]}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # BANDEAU
 # ══════════════════════════════════════════════════════════════════════════════
 if before:
-    title = f"FORECAST · <b>{E.fmt_ratio(tot['ratio'])}</b> LE N-1"
+    title = f"FORECAST · <b>{E.fmt_ratio(tot['mult'])}</b> {base_txt.upper()}"
     chips = [f"{tot['n']} articles", (f"{tot['justify']} à justifier", "alert") if tot["justify"] else ("Aucune prévision à justifier", "ok"),
-             f"{tot['watch']} à surveiller", f"{tot['nohist']} sans historique", ("Promo pas encore vendue", "")]
+             f"{tot['watch']} à surveiller", f"{tot['below']} sous la base", f"{tot['nohist']} sans historique", ("Promo pas encore vendue", "")]
 else:
     title = f"CA RÉALISÉ · <b>{E.fmt_pct(tot['real_ca'])}</b> DU FORECAST"
     chips = [f"{tot['n']} articles", (f"CA promis non réalisé {E.fmt_fcfa(tot['short'])}", "alert") if tot["short"] else ("Forecast tenu", "ok"),
              (f"Biais {E.fmt_pct(tot['bias'])}", "alert" if (tot["bias"] or 0) >= .25 else "ok"),
              f"{tot['justify']} prévision(s) étaient à justifier", f"CA vs N-1 {E.fmt_pct(tot['ca_evo'], 0, True)}"]
 T.hero(title, f"{filters['supplier'] or 'Fournisseur non lu'} · extraction {per}", chips, eyebrow="Forecast Promo")
+if base_note:
+    T.alert(base_note[1], base_note[2], base_note[0])
 if not smeta["has_sf"]:
     T.alert("Sous-famille absente de l'extraction", "Ajoutez l'axe Sous-Famille entre Famille et Article dans l'export PBI pour lire aussi à ce niveau.", "info")
 
@@ -298,13 +352,13 @@ tab1, tab2, tab3, tab4 = st.tabs(["① Avant la promo", "② Après la promo", f
 # ── ① Avant la promo ──────────────────────────────────────────────────────────
 with tab1:
     T.kpi_row([
-        T.kpi("CA prévu HT", E.fmt_fcfa(tot["prev_ca"]), E.fmt_ratio(tot["ratio"]) + " le N-1",
-              "neg" if (tot["ratio"] or 0) > P["justify"] else "mut", f"CA N-1 même période {E.fmt_fcfa(tot['ca_n1'])}", "blue", "🎯", "FCFA"),
+        T.kpi("Quantité prévue", E.fmt_int(tot["prev_qty"]), E.fmt_ratio(tot["mult"]) + " " + base_txt,
+              "neg" if (tot["mult"] or 0) > P["justify"] else "mut", f"base {E.fmt_int(tot['ref_qty'])} unités sans promo", "blue", "🎯"),
         T.kpi("Prévisions à justifier", str(tot["justify"]), f"{tot['watch']} à surveiller", "neg" if tot["justify"] else "pos",
-              f"prévision > × {P['justify']:.1f} le N-1".replace(".", ","), "violet", "🚩"),
+              f"multiplicateur > × {P['justify']:.1f}".replace(".", ","), "violet", "🚩"),
         T.kpi("CA prévu à justifier", E.fmt_fcfa(tot["justify_ca"]), E.fmt_pct(E.div(tot["justify_ca"], tot["prev_ca"])) + " du forecast",
-              "neg" if tot["justify_ca"] else "pos", "part du forecast portée par ces prévisions", "violet", "⚖️", "FCFA"),
-        T.kpi("Sans historique", str(tot["nohist"]), "", "mut", "aucune vente N-1 sur la période", "teal", "🆕"),
+              "neg" if tot["justify_ca"] else "pos", f"forecast total {E.fmt_fcfa(tot['prev_ca'])} HT", "violet", "⚖️", "FCFA"),
+        T.kpi("Sous la base · sans historique", f"{tot['below']} · {tot['nohist']}", "", "mut", "prévision trop prudente · aucun repère", "teal", "🔎"),
     ])
     T.card(f"<div style='font-size:14px;font-weight:600;line-height:1.55'>{E.sentence_before(tot)}</div>")
     T.section("À challenger avant validation")
@@ -362,15 +416,17 @@ with tab3:
 
 # ── Export ────────────────────────────────────────────────────────────────────
 with tab4:
-    T.section("Classeur Excel · valeurs uniquement")
-    T.card("<div style='font-size:13px;line-height:1.55'>Onglets : <b>Synthèse</b>, <b>① Avant la promo</b> (forecast vs N-1 par article), "
-           "<b>② Après la promo</b> (forecast vs réalisé vs N-1, marge en valeur et taux), <b>Contrôles</b>, <b>Lexique</b>. "
-           "Chaque ligne porte Département, Rayon, Famille et Sous-famille pour filtrer ou faire un TCD.</div>"
-           "<div class='note'>Généré avec les règles de la barre latérale · aucune formule.</div>")
-    if st.button("Générer le classeur", type="primary", key="fp_btn", width="stretch"):
-        st.session_state["fp_xlsx"] = export(a, tot, controls, filters, meta, params)
+    T.section("Excel réunion achats · " + ("avant promo" if before else "résultat promo"))
+    T.card("<div style='font-size:13px;line-height:1.55'>Quatre onglets : <b>Synthèse</b> (indicateurs clés, statuts, points de contrôle), "
+           + ("<b>Articles</b> classés du plus à challenger au moins, avec base, multiplicateur, CA et marge prévus, et une colonne "
+              "<b>Justification acheteur</b> à remplir en réunion" if before else
+              "<b>Articles</b> classés par CA promis non réalisé, avec CA, marge et N-1, et une colonne <b>Explication acheteur</b> à remplir en réunion")
+           + ", <b>Magasins</b>, <b>Lexique</b>.</div>"
+           "<div class='note'>La version avant ou après promo est choisie automatiquement selon l'extraction · aucune formule.</div>")
+    if st.button("Générer l'Excel réunion achats", type="primary", key="fp_btn", width="stretch"):
+        st.session_state["fp_xlsx"] = export(a, tot, controls, sites, filters, meta, params)
         sup = re.sub(r"[^A-Za-z0-9]+", "_", (filters["supplier"] or "promo").split(" - ")[-1]).strip("_")
-        st.session_state["fp_name"] = f"SmartBuyer_Forecast_Promo_{sup}_{datetime.now():%Y%m%d}.xlsx"
+        st.session_state["fp_name"] = f"Reunion_Achats_Forecast_Promo_{'avant' if before else 'resultat'}_{sup}_{datetime.now():%Y%m%d}.xlsx"
     if st.session_state.get("fp_xlsx"):
         st.download_button("⬇️ Télécharger le classeur", data=st.session_state["fp_xlsx"], file_name=st.session_state["fp_name"],
                            mime=XLSX, key="fp_dl", width="stretch")
