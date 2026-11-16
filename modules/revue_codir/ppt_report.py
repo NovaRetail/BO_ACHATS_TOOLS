@@ -214,7 +214,7 @@ def _cover(prs, R):
     r.text = 'COMMERCIALE'
     r.font.bold = True
     m = R['meta']
-    box = tb(s, 0.94, 4.78, 7.6, 0.36, [[(f"Semaine {m['week']} · {m['periode']} · Rapport à la Direction Générale", {'italic': True, 'color': NAVY, 'size': 13})]],
+    box = tb(s, 0.94, 4.78, 5.4, 0.36, [[(f"Semaine {m['week']} · {m['periode']}", {'italic': True, 'color': NAVY, 'size': 13})]],
              anchor=MSO_ANCHOR.MIDDLE)
     box.fill.solid()
     box.fill.fore_color.rgb = rgb('FFFFFF')
