@@ -326,7 +326,6 @@ with tabs[2]:
             ('2 · Synthèse exécutive', 'où en est-on, pourquoi, que fait-on'),
             ('3 · Performance globale', 'passage de marge, secteur × format'),
             ('4 · Contributeurs et détracteurs', 'par rayon, par magasin'),
-            ('5 · Plan d’actions', 'points en attente de retour'),
             ('Annexe A1 à A4', 'PGC, Frais, Non-alimentaire, lexique'),
         ], tall=False)
     with c2:
